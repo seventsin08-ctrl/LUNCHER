@@ -51,3 +51,5 @@ recent-apps screen are unchanged.
 
 GitHub Actions builds the APK on every push (`.github/workflows/build.yml`).
 Locally: `./gradlew assembleDebug` (requires the Android SDK).
+For a separate installation alongside the original, build `assemblePreview`;
+its app name is Apple Launcher Preview and its application ID ends in `.preview`.

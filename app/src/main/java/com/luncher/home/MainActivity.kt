@@ -1713,9 +1713,12 @@ class MainActivity : Activity() {
             return view.width > 0 && view.height > 0 && rawX >= loc[0] && rawX < loc[0] + view.width &&
                 rawY >= loc[1] && rawY < loc[1] + view.height
         }
-        val wi = page.widgets.indices.firstOrNull { contains(frame.getChildAt(it)) }
-        val ai = page.apps.indices.firstOrNull { contains(frame.getChildAt(page.widgets.size + it)) }
+        val dock = dockApps()
+        val di = dock.indices.firstOrNull { contains(dockRow.getChildAt(it)) }
+        val wi = if (di == null) page.widgets.indices.firstOrNull { contains(frame.getChildAt(it)) } else null
+        val ai = if (di == null) page.apps.indices.firstOrNull { contains(frame.getChildAt(page.widgets.size + it)) } else null
         val source = (when {
+            di != null -> dockRow.getChildAt(di)
             wi != null -> frame.getChildAt(wi)
             ai != null -> frame.getChildAt(page.widgets.size + ai)
             else -> return
@@ -1725,7 +1728,8 @@ class MainActivity : Activity() {
             if (!isActive || overlayOpen() || !source.isAttachedToWindow) return@Runnable
             source.cancelLongPress()
             enterEditMode(refresh = false)
-            if (wi != null) startWidgetDrag(page.widgets[wi], pageIndex, source, holdX, holdY)
+            if (di != null) startDrag(dock[di], true, source, holdX, holdY)
+            else if (wi != null) startWidgetDrag(page.widgets[wi], pageIndex, source, holdX, holdY)
             else if (ai != null) startDrag(page.apps[ai].first, false, source, holdX, holdY)
         }
         pendingHomeHold = task
