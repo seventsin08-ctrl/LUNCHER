@@ -95,12 +95,19 @@ class SettingsActivity : Activity() {
         addRow(look, previewRow!!, pad = true)
         refreshPreview()
         segment(look, "Icon Style", listOf(
-            "clear" to "Clear", "tinted" to "Tinted", "dark" to "Dark", "light" to "Light", "color" to "Color"
+            "clear" to "Glass", "tinted" to "Tinted", "dark" to "Dark", "light" to "Light", "color" to "Color"
         ), s.iconStyle) { s.iconStyle = it; refreshPreview() }
+        info(look, "Glass gives icons a clear look. Color shows the original app icons.")
         swatches(look, "Accent Color", s.tint) { s.tint = it; refreshPreview() }
-        toggle(look, "Glass Effect", "See-through widgets, dock and icons", s.glass) { s.glass = it }
+        toggle(look, "Glass Effect", "See-through folders, widgets and dock", s.glass) { s.glass = it }
         toggle(look, "Tint Widgets & Dock", "Use the accent color on glass panels", s.tintPanels) { s.tintPanels = it }
         slider(look, "Wallpaper Dimming", 0, 80, s.dim, { "$it%" }) { s.dim = it }
+        button(look, "Restore Glass Look", 0xFF0A84FF.toInt()) {
+            s.iconStyle = "clear"
+            s.glass = true
+            s.tintPanels = false
+            rebuild()
+        }
         button(look, "Dark Glass Wallpaper", 0xFF0A84FF.toInt()) {
             s.pendingEdit = false
             getSharedPreferences("luncher", MODE_PRIVATE).edit().putBoolean("s_apply_wallpaper", true).apply()

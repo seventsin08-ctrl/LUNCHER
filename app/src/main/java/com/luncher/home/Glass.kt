@@ -40,6 +40,21 @@ object Glass {
         }
     }
 
+    /** A readable, translucent folder surface that follows the Glass Effect setting. */
+    fun folder(ctx: Context, radiusDp: Float): GradientDrawable {
+        if (!glass) return menu(ctx, radiusDp)
+        val d = ctx.resources.displayMetrics.density
+        val colors = intArrayOf(Color.argb(205, 57, 57, 64), Color.argb(220, 23, 23, 28))
+        val tinted = if (tintPanels && tint != Color.WHITE) {
+            colors.map { IconFactory.blend(it, Color.argb(Color.alpha(it), Color.red(tint), Color.green(tint), Color.blue(tint)), 0.18f) }
+                .toIntArray()
+        } else colors
+        return GradientDrawable(GradientDrawable.Orientation.TL_BR, tinted).apply {
+            cornerRadius = radiusDp * d
+            setStroke(maxOf(1, (0.8f * d).toInt()), Color.argb(75, 255, 255, 255))
+        }
+    }
+
     fun circle(color: Int): GradientDrawable = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(color)

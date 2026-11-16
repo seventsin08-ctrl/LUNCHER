@@ -2465,8 +2465,8 @@ class MainActivity : Activity() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val app = apps[position]
             holder.label.text = app.label
-            val nativeIcon = runCatching { packageManager.getActivityIcon(app.component) }.getOrNull()
-            if (nativeIcon != null) holder.icon.setImageDrawable(nativeIcon) else holder.icon.setImageBitmap(app.icon)
+            // Use the same selected style as the home screen, including original colors.
+            holder.icon.setImageBitmap(app.icon)
             holder.badge.visibility = if (app.key in selected) View.VISIBLE else View.GONE
             holder.tile.contentDescription = if (app.key in selected) "${app.label}, added" else app.label
             holder.tile.setOnClickListener { onTap(app, holder.icon) }
@@ -2515,7 +2515,7 @@ class MainActivity : Activity() {
         val members = group.keys.mapNotNull { byKey[it] }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Glass.menu(this@MainActivity, 30f)
+            background = Glass.folder(this@MainActivity, 30f)
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -2582,7 +2582,7 @@ class MainActivity : Activity() {
         val selected = group.keys.toMutableSet()
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Glass.menu(this@MainActivity, 30f)
+            background = Glass.folder(this@MainActivity, 30f)
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
