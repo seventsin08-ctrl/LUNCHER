@@ -20,13 +20,27 @@ and an App Library page.
 | Action | What it does |
 | --- | --- |
 | Swipe left/right | Change pages (the last page is the App Library) |
-| Swipe down / tap **Search** | Search apps |
-| Tap a photo widget | Pick a photo (long-press: change photo, color/B&W, remove) |
-| Long-press an app | Add/remove from dock, App info, uninstall |
-| Long-press empty space | Wallpaper options, default home settings |
+| Swipe down | Search (apps, calculator, web) — or Notifications, in Settings |
+| Swipe up | App Switcher with your recent apps — or system Recents / App Library |
+| Double-tap empty space | Lock the screen (turn on in Settings) |
+| Long-press an app | Edit Home Screen, Dock, hide, App Info, delete |
+| Long-press empty space | Edit Home Screen, Settings, wallpaper |
+| Edit Home Screen | Icons jiggle: drag to reorder, drag across pages, drag into the dock, tap − to remove |
 
-Icons use Android 13+ themed (monochrome) icons when an app provides them,
-and fall back to a desaturated version of the app's normal icon.
+## Settings
+
+Open from the long-press menu or the ⚙ button on the App Library page.
+
+- **Appearance:** icon style (Clear, Tinted, Dark, Light, Color), accent color, glass on/off, tinted widgets, wallpaper dimming
+- **Home Screen:** icon size, app names, 4 or 5 columns, badges, hidden apps, reset layout
+- **Widgets:** turn each widget on or off, restore removed ones
+- **Animations:** on/off, speed, app-opening style (Zoom, Fade, Slide Up), page swipe (Depth, Flat, Cube, Zoom), blur, haptics
+- **Gestures:** swipe down, swipe up, double-tap to lock
+
+Some features need a permission you grant once in Android settings:
+notification access (badges, Now Playing), usage access (all recent apps in the
+App Switcher), and the "Luncher Gestures" accessibility helper (system Recents,
+double-tap to lock).
 
 ## Build
 
