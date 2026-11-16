@@ -137,6 +137,7 @@ class SettingsActivity : Activity() {
         button(home, "Reset Home Screen Layout", 0xFFFF453A.toInt()) {
             s.order = emptyList()
             s.hiddenWidgets = emptySet()
+            getSharedPreferences("luncher", MODE_PRIVATE).edit().remove("widget_positions").apply()
             rebuild()
         }
 
@@ -181,19 +182,20 @@ class SettingsActivity : Activity() {
         segment(gest, "Swipe Down", listOf(
             "search" to "Search", "notifications" to "Notifications", "none" to "Off"
         ), s.swipeDown) { s.swipeDown = it }
-        segment(gest, "Swipe Up", listOf(
-            "switcher" to "App Switcher", "recents" to "Recents", "library" to "Library", "none" to "Off"
-        ), s.swipeUp) { s.swipeUp = it; rebuild() }
+        segment(gest, "Swipe Up", listOf("none" to "Off", "library" to "Library"), s.swipeUp) {
+            s.swipeUp = it
+            rebuild()
+        }
         toggle(gest, "Double-Tap to Lock", "Double-tap an empty spot on the Home Screen", s.doubleTapLock) {
             s.doubleTapLock = it
             rebuild()
         }
-        val needsHelper = s.swipeUp == "recents" || s.doubleTapLock
+        val needsHelper = s.doubleTapLock
         if (needsHelper || LuncherAccessibility.instance != null) {
             info(
                 gest,
                 if (LuncherAccessibility.instance != null) "Gesture helper is on ✓"
-                else "Recents and Double-Tap to Lock need the Apple Launcher Gestures helper."
+                else "Double-Tap to Lock needs the Apple Launcher Gestures helper."
             )
             if (LuncherAccessibility.instance == null) {
                 button(gest, "Turn On Apple Launcher Gestures…", 0xFF0A84FF.toInt()) {
@@ -201,19 +203,6 @@ class SettingsActivity : Activity() {
                 }
             }
         }
-        if (s.swipeUp == "switcher") {
-            info(
-                gest,
-                if (hasUsageAccess()) "App Switcher shows every app you recently used ✓"
-                else "App Switcher shows apps opened from Apple Launcher. Allow usage access to include all recent apps."
-            )
-            if (!hasUsageAccess()) {
-                button(gest, "Allow Usage Access…", 0xFF0A84FF.toInt()) {
-                    runCatching { startActivity(Intent(SysSettings.ACTION_USAGE_ACCESS_SETTINGS)) }
-                }
-            }
-        }
-
         // ---------------- About
         val about = section("GENERAL")
         button(about, "Default Home App…", 0xFF0A84FF.toInt()) {

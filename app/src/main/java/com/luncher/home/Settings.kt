@@ -80,9 +80,12 @@ class Settings(ctx: Context) {
     var swipeDown: String
         get() = p.getString("s_swipe_down", "search") ?: "search"
         set(v) = put("s_swipe_down", v)
-    /** switcher | recents | library | none */
+    /** library | none. Old recent-apps settings are treated as off. */
     var swipeUp: String
-        get() = p.getString("s_swipe_up", "switcher") ?: "switcher"
+        get() = when (p.getString("s_swipe_up", "none")) {
+            "library" -> "library"
+            else -> "none"
+        }
         set(v) = put("s_swipe_up", v)
     var doubleTapLock: Boolean
         get() = p.getBoolean("s_dtap_lock", false)

@@ -19,7 +19,9 @@ data class PlacedWidget(
     val row: Int,
     val w: Int,
     val h: Int,
-    val id: String = ""
+    val id: String = "",
+    /** Original page is a stable identity even after the widget moves. */
+    val originPage: Int = -1
 )
 
 sealed class Page {

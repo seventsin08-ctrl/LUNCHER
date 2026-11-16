@@ -21,11 +21,16 @@ and an App Library page.
 | --- | --- |
 | Swipe left/right | Change pages (the last page is the App Library) |
 | Swipe down | Search (apps, calculator, web) — or Notifications, in Settings |
-| Swipe up | App Switcher with your recent apps — or system Recents / App Library |
+| Swipe up | Off by default; optionally open the App Library |
 | Double-tap empty space | Lock the screen (turn on in Settings) |
-| Long-press an app | Edit Home Screen, Dock, hide, App Info, delete |
+| Long-press a home-screen app | Hold and drag to reorder or group it |
 | Long-press empty space | Edit Home Screen, Settings, wallpaper |
 | Edit Home Screen | Icons jiggle: drag to reorder, drag across pages, drag into the dock, tap − to remove |
+
+Hold a home-screen app or built-in widget to drag it. Drop an app over the
+center of another app to create a folder, or over an existing folder to add it.
+Tap a folder to open apps, rename it, remove an app, or ungroup it. Widgets can
+be moved to an area without another widget; apps reflow around them.
 
 ## Settings
 
@@ -38,9 +43,9 @@ Open from the long-press menu or the ⚙ button on the App Library page.
 - **Gestures:** swipe down, swipe up, double-tap to lock
 
 Some features need a permission you grant once in Android settings:
-notification access (badges, Now Playing), usage access (all recent apps in the
-App Switcher), and the "Luncher Gestures" accessibility helper (system Recents,
-double-tap to lock).
+notification access (badges, Now Playing), and the "Luncher Gestures"
+accessibility helper (double-tap to lock). Android's own system navigation and
+recent-apps screen are unchanged.
 
 ## Build
 

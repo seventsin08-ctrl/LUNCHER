@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityOptions
+import android.app.AlertDialog
 import android.app.SearchManager
 import android.app.WallpaperManager
 import android.app.usage.UsageStatsManager
@@ -24,6 +25,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.RadialGradient
 import android.graphics.RenderEffect
 import android.graphics.Shader
@@ -48,6 +50,7 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.ViewOutlineProvider
@@ -78,6 +81,9 @@ import androidx.viewpager2.widget.ViewPager2
 import java.time.LocalDate
 import java.time.format.TextStyle
 import java.util.Locale
+import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -155,6 +161,14 @@ class MainActivity : Activity() {
     private var editMode = false
     private val jiggles = ArrayList<ObjectAnimator>()
     private var drag: DragState? = null
+    private var widgetDrag: WidgetDragState? = null
+    private var pendingHomeHold: Runnable? = null
+    private var holdX = 0f
+    private var holdY = 0f
+    private var previewOrder: List<String>? = null
+    private var folderHoverView: View? = null
+    private var pendingReorder: Runnable? = null
+    private var pendingReorderKey: String? = null
     private val edgeFlip = Runnable { flipPageDuringDrag() }
     private var edgeDir = 0
 
@@ -193,6 +207,17 @@ class MainActivity : Activity() {
         val size: Int
     )
 
+    private class WidgetDragState(
+        val widget: PlacedWidget,
+        val page: Int,
+        val source: View,
+        val floating: ImageView,
+        val width: Int,
+        val height: Int
+    )
+
+    private data class HomeFolder(val id: String, val name: String, val keys: List<String>)
+
     // ================================================================ lifecycle
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -222,7 +247,10 @@ class MainActivity : Activity() {
                     onSwipeDown(); return true
                 }
                 if (dy < -dp(80) && velocityY < -700) {
-                    onSwipeUp(); return true
+                    if (settings.swipeUp == "library") {
+                        onSwipeUp(); return true
+                    }
+                    return false
                 }
                 return false
             }
@@ -261,6 +289,8 @@ class MainActivity : Activity() {
     override fun onPause() {
         isActive = false
         if (drag != null) cancelDrag()
+        if (widgetDrag != null) cancelWidgetDrag()
+        cancelHomeHold()
         super.onPause()
     }
 
@@ -285,6 +315,7 @@ class MainActivity : Activity() {
     private fun goHome() {
         when {
             drag != null -> cancelDrag()
+            widgetDrag != null -> cancelWidgetDrag()
             menuLayer != null -> dismissMenu()
             switcher.isShowing -> switcher.hide(anim)
             searchOverlay.visibility == View.VISIBLE -> closeSearch()
@@ -297,11 +328,27 @@ class MainActivity : Activity() {
         menuLayer != null || switcher.isShowing || searchOverlay.visibility == View.VISIBLE
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (drag != null || widgetDrag != null) {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_MOVE -> if (drag != null) moveDrag(ev.rawX, ev.rawY)
+                    else moveWidgetDrag(ev.rawX, ev.rawY)
+                MotionEvent.ACTION_UP -> if (drag != null) endDrag(ev.rawX, ev.rawY)
+                    else endWidgetDrag(ev.rawX, ev.rawY)
+                MotionEvent.ACTION_CANCEL -> if (drag != null) cancelDrag() else cancelWidgetDrag()
+            }
+            return true
+        }
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> scheduleHomeHold(ev.rawX, ev.rawY)
+            MotionEvent.ACTION_MOVE -> if (hypot(ev.rawX - holdX, ev.rawY - holdY) > dp(10)) cancelHomeHold()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> cancelHomeHold()
+        }
         if (::gestures.isInitialized) gestures.onTouchEvent(ev)
         return super.dispatchTouchEvent(ev)
     }
 
     override fun onDestroy() {
+        cancelHomeHold()
         NotificationService.onChange = null
         runCatching { unregisterReceiver(packageReceiver) }
         runCatching { unregisterReceiver(batteryReceiver) }
@@ -743,7 +790,7 @@ class MainActivity : Activity() {
         return ((hDp - 230f) / CELL_H).toInt().coerceIn(4, 7)
     }
 
-    private fun widgetsFor(page: Int): List<PlacedWidget> {
+    private fun defaultWidgetsFor(page: Int): List<PlacedWidget> {
         val wide = cols
         val half = cols / 2
         val right = cols - half
@@ -768,7 +815,32 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun widgetKey(page: Int, w: PlacedWidget) = "$page:${w.type.name}:${w.id}"
+    private fun widgetPositions(): JSONObject = runCatching {
+        JSONObject(prefs.getString("widget_positions", "{}") ?: "{}")
+    }.getOrDefault(JSONObject())
+
+    private fun widgetsFor(page: Int): List<PlacedWidget> {
+        val positions = widgetPositions()
+        return (0 until MIN_PAGES).flatMap { origin ->
+            defaultWidgetsFor(origin).mapNotNull { widget ->
+                val stable = widget.copy(originPage = origin)
+                val saved = positions.optJSONObject(widgetKey(origin, stable))
+                val savedPage = saved?.optInt("page", origin)?.coerceIn(0, 100) ?: origin
+                if (savedPage != page) null else stable.copy(
+                    col = (saved?.optInt("col", widget.col) ?: widget.col).coerceIn(0, (cols - widget.w).coerceAtLeast(0)),
+                    row = (saved?.optInt("row", widget.row) ?: widget.row).coerceIn(0, (rowsPerPage() - widget.h).coerceAtLeast(0))
+                )
+            }
+        }
+    }
+
+    private fun lastWidgetPage(): Int {
+        val positions = widgetPositions()
+        return positions.keys().asSequence().mapNotNull { positions.optJSONObject(it)?.optInt("page", 0) }
+            .maxOrNull()?.coerceIn(0, 100) ?: 0
+    }
+
+    private fun widgetKey(page: Int, w: PlacedWidget) = "${if (w.originPage >= 0) w.originPage else page}:${w.type.name}:${w.id}"
 
     private fun widgetVisible(page: Int, w: PlacedWidget): Boolean {
         val typeKey = when (w.type) {
@@ -778,11 +850,57 @@ class MainActivity : Activity() {
         return settings.widgetEnabled(typeKey) && widgetKey(page, w) !in settings.hiddenWidgets
     }
 
+    private fun folders(): List<HomeFolder> {
+        val json = runCatching { JSONObject(prefs.getString("home_folders", "{}") ?: "{}") }.getOrDefault(JSONObject())
+        return json.keys().asSequence().mapNotNull { id ->
+            val value = json.optJSONObject(id) ?: return@mapNotNull null
+            val members = value.optJSONArray("apps") ?: JSONArray()
+            HomeFolder(id, value.optString("name", "Folder"),
+                (0 until members.length()).mapNotNull { members.optString(it).takeIf(String::isNotEmpty) }.distinct())
+        }.toList()
+    }
+
+    private fun saveFolders(folders: List<HomeFolder>) {
+        val json = JSONObject()
+        folders.forEach { folder ->
+            json.put(folder.id, JSONObject().put("name", folder.name).put("apps", JSONArray(folder.keys)))
+        }
+        prefs.edit().putString("home_folders", json.toString()).apply()
+    }
+
+    private fun folderComponent(id: String) = ComponentName(packageName, "$packageName.folder.$id")
+    private fun folderId(app: AppInfo): String? {
+        val prefix = "$packageName.folder."
+        return if (app.component.packageName == packageName && app.component.className.startsWith(prefix))
+            app.component.className.removePrefix(prefix) else null
+    }
+
+    private fun folderApp(folder: HomeFolder, appsByKey: Map<String, AppInfo>): AppInfo {
+        val side = dp(iconDp).coerceAtLeast(1) * 2
+        val bitmap = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        paint.color = 0xBB333338.toInt()
+        canvas.drawRoundRect(0f, 0f, side.toFloat(), side.toFloat(), side * 0.23f, side * 0.23f, paint)
+        val gap = side * 0.09f
+        val size = (side - gap * 3) / 2f
+        folder.keys.mapNotNull { appsByKey[it] }.take(4).forEachIndexed { index, app ->
+            val left = gap + (index % 2) * (size + gap)
+            val top = gap + (index / 2) * (size + gap)
+            canvas.drawBitmap(app.icon, null, RectF(left, top, left + size, top + size), paint)
+        }
+        return AppInfo(folder.name, folderComponent(folder.id), bitmap)
+    }
+
     /** Home apps in display order (custom order first, new apps at the end). */
     private fun homeApps(dockKeys: Set<String>): List<AppInfo> {
         val hidden = settings.hiddenApps
-        val orderIndex = settings.order.withIndex().associate { it.value to it.index }
-        return allApps
+        val orderIndex = (previewOrder ?: settings.order).withIndex().associate { it.value to it.index }
+        val groups = folders()
+        val members = groups.flatMap { it.keys }.toSet()
+        val byKey = allApps.associateBy { it.key }
+        val grouped = groups.filter { folder -> folder.keys.any { it in byKey } }.map { folderApp(it, byKey) }
+        return (allApps.filter { it.key !in members } + grouped)
             .filter { it.key !in dockKeys && it.key !in hidden }
             .sortedWith(compareBy({ orderIndex[it.key] ?: Int.MAX_VALUE }, { it.label.lowercase() }))
     }
@@ -796,7 +914,8 @@ class MainActivity : Activity() {
         val result = mutableListOf<Page>()
         var next = 0
         var page = 0
-        while (page < MIN_PAGES || next < home.size) {
+        val lastWidget = lastWidgetPage()
+        while (page < MIN_PAGES || next < home.size || page <= lastWidget) {
             val widgets = widgetsFor(page).filter { it.row + it.h <= rows && it.col + it.w <= cols && widgetVisible(page, it) }
             val taken = BooleanArray(rows * cols)
             for (w in widgets) {
@@ -934,6 +1053,7 @@ class MainActivity : Activity() {
         }
         for ((app, cell) in p.apps) {
             val v = makeAppCell(app, fromDock = false)
+            if (drag?.app?.key == app.key) v.alpha = 0.2f
             frame.addView(v, place(cell % cols, cell / cols, 1, 1))
             entrance(v, cell % cols, cell / cols)
         }
@@ -1085,8 +1205,8 @@ class MainActivity : Activity() {
     private fun makeAppCell(app: AppInfo, fromDock: Boolean, showLabel: Boolean = true): View {
         val icon = ImageView(this).apply { setImageBitmap(app.icon) }
         val cell = makeCell(
-            icon, if (showLabel) app.label else null, app.packageName,
-            { launch(app, it) }, { showAppMenu(app, it) },
+            icon, if (showLabel) app.label else null, if (folderId(app) == null) app.packageName else null,
+            { launch(app, it) }, null,
             onRemove = { removeFromHome(app, fromDock) }
         )
         if (editMode) {
@@ -1455,7 +1575,7 @@ class MainActivity : Activity() {
 
     // ================================================================ edit mode & drag
 
-    private fun enterEditMode() {
+    private fun enterEditMode(refresh: Boolean = true) {
         if (editMode) return
         if (menuLayer != null) dismissMenu(immediate = true)
         if (searchOverlay.visibility == View.VISIBLE) closeSearch(false)
@@ -1464,8 +1584,10 @@ class MainActivity : Activity() {
         editBar.visibility = View.VISIBLE
         editBar.alpha = 0f
         editBar.animate().alpha(1f).setDuration(dur(200)).start()
-        refreshPages()
-        buildDock(dockApps())
+        if (refresh) {
+            refreshPages()
+            buildDock(dockApps())
+        }
     }
 
     private fun exitEditMode() {
@@ -1477,6 +1599,10 @@ class MainActivity : Activity() {
     }
 
     private fun removeFromHome(app: AppInfo, fromDock: Boolean) {
+        if (folderId(app) != null) {
+            ungroupFolder(app)
+            return
+        }
         if (fromDock) {
             setDock(dockKeys() - app.key)
             return
@@ -1561,7 +1687,124 @@ class MainActivity : Activity() {
         return loc
     }
 
+    private fun cancelHomeHold() {
+        pendingHomeHold?.let { mainHandler.removeCallbacks(it) }
+        pendingHomeHold = null
+    }
+
+    private fun currentPageFrame(): FrameLayout? {
+        val rv = pager.getChildAt(0) as? RecyclerView ?: return null
+        val holder = rv.findViewHolderForAdapterPosition(pager.currentItem)?.itemView as? FrameLayout ?: return null
+        return holder.getChildAt(0) as? FrameLayout
+    }
+
+    /** Hold an icon or built-in widget directly on the home screen to pick it up. */
+    private fun scheduleHomeHold(rawX: Float, rawY: Float) {
+        cancelHomeHold()
+        holdX = rawX; holdY = rawY
+        if (!::pager.isInitialized || overlayOpen()) return
+        val pageIndex = pager.currentItem
+        val page = pages.getOrNull(pageIndex) as? Page.Home ?: return
+        val frame = currentPageFrame() ?: return
+        fun contains(view: View?): Boolean {
+            if (view == null) return false
+            val loc = IntArray(2)
+            view.getLocationOnScreen(loc)
+            return view.width > 0 && view.height > 0 && rawX >= loc[0] && rawX < loc[0] + view.width &&
+                rawY >= loc[1] && rawY < loc[1] + view.height
+        }
+        val wi = page.widgets.indices.firstOrNull { contains(frame.getChildAt(it)) }
+        val ai = page.apps.indices.firstOrNull { contains(frame.getChildAt(page.widgets.size + it)) }
+        val source = (when {
+            wi != null -> frame.getChildAt(wi)
+            ai != null -> frame.getChildAt(page.widgets.size + ai)
+            else -> return
+        }) ?: return
+        val task = Runnable {
+            pendingHomeHold = null
+            if (!isActive || overlayOpen() || !source.isAttachedToWindow) return@Runnable
+            source.cancelLongPress()
+            enterEditMode(refresh = false)
+            if (wi != null) startWidgetDrag(page.widgets[wi], pageIndex, source, holdX, holdY)
+            else if (ai != null) startDrag(page.apps[ai].first, false, source, holdX, holdY)
+        }
+        pendingHomeHold = task
+        mainHandler.postDelayed(task, (ViewConfiguration.getLongPressTimeout() - 40L).coerceAtLeast(200L))
+    }
+
+    private fun startWidgetDrag(widget: PlacedWidget, page: Int, source: View, rawX: Float, rawY: Float) {
+        val bitmap = runCatching { source.drawToBitmap() }.getOrNull() ?: return
+        val width = source.width.coerceAtLeast(1)
+        val height = source.height.coerceAtLeast(1)
+        val floating = ImageView(this).apply {
+            setImageBitmap(bitmap)
+            elevation = dp(14).toFloat()
+            alpha = 0.9f
+        }
+        root.addView(floating, FrameLayout.LayoutParams(width, height))
+        val off = rootOffset()
+        floating.x = rawX - off[0] - width / 2f
+        floating.y = rawY - off[1] - height / 2f
+        source.alpha = 0.2f
+        pager.isUserInputEnabled = false
+        haptic(source)
+        widgetDrag = WidgetDragState(widget, page, source, floating, width, height)
+    }
+
+    private fun moveWidgetDrag(rawX: Float, rawY: Float) {
+        val d = widgetDrag ?: return
+        val off = rootOffset()
+        d.floating.x = rawX - off[0] - d.width / 2f
+        d.floating.y = rawY - off[1] - d.height / 2f
+        updateDragEdge(rawX, rawY)
+    }
+
+    private fun finishWidgetDrag(d: WidgetDragState) {
+        widgetDrag = null
+        edgeDir = 0
+        mainHandler.removeCallbacks(edgeFlip)
+        pager.isUserInputEnabled = true
+        d.source.alpha = 1f
+        root.removeView(d.floating)
+    }
+
+    private fun cancelWidgetDrag() {
+        val d = widgetDrag ?: return
+        finishWidgetDrag(d)
+        rebuild()
+    }
+
+    private fun endWidgetDrag(rawX: Float, rawY: Float) {
+        val d = widgetDrag ?: return
+        val targetPage = pager.currentItem
+        val target = pages.getOrNull(targetPage) as? Page.Home
+        val frame = currentPageFrame()
+        finishWidgetDrag(d)
+        if (target == null || frame == null || overDock(rawX, rawY)) { rebuild(); return }
+        val loc = IntArray(2)
+        frame.getLocationOnScreen(loc)
+        val w = d.widget
+        val col = ((rawX - loc[0] - frame.paddingLeft) / cellW() - w.w / 2f)
+            .roundToInt().coerceIn(0, (cols - w.w).coerceAtLeast(0))
+        val row = ((rawY - loc[1] - frame.paddingTop) / dp(CELL_H) - w.h / 2f)
+            .roundToInt().coerceIn(0, (rowsPerPage() - w.h).coerceAtLeast(0))
+        val blocked = target.widgets.any { other ->
+            widgetKey(targetPage, other) != widgetKey(d.page, w) &&
+                col < other.col + other.w && col + w.w > other.col &&
+                row < other.row + other.h && row + w.h > other.row
+        }
+        if (blocked) {
+            toast("Choose a space without another widget")
+        } else {
+            val positions = widgetPositions()
+            positions.put(widgetKey(d.page, w), JSONObject().put("page", targetPage).put("col", col).put("row", row))
+            prefs.edit().putString("widget_positions", positions.toString()).apply()
+        }
+        rebuild()
+    }
+
     private fun startDrag(app: AppInfo, fromDock: Boolean, source: View, rawX: Float, rawY: Float) {
+        previewOrder = currentOrder()
         val size = dp(iconDp)
         val floating = ImageView(this).apply {
             setImageBitmap(app.icon)
@@ -1587,6 +1830,13 @@ class MainActivity : Activity() {
         val y = rawY - off[1]
         d.floating.x = x - d.size / 2f
         d.floating.y = y - d.size / 2f
+        updateDragEdge(rawX, rawY)
+        previewAppReorder(rawX, rawY)
+    }
+
+    private fun updateDragEdge(rawX: Float, rawY: Float) {
+        val off = rootOffset()
+        val x = rawX - off[0]
         val edge = dp(28)
         val dir = when {
             overDock(rawX, rawY) -> 0
@@ -1602,7 +1852,7 @@ class MainActivity : Activity() {
     }
 
     private fun flipPageDuringDrag() {
-        if (drag == null || edgeDir == 0) return
+        if ((drag == null && widgetDrag == null) || edgeDir == 0) return
         val target = (pager.currentItem + edgeDir).coerceIn(0, homePageCount() - 1)
         if (target != pager.currentItem) {
             pager.setCurrentItem(target, anim > 0f)
@@ -1629,11 +1879,14 @@ class MainActivity : Activity() {
     private fun cancelDrag() {
         val d = drag ?: return
         finishDragVisuals(d)
+        previewOrder = null
         rebuild()
     }
 
     private fun finishDragVisuals(d: DragState) {
         drag = null
+        cancelPendingReorder()
+        highlightFolderTarget(null)
         edgeDir = 0
         mainHandler.removeCallbacks(edgeFlip)
         pager.isUserInputEnabled = true
@@ -1644,6 +1897,12 @@ class MainActivity : Activity() {
     }
 
     private fun dropIntoDock(d: DragState, rawX: Float) {
+        if (folderId(d.app) != null) {
+            previewOrder = null
+            toast("Move folders on the Home Screen")
+            rebuild()
+            return
+        }
         val dock = dockKeys().filter { k -> allApps.any { it.key == k } }.toMutableList()
         val loc = IntArray(2)
         dockRow.getLocationOnScreen(loc)
@@ -1662,6 +1921,7 @@ class MainActivity : Activity() {
             dock.add(idx.coerceIn(0, dock.size), d.app.key)
         }
         settings.hiddenApps = settings.hiddenApps - d.app.key
+        previewOrder = null
         setDock(dock)
     }
 
@@ -1669,13 +1929,180 @@ class MainActivity : Activity() {
     private fun currentOrder(): List<String> =
         homeApps(dockKeys().toSet()).map { it.key }
 
+    private data class GridHit(
+        val page: Page.Home, val frame: FrameLayout, val cell: Int,
+        val appIndex: Int, val centered: Boolean, val localX: Float
+    )
+
+    private fun gridHit(rawX: Float, rawY: Float): GridHit? {
+        val page = pages.getOrNull(pager.currentItem) as? Page.Home ?: return null
+        val frame = currentPageFrame() ?: return null
+        val loc = IntArray(2)
+        frame.getLocationOnScreen(loc)
+        val x = rawX - loc[0] - frame.paddingLeft
+        val y = rawY - loc[1] - frame.paddingTop
+        if (x < 0 || y < 0 || x >= cellW() * cols || y >= dp(CELL_H) * rowsPerPage()) return null
+        val col = (x / cellW()).toInt()
+        val row = (y / dp(CELL_H)).toInt()
+        val cell = row * cols + col
+        val index = page.apps.indexOfFirst { it.second == cell }
+        val cx = (col + 0.5f) * cellW()
+        val cy = row * dp(CELL_H) + dp(4) + dp(iconDp) / 2f
+        val centered = abs(x - cx) < dp(iconDp * 0.34f) && abs(y - cy) < dp(iconDp * 0.34f)
+        return GridHit(page, frame, cell, index, centered, x - col * cellW())
+    }
+
+    private fun highlightFolderTarget(view: View?) {
+        if (folderHoverView === view) return
+        folderHoverView?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
+        folderHoverView = view
+        view?.animate()?.scaleX(1.08f)?.scaleY(1.08f)?.setDuration(120)?.start()
+    }
+
+    private fun cancelPendingReorder() {
+        pendingReorder?.let { mainHandler.removeCallbacks(it) }
+        pendingReorder = null
+        pendingReorderKey = null
+    }
+
+    /** Reflow other icons as the dragged app crosses a cell boundary. */
+    private fun previewAppReorder(rawX: Float, rawY: Float) {
+        val d = drag ?: return
+        if (overDock(rawX, rawY)) { cancelPendingReorder(); highlightFolderTarget(null); return }
+        val hit = gridHit(rawX, rawY) ?: run { cancelPendingReorder(); highlightFolderTarget(null); return }
+        val target = hit.page.apps.getOrNull(hit.appIndex)?.first
+        if (target != null && target.key != d.app.key && hit.centered && folderId(d.app) == null) {
+            cancelPendingReorder()
+            highlightFolderTarget(hit.frame.getChildAt(hit.page.widgets.size + hit.appIndex))
+            return
+        }
+        highlightFolderTarget(null)
+        if (d.fromDock || target == null || target.key == d.app.key) { cancelPendingReorder(); return }
+        val after = hit.localX > cellW() / 2f
+        val key = "${d.app.key}|${target.key}|$after|${pager.currentItem}"
+        if (pendingReorderKey == key) return
+        cancelPendingReorder()
+        pendingReorderKey = key
+        val task = Runnable {
+            pendingReorder = null; pendingReorderKey = null
+            if (drag?.app?.key != d.app.key) return@Runnable
+            val order = currentOrder().toMutableList()
+            if (!order.remove(d.app.key)) return@Runnable
+            var index = order.indexOf(target.key)
+            if (index < 0) return@Runnable
+            if (after) index++
+            order.add(index.coerceIn(0, order.size), d.app.key)
+            if (order != previewOrder) {
+                previewOrder = order
+                rebuild()
+            }
+        }
+        pendingReorder = task
+        mainHandler.postDelayed(task, 220)
+    }
+
+    private fun putIntoFolder(d: DragState, target: AppInfo): Boolean {
+        if (folderId(d.app) != null || d.app.key == target.key) return false
+        val groups = folders().toMutableList()
+        val oldOrder = currentOrder().filter { it != d.app.key }.toMutableList()
+        val targetId = folderId(target)
+        val folder = if (targetId != null) {
+            val index = groups.indexOfFirst { it.id == targetId }
+            if (index < 0) return false
+            groups[index] = groups[index].copy(keys = (groups[index].keys + d.app.key).distinct())
+            groups[index]
+        } else {
+            val group = HomeFolder(UUID.randomUUID().toString().replace("-", ""), "Folder", listOf(target.key, d.app.key))
+            groups += group
+            val index = oldOrder.indexOf(target.key)
+            if (index >= 0) oldOrder[index] = folderComponent(group.id).flattenToString()
+            else oldOrder.add(folderComponent(group.id).flattenToString())
+            group
+        }
+        if (d.fromDock) saveDock(dockKeys().filter { it != d.app.key })
+        saveFolders(groups)
+        settings.hiddenApps = settings.hiddenApps - d.app.key - target.key
+        previewOrder = null
+        settings.order = oldOrder
+        rebuild()
+        toast(if (targetId == null) "Folder created" else "Added to ${folder.name}")
+        return true
+    }
+
+    private fun openFolder(app: AppInfo) {
+        val group = folders().firstOrNull { it.id == folderId(app) } ?: return
+        val byKey = allApps.associateBy { it.key }
+        val members = group.keys.mapNotNull { byKey[it] }
+        val choices = members.map { it.label } + listOf("Rename folder", "Remove an app", "Ungroup apps")
+        AlertDialog.Builder(this).setTitle(group.name).setItems(choices.toTypedArray()) { _, which ->
+            when {
+                which < members.size -> launch(members[which], null)
+                which == members.size -> renameFolder(app)
+                which == members.size + 1 -> {
+                    if (members.isNotEmpty()) AlertDialog.Builder(this).setTitle("Remove app from folder")
+                        .setItems(members.map { it.label }.toTypedArray()) { _, index ->
+                            removeFolderMember(app, members[index].key)
+                        }.setNegativeButton("Cancel", null).show()
+                }
+                else -> ungroupFolder(app)
+            }
+        }.setNegativeButton("Close", null).show()
+    }
+
+    private fun renameFolder(app: AppInfo) {
+        val id = folderId(app) ?: return
+        val input = EditText(this).apply { setText(app.label); setSingleLine(); selectAll() }
+        AlertDialog.Builder(this).setTitle("Folder name").setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val name = input.text.toString().trim().take(40).ifEmpty { "Folder" }
+                saveFolders(folders().map { if (it.id == id) it.copy(name = name) else it })
+                rebuild()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun ungroupFolder(app: AppInfo) {
+        val group = folders().firstOrNull { it.id == folderId(app) } ?: return
+        val order = currentOrder().toMutableList()
+        val index = order.indexOf(app.key).let { if (it < 0) order.size else it }
+        order.remove(app.key)
+        order.addAll(index.coerceIn(0, order.size), group.keys.filter { it !in order })
+        saveFolders(folders().filter { it.id != group.id })
+        settings.hiddenApps = settings.hiddenApps - group.keys.toSet()
+        previewOrder = null
+        settings.order = order
+        rebuild()
+    }
+
+    private fun removeFolderMember(app: AppInfo, key: String) {
+        val group = folders().firstOrNull { it.id == folderId(app) } ?: return
+        val remaining = group.keys.filter { it != key }
+        val order = currentOrder().toMutableList()
+        val index = order.indexOf(app.key).let { if (it < 0) order.size else it }
+        if (remaining.size < 2) {
+            order.remove(app.key)
+            order.addAll(index.coerceIn(0, order.size), (remaining + key).filter { it !in order })
+            saveFolders(folders().filter { it.id != group.id })
+        } else {
+            order.add((index + 1).coerceIn(0, order.size), key)
+            saveFolders(folders().map { if (it.id == group.id) it.copy(keys = remaining) else it })
+        }
+        settings.hiddenApps = settings.hiddenApps - key
+        previewOrder = null
+        settings.order = order
+        rebuild()
+    }
+
     private fun dropOnHome(d: DragState, rawX: Float, rawY: Float) {
+        val hit = gridHit(rawX, rawY)
+        val targetApp = if (hit == null) null else hit.page.apps.getOrNull(hit.appIndex)?.first
+        if (hit != null && hit.centered && targetApp != null && putIntoFolder(d, targetApp)) return
         val pageIdx = pager.currentItem
         val page = pages.getOrNull(pageIdx) as? Page.Home
         val rv = pager.getChildAt(0) as? RecyclerView
         val pageFrame = rv?.findViewHolderForAdapterPosition(pageIdx)?.itemView
             ?.let { (it as? FrameLayout)?.getChildAt(0) }
         if (page == null || pageFrame == null) {
+            previewOrder = null
             rebuild(); return
         }
         val loc = IntArray(2)
@@ -1707,6 +2134,7 @@ class MainActivity : Activity() {
             }
         }
         order.add(insertAt.coerceIn(0, order.size), d.app.key)
+        previewOrder = null
         settings.order = order
         rebuild()
     }
@@ -1722,10 +2150,6 @@ class MainActivity : Activity() {
 
     private fun onSwipeUp() {
         when (settings.swipeUp) {
-            "switcher" -> openSwitcher()
-            "recents" -> if (!LuncherAccessibility.perform(AccessibilityService.GLOBAL_ACTION_RECENTS)) {
-                askForGestureHelper("Recents")
-            }
             "library" -> pager.setCurrentItem(pages.size - 1, anim > 0f)
         }
     }
@@ -2163,6 +2587,10 @@ class MainActivity : Activity() {
 
     private fun launch(app: AppInfo, from: View?) {
         if (editMode) return
+        if (folderId(app) != null) {
+            openFolder(app)
+            return
+        }
         val intent = Intent(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_LAUNCHER)
             .setComponent(app.component)
@@ -2210,6 +2638,14 @@ class MainActivity : Activity() {
     }
 
     private fun showAppMenu(app: AppInfo, anchor: View) {
+        if (folderId(app) != null) {
+            showContextMenu(anchor, listOf(
+                MenuItem("Open Folder") { openFolder(app) },
+                MenuItem("Rename Folder") { renameFolder(app) },
+                MenuItem("Ungroup Apps") { ungroupFolder(app) }
+            ))
+            return
+        }
         val keys = dockKeys()
         val inDock = app.key in keys
         val hidden = app.key in settings.hiddenApps
