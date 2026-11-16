@@ -42,7 +42,6 @@ class AppListAdapter(
                     outline.setRoundRect(0, 0, view.width, view.height, view.width * IconFactory.CORNER)
                 }
             }
-            elevation = dp(3).toFloat()
         }
         val label = TextView(ctx).apply {
             setTextColor(Color.WHITE)

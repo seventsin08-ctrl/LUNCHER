@@ -22,14 +22,14 @@ object IconFactory {
 
     const val CORNER = 0.225f
 
-    /** Draws the shared glass tile (used by app icons and live icons). */
+    /** Draws the shared see-through "clear glass" tile (used by app icons and live icons). */
     fun drawTile(c: Canvas, w: Float, h: Float) {
         val r = minOf(w, h) * CORNER
         val rect = RectF(0f, 0f, w, h)
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
-                0f, 0f, 0f, h,
-                intArrayOf(0xFF4C4C52.toInt(), 0xFF2A2A2E.toInt(), 0xFF1B1B1E.toInt()),
+                0f, 0f, w * 0.35f, h,
+                intArrayOf(0x9C77777E.toInt(), 0x7A45454B, 0xA61E1E22.toInt()),
                 floatArrayOf(0f, 0.5f, 1f),
                 Shader.TileMode.CLAMP
             )
@@ -37,24 +37,25 @@ object IconFactory {
         c.drawRoundRect(rect, r, r, fill)
     }
 
-    /** Glossy highlight + hairline border drawn on top of a tile. */
+    /** Liquid-glass sheen + bright rim drawn on top of a tile. */
     fun drawGloss(c: Canvas, w: Float, h: Float) {
         val r = minOf(w, h) * CORNER
         val gloss = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
-                0f, 0f, 0f, h * 0.55f,
-                0x2EFFFFFF, 0x00FFFFFF,
+                0f, 0f, 0f, h * 0.5f,
+                0x33FFFFFF, 0x00FFFFFF,
                 Shader.TileMode.CLAMP
             )
         }
         c.drawRoundRect(RectF(0f, 0f, w, h), r, r, gloss)
-        val stroke = maxOf(1f, w / 90f)
+        val stroke = maxOf(1.2f, w / 70f)
         val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = stroke
             shader = LinearGradient(
-                0f, 0f, 0f, h,
-                0x66FFFFFF, 0x14FFFFFF,
+                0f, 0f, w, h,
+                intArrayOf(0xC8FFFFFF.toInt(), 0x22FFFFFF, 0x14FFFFFF, 0x80FFFFFF.toInt()),
+                floatArrayOf(0f, 0.35f, 0.65f, 1f),
                 Shader.TileMode.CLAMP
             )
         }
@@ -64,39 +65,47 @@ object IconFactory {
 
     fun render(d: Drawable, size: Int): Bitmap {
         val s = size.toFloat()
+        val r = s * CORNER
         val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
         drawTile(c, s, s)
 
-        // Draw the glyph into its own layer, then composite it onto the tile only (SRC_ATOP).
+        // Glyph goes into its own layer, gets clipped to the rounded tile shape, then is drawn on top.
         val glyph = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val g = Canvas(glyph)
-        var filter: ColorMatrixColorFilter? = grayscale(1.15f)
+        var filter: ColorMatrixColorFilter? = grayscale(1.2f)
 
         if (d is AdaptiveIconDrawable) {
             val bleed = (s * 0.25f).toInt()
             val mono = if (Build.VERSION.SDK_INT >= 33) d.monochrome else null
-            val layer = mono ?: d.foreground
-            if (layer != null) {
-                val l = layer.mutate()
-                if (mono != null) {
-                    l.setTint(0xFFF2F2F2.toInt())
-                    filter = null
-                }
+            if (mono != null) {
+                val l = mono.mutate()
+                l.setTint(0xFFF5F5F5.toInt())
                 l.setBounds(-bleed, -bleed, size + bleed, size + bleed)
                 l.draw(g)
+                filter = null
+            } else {
+                d.background?.mutate()?.let {
+                    it.alpha = 70
+                    it.setBounds(-bleed, -bleed, size + bleed, size + bleed)
+                    it.draw(g)
+                }
+                d.foreground?.mutate()?.let {
+                    it.setBounds(-bleed, -bleed, size + bleed, size + bleed)
+                    it.draw(g)
+                }
             }
         } else {
-            val pad = (s * 0.18f).toInt()
+            val pad = (s * 0.17f).toInt()
             val l = d.mutate()
             l.setBounds(pad, pad, size - pad, size - pad)
             l.draw(g)
         }
 
-        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
-            colorFilter = filter
-        }
+        val mask = Paint(Paint.ANTI_ALIAS_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
+        g.drawRoundRect(RectF(0f, 0f, s, s), r, r, mask)
+
+        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { colorFilter = filter }
         c.drawBitmap(glyph, 0f, 0f, p)
         glyph.recycle()
 

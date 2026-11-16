@@ -22,7 +22,7 @@ class AnalogClockView(ctx: Context) : View(ctx) {
             postDelayed(this, 1000L - System.currentTimeMillis() % 1000L)
         }
     }
-    private val face = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF101012.toInt() }
+    private val face = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD90E0E10.toInt() }
     private val num = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFEDEDED.toInt()
         textAlign = Paint.Align.CENTER

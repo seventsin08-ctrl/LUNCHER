@@ -5,26 +5,41 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 
 object Glass {
-    /** Smoked translucent glass panel used for widgets, dock and pills. */
-    fun panel(ctx: Context, radiusDp: Float, dark: Boolean = true): GradientDrawable {
+    /** See-through "clear glass" panel used for widgets, dock and pills. */
+    fun panel(ctx: Context, radiusDp: Float): GradientDrawable {
         val d = ctx.resources.displayMetrics.density
-        val colors = if (dark) {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
             intArrayOf(
-                Color.argb(120, 72, 72, 78),
-                Color.argb(105, 40, 40, 44),
-                Color.argb(130, 22, 22, 25)
+                Color.argb(95, 130, 130, 138),
+                Color.argb(70, 70, 70, 76),
+                Color.argb(110, 24, 24, 27)
             )
-        } else {
-            intArrayOf(Color.argb(80, 255, 255, 255), Color.argb(40, 255, 255, 255))
-        }
-        return GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, colors).apply {
+        ).apply {
             cornerRadius = radiusDp * d
-            setStroke(maxOf(1, (0.8f * d).toInt()), Color.argb(70, 255, 255, 255))
+            setStroke(maxOf(1, (0.9f * d).toInt()), Color.argb(85, 255, 255, 255))
+        }
+    }
+
+    /** Denser glass for context menus so text stays readable. */
+    fun menu(ctx: Context, radiusDp: Float): GradientDrawable {
+        val d = ctx.resources.displayMetrics.density
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(Color.argb(225, 58, 58, 62), Color.argb(235, 36, 36, 40))
+        ).apply {
+            cornerRadius = radiusDp * d
+            setStroke(maxOf(1, (0.7f * d).toInt()), Color.argb(60, 255, 255, 255))
         }
     }
 
     fun circle(color: Int): GradientDrawable = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
+        setColor(color)
+    }
+
+    fun pill(color: Int, radiusPx: Float): GradientDrawable = GradientDrawable().apply {
+        cornerRadius = radiusPx
         setColor(color)
     }
 }
