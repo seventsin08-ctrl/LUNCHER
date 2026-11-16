@@ -7,6 +7,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityOptions
 import android.app.AlertDialog
+import android.app.Dialog
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
@@ -34,6 +35,7 @@ import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.ColorDrawable
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -68,6 +70,7 @@ import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
@@ -2408,24 +2411,248 @@ class MainActivity : Activity() {
         return true
     }
 
+    /** The folder and app picker use the same three-column icon-and-name tiles. */
+    private inner class FolderGridAdapter(
+        private var apps: List<AppInfo>,
+        private val selected: Set<String> = emptySet(),
+        private val onTap: (AppInfo, View) -> Unit,
+        private val onHold: ((AppInfo) -> Unit)? = null
+    ) : RecyclerView.Adapter<FolderGridAdapter.Holder>() {
+        inner class Holder(val tile: LinearLayout, val icon: ImageView, val badge: TextView,
+                           val label: TextView) : RecyclerView.ViewHolder(tile)
+
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): Holder {
+            val tile = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                setPadding(dp(4), dp(9), dp(4), dp(7))
+                layoutParams = RecyclerView.LayoutParams(MATCH_PARENT, dp(108))
+                isClickable = true
+                isFocusable = true
+            }
+            val imageWrap = FrameLayout(this@MainActivity)
+            val icon = ImageView(this@MainActivity).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                outlineProvider = roundedOutline()
+                clipToOutline = true
+            }
+            imageWrap.addView(icon, FrameLayout.LayoutParams(dp(60), dp(60)))
+            val badge = TextView(this@MainActivity).apply {
+                text = "✓"
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                typeface = Typeface.DEFAULT_BOLD
+                background = Glass.circle(0xFF0A84FF.toInt())
+                visibility = View.GONE
+            }
+            imageWrap.addView(badge, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.END))
+            tile.addView(imageWrap, LinearLayout.LayoutParams(dp(64), dp(64)))
+            val label = TextView(this@MainActivity).apply {
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 12f
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                setShadowLayer(dp(2).toFloat(), 0f, 1f, 0xA0000000.toInt())
+            }
+            tile.addView(label, LinearLayout.LayoutParams(MATCH_PARENT, dp(28)).apply { topMargin = dp(4) })
+            return Holder(tile, icon, badge, label)
+        }
+
+        override fun getItemCount() = apps.size
+
+        override fun onBindViewHolder(holder: Holder, position: Int) {
+            val app = apps[position]
+            holder.label.text = app.label
+            val nativeIcon = runCatching { packageManager.getActivityIcon(app.component) }.getOrNull()
+            if (nativeIcon != null) holder.icon.setImageDrawable(nativeIcon) else holder.icon.setImageBitmap(app.icon)
+            holder.badge.visibility = if (app.key in selected) View.VISIBLE else View.GONE
+            holder.tile.contentDescription = if (app.key in selected) "${app.label}, added" else app.label
+            holder.tile.setOnClickListener { onTap(app, holder.icon) }
+            holder.tile.setOnLongClickListener {
+                if (onHold == null) false else { onHold.invoke(app); true }
+            }
+        }
+
+        @Suppress("NotifyDataSetChanged")
+        fun replaceApps(newApps: List<AppInfo>) { apps = newApps; notifyDataSetChanged() }
+    }
+
+    /** A compact, rounded panel over the home screen, with system back/outside tap to close. */
+    private fun folderDialog(panel: View, widthFraction: Float = 0.88f): Dialog {
+        val dialog = Dialog(this)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.setContentView(panel)
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.62f)
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+            setLayout((resources.displayMetrics.widthPixels * widthFraction).toInt(), WRAP_CONTENT)
+        }
+        return dialog
+    }
+
+    private fun folderHeaderButton(symbol: String, description: String) = TextView(this).apply {
+        text = symbol
+        contentDescription = description
+        textSize = 24f
+        gravity = Gravity.CENTER
+        setTextColor(Color.WHITE)
+        background = Glass.circle(0x557F7F86)
+        isClickable = true
+        isFocusable = true
+    }
+
     private fun openFolder(app: AppInfo) {
-        val group = folders().firstOrNull { it.id == folderId(app) } ?: return
+        val id = folderId(app) ?: return
+        val group = folders().firstOrNull { it.id == id } ?: return
         val byKey = allApps.associateBy { it.key }
         val members = group.keys.mapNotNull { byKey[it] }
-        val choices = members.map { it.label } + listOf("Rename folder", "Remove an app", "Ungroup apps")
-        AlertDialog.Builder(this).setTitle(group.name).setItems(choices.toTypedArray()) { _, which ->
-            when {
-                which < members.size -> launch(members[which], null)
-                which == members.size -> renameFolder(app)
-                which == members.size + 1 -> {
-                    if (members.isNotEmpty()) AlertDialog.Builder(this).setTitle("Remove app from folder")
-                        .setItems(members.map { it.label }.toTypedArray()) { _, index ->
-                            removeFolderMember(app, members[index].key)
-                        }.setNegativeButton("Cancel", null).show()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Glass.menu(this@MainActivity, 30f)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val title = TextView(this).apply {
+            text = group.name
+            textSize = 20f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(Color.WHITE)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        header.addView(title, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        val more = folderHeaderButton("⋯", "Folder options")
+        val add = folderHeaderButton("+", "Add apps to folder")
+        header.addView(more, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(8) })
+        header.addView(add, LinearLayout.LayoutParams(dp(38), dp(38)))
+        panel.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        val grid = RecyclerView(this).apply {
+            layoutManager = GridLayoutManager(this@MainActivity, 3)
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            clipToPadding = false
+            setPadding(0, dp(8), 0, 0)
+        }
+        val gridHeight = minOf(dp(108) * maxOf(1, (members.size + 2) / 3) + dp(8),
+            (resources.displayMetrics.heightPixels * 0.55f).toInt())
+        panel.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT, gridHeight))
+        val dialog = folderDialog(panel)
+        grid.adapter = FolderGridAdapter(members, onTap = { member, _ ->
+            dialog.dismiss()
+            launch(member, null)
+        }, onHold = { member ->
+            AlertDialog.Builder(this).setTitle(member.label)
+                .setItems(arrayOf("Remove from folder")) { _, _ ->
+                    dialog.dismiss()
+                    removeFolderMember(app, member.key)
+                }.setNegativeButton("Cancel", null).show()
+        })
+        add.setOnClickListener {
+            dialog.dismiss()
+            showFolderAppPicker(id)
+        }
+        more.setOnClickListener { anchor ->
+            PopupMenu(this, anchor).apply {
+                menu.add("Rename folder").setOnMenuItemClickListener {
+                    dialog.dismiss(); renameFolder(app); true
                 }
-                else -> ungroupFolder(app)
+                menu.add("Remove an app").setOnMenuItemClickListener {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Remove app from folder")
+                        .setItems(members.map { it.label }.toTypedArray()) { _, index ->
+                            dialog.dismiss(); removeFolderMember(app, members[index].key)
+                        }.setNegativeButton("Cancel", null).show()
+                    true
+                }
+                menu.add("Ungroup apps").setOnMenuItemClickListener {
+                    dialog.dismiss(); ungroupFolder(app); true
+                }
+                show()
             }
-        }.setNegativeButton("Close", null).show()
+        }
+    }
+
+    private fun showFolderAppPicker(folderId: String) {
+        val group = folders().firstOrNull { it.id == folderId } ?: return
+        val selected = group.keys.toMutableSet()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Glass.menu(this@MainActivity, 30f)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        header.addView(TextView(this).apply {
+            text = "Add apps"
+            textSize = 20f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(Color.WHITE)
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        val done = TextView(this).apply {
+            text = "Done"
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF70B7FF.toInt())
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        header.addView(done, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        panel.addView(header)
+        val search = EditText(this).apply {
+            hint = "Search apps"
+            setSingleLine()
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setHintTextColor(0xFFB8B8BE.toInt())
+            background = Glass.pill(0x553F3F46, dp(12).toFloat())
+            setPadding(dp(12), 0, dp(12), 0)
+            imeOptions = EditorInfo.IME_ACTION_DONE
+        }
+        panel.addView(search, LinearLayout.LayoutParams(MATCH_PARENT, dp(43)).apply {
+            topMargin = dp(12); bottomMargin = dp(8)
+        })
+        val grid = RecyclerView(this).apply {
+            layoutManager = GridLayoutManager(this@MainActivity, 3)
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        }
+        panel.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT,
+            (resources.displayMetrics.heightPixels * 0.54f).toInt().coerceAtLeast(dp(160))))
+        val dialog = folderDialog(panel, 0.92f)
+        val adapter = FolderGridAdapter(allApps, selected, onTap = { selectedApp, _ ->
+            if (selectedApp.key !in selected) {
+                addAppToFolder(folderId, selectedApp.key)
+                selected.add(selectedApp.key)
+                grid.adapter?.notifyDataSetChanged()
+                toast("Added ${selectedApp.label}")
+            }
+        })
+        grid.adapter = adapter
+        search.addTextChangedListener { text ->
+            val query = text?.toString()?.trim().orEmpty()
+            adapter.replaceApps(if (query.isEmpty()) allApps else allApps.filter {
+                it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true)
+            })
+        }
+        done.setOnClickListener {
+            dialog.dismiss()
+            val refreshed = folders().firstOrNull { it.id == folderId }
+            if (refreshed != null) openFolder(folderApp(refreshed, allApps.associateBy { it.key }))
+        }
+    }
+
+    private fun addAppToFolder(folderId: String, key: String) {
+        val groups = folders()
+        val group = groups.firstOrNull { it.id == folderId } ?: return
+        val members = FolderMembership.add(group.keys, key, allApps.map { it.key }.toSet())
+        if (members == group.keys) return
+        saveFolders(groups.map { if (it.id == folderId) it.copy(keys = members) else it })
+        settings.hiddenApps = settings.hiddenApps - key
+        previewOrder = null
+        settings.order = currentOrder().filter { it != key }
+        rebuild()
     }
 
     private fun renameFolder(app: AppInfo) {
