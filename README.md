@@ -27,10 +27,18 @@ and an App Library page.
 | Long-press empty space | Edit Home Screen, Settings, wallpaper |
 | Edit Home Screen | Icons jiggle: drag to reorder, drag across pages, drag into the dock, tap − to remove |
 
-Hold a home-screen app or built-in widget to drag it. Drop an app over the
-center of another app to create a folder, or over an existing folder to add it.
-Tap a folder to open apps, rename it, remove an app, or ungroup it. Widgets can
-be moved to an area without another widget; apps reflow around them.
+Hold a home-screen app or widget to drag it. Drop an app over the center of
+another app to create a folder, or over an existing folder to add it. Apps can
+also be placed into an empty grid cell. Apps animate as they rearrange when
+animations are enabled. Tap a folder to open apps, rename it, remove an app, or
+ungroup it. Widgets can be moved to an area without another widget; apps reflow
+around them.
+
+To add a widget, long-press an empty part of the Home Screen and choose
+**Add Widgets**, or tap **+** in edit mode. Choose a built-in widget such as
+Photo or Clock, or choose **Widgets from installed apps**. Android may ask for
+permission or show the widget provider's setup. Only apps that provide a
+compatible Android home-screen widget appear, and widgets must fit the grid.
 
 ## Settings
 
@@ -51,5 +59,6 @@ recent-apps screen are unchanged.
 
 GitHub Actions builds the APK on every push (`.github/workflows/build.yml`).
 Locally: `./gradlew assembleDebug` (requires the Android SDK).
-For a separate installation alongside the original, build `assemblePreview`;
-its app name is Apple Launcher Preview and its application ID ends in `.preview`.
+For a separate installation alongside the earlier launcher and preview, build
+`assemblePreview`; its app name is Apple Launcher Preview 2 and its application
+ID ends in `.preview2`.

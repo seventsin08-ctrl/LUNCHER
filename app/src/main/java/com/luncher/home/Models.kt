@@ -10,7 +10,7 @@ data class AppInfo(val label: String, val component: ComponentName, val icon: Bi
     val packageName: String get() = component.packageName
 }
 
-enum class WidgetType { PHOTO, CALENDAR, BATTERY, CLOCK_ICON, CALENDAR_ICON, MUSIC }
+enum class WidgetType { PHOTO, CALENDAR, BATTERY, CLOCK_ICON, CALENDAR_ICON, MUSIC, APPWIDGET }
 
 /** A widget placed on the home grid. col/row/w/h are in grid cells. */
 data class PlacedWidget(

@@ -7,6 +7,9 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityOptions
 import android.app.AlertDialog
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProviderInfo
 import android.app.SearchManager
 import android.app.WallpaperManager
 import android.app.usage.UsageStatsManager
@@ -41,6 +44,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.UserManager
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import android.provider.Settings as SysSettings
@@ -98,6 +102,9 @@ class MainActivity : Activity() {
         private const val KEY_DOCK = "dock"
         private const val KEY_RECENT = "recent"
         private const val REQ_PHOTO = 4100
+        private const val REQ_WIDGET_BIND = 4101
+        private const val REQ_WIDGET_CONFIGURE = 4102
+        private const val WIDGET_HOST_ID = 1024
 
         private val EASE = PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
         private val SPRING = OvershootInterpolator(1.6f)
@@ -105,6 +112,8 @@ class MainActivity : Activity() {
 
     private lateinit var prefs: SharedPreferences
     private lateinit var settings: Settings
+    private lateinit var appWidgetManager: AppWidgetManager
+    private lateinit var appWidgetHost: AppWidgetHost
     private var appliedVersion = -1
 
     private lateinit var root: FrameLayout
@@ -169,6 +178,9 @@ class MainActivity : Activity() {
     private var folderHoverView: View? = null
     private var pendingReorder: Runnable? = null
     private var pendingReorderKey: String? = null
+    private data class ScreenPosition(val page: Int, val x: Int, val y: Int)
+    private var reflowPositions: Map<String, ScreenPosition> = emptyMap()
+    private var reflowRevision = 0
     private val edgeFlip = Runnable { flipPageDuringDrag() }
     private var edgeDir = 0
 
@@ -227,6 +239,8 @@ class MainActivity : Activity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         prefs = getSharedPreferences("luncher", MODE_PRIVATE)
         settings = Settings(this)
+        appWidgetManager = AppWidgetManager.getInstance(this)
+        appWidgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         applyStyleGlobals()
         buildUi()
         setContentView(root)
@@ -268,6 +282,16 @@ class MainActivity : Activity() {
         registerReceivers()
         appliedVersion = settings.version
         reloadApps()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        runCatching { appWidgetHost.startListening() }
+    }
+
+    override fun onStop() {
+        runCatching { appWidgetHost.stopListening() }
+        super.onStop()
     }
 
     override fun onResume() {
@@ -368,6 +392,18 @@ class MainActivity : Activity() {
     @Deprecated("Uses the classic result API, which is fine for a plain Activity")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_WIDGET_BIND || requestCode == REQ_WIDGET_CONFIGURE) {
+            val saved = prefs.getInt("pending_widget_id", AppWidgetManager.INVALID_APPWIDGET_ID)
+            val returned = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, saved) ?: saved
+            if (resultCode != RESULT_OK || saved == AppWidgetManager.INVALID_APPWIDGET_ID || returned != saved) {
+                cancelPendingAppWidget(saved)
+            } else if (requestCode == REQ_WIDGET_BIND) {
+                configureOrAddAppWidget(saved)
+            } else {
+                finishAddingAppWidget(saved)
+            }
+            return
+        }
         if (requestCode != REQ_PHOTO) return
         val id = pendingPhotoId ?: return
         pendingPhotoId = null
@@ -821,9 +857,35 @@ class MainActivity : Activity() {
         JSONObject(prefs.getString("widget_positions", "{}") ?: "{}")
     }.getOrDefault(JSONObject())
 
+    private fun additionalWidgetData(): JSONObject = runCatching {
+        JSONObject(prefs.getString("additional_widgets", "{}") ?: "{}")
+    }.getOrDefault(JSONObject())
+
+    private fun additionalWidgets(): List<Pair<Int, PlacedWidget>> {
+        val json = additionalWidgetData()
+        return json.keys().asSequence().mapNotNull { id ->
+            val item = json.optJSONObject(id) ?: return@mapNotNull null
+            val type = runCatching { WidgetType.valueOf(item.optString("type")) }.getOrNull() ?: return@mapNotNull null
+            val width = item.optInt("w", 1).coerceIn(1, cols)
+            val height = item.optInt("h", 1).coerceIn(1, rowsPerPage())
+            val page = item.optInt("page", 0).coerceIn(0, 100)
+            val w = PlacedWidget(type,
+                item.optInt("col", 0).coerceIn(0, cols - width),
+                item.optInt("row", 0).coerceIn(0, rowsPerPage() - height), width, height, id, page)
+            page to w
+        }.toList()
+    }
+
+    private fun saveAdditionalWidget(w: PlacedWidget, page: Int) {
+        val json = additionalWidgetData()
+        json.put(w.id, JSONObject().put("type", w.type.name).put("page", page)
+            .put("col", w.col).put("row", w.row).put("w", w.w).put("h", w.h))
+        prefs.edit().putString("additional_widgets", json.toString()).apply()
+    }
+
     private fun widgetsFor(page: Int): List<PlacedWidget> {
         val positions = widgetPositions()
-        return (0 until MIN_PAGES).flatMap { origin ->
+        val builtIn = (0 until MIN_PAGES).flatMap { origin ->
             defaultWidgetsFor(origin).mapNotNull { widget ->
                 val stable = widget.copy(originPage = origin)
                 val saved = positions.optJSONObject(widgetKey(origin, stable))
@@ -834,22 +896,57 @@ class MainActivity : Activity() {
                 )
             }
         }
+        return builtIn + additionalWidgets().filter { it.first == page }.map { it.second }
     }
 
     private fun lastWidgetPage(): Int {
         val positions = widgetPositions()
-        return positions.keys().asSequence().mapNotNull { positions.optJSONObject(it)?.optInt("page", 0) }
+        val builtInMax = positions.keys().asSequence().mapNotNull { positions.optJSONObject(it)?.optInt("page", 0) }
             .maxOrNull()?.coerceIn(0, 100) ?: 0
+        return maxOf(builtInMax, additionalWidgets().maxOfOrNull { it.first } ?: 0)
     }
 
-    private fun widgetKey(page: Int, w: PlacedWidget) = "${if (w.originPage >= 0) w.originPage else page}:${w.type.name}:${w.id}"
+    private fun widgetKey(page: Int, w: PlacedWidget) =
+        if (w.id.startsWith("extra_") || w.id.startsWith("appwidget_")) "extra:${w.id}"
+        else "${if (w.originPage >= 0) w.originPage else page}:${w.type.name}:${w.id}"
 
     private fun widgetVisible(page: Int, w: PlacedWidget): Boolean {
+        if (w.type == WidgetType.APPWIDGET) return true
         val typeKey = when (w.type) {
             WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> "ICONS"
             else -> w.type.name
         }
         return settings.widgetEnabled(typeKey) && widgetKey(page, w) !in settings.hiddenWidgets
+    }
+
+    /** Keep restored or re-enabled widgets from covering one another after a layout change. */
+    private fun resolveWidgetCollisions() {
+        val last = maxOf(MIN_PAGES - 1, lastWidgetPage()).coerceIn(0, 100)
+        val widgets = (0..last).flatMap { page ->
+            widgetsFor(page).filter { widgetVisible(page, it) }.map { page to it }
+        }.sortedBy { (_, w) -> if (w.id.startsWith("extra_") || w.id.startsWith("appwidget_")) 0 else 1 }
+        val occupied = mutableListOf<WidgetGrid.Placement>()
+        val builtInPositions = widgetPositions()
+        val added = additionalWidgetData()
+        var changed = false
+        for ((page, w) in widgets) {
+            val desired = WidgetGrid.Placement(page, w.col, w.row, w.w, w.h)
+            val target = if (WidgetGrid.fits(desired, cols, rowsPerPage(), occupied)) desired
+                else WidgetGrid.firstFit(cols, rowsPerPage(), w.w, w.h,
+                    listOf(page) + (0..100).filter { it != page }, occupied) ?: continue
+            occupied += target
+            if (target != desired) {
+                if (w.id.startsWith("extra_") || w.id.startsWith("appwidget_")) {
+                    added.optJSONObject(w.id)?.put("page", target.page)?.put("col", target.col)?.put("row", target.row)
+                } else {
+                    builtInPositions.put(widgetKey(page, w), JSONObject().put("page", target.page)
+                        .put("col", target.col).put("row", target.row))
+                }
+                changed = true
+            }
+        }
+        if (changed) prefs.edit().putString("widget_positions", builtInPositions.toString())
+            .putString("additional_widgets", added.toString()).apply()
     }
 
     private fun folders(): List<HomeFolder> {
@@ -908,16 +1005,21 @@ class MainActivity : Activity() {
     }
 
     private fun rebuild() {
+        reflowPositions = captureReflowPositions()
+        reflowRevision++
+        resolveWidgetCollisions()
         val dock = dockApps()
         val dockKeys = dock.map { it.key }.toSet()
         val home = homeApps(dockKeys)
+        val homeByKey = home.associateBy { it.key }
+        val slots = HomeGridOrder.normalize(previewOrder ?: settings.order, home.map { it.key })
         val rows = rowsPerPage()
 
         val result = mutableListOf<Page>()
         var next = 0
         var page = 0
         val lastWidget = lastWidgetPage()
-        while (page < MIN_PAGES || next < home.size || page <= lastWidget) {
+        while (page < MIN_PAGES || next < slots.size || page <= lastWidget) {
             val widgets = widgetsFor(page).filter { it.row + it.h <= rows && it.col + it.w <= cols && widgetVisible(page, it) }
             val taken = BooleanArray(rows * cols)
             for (w in widgets) {
@@ -927,7 +1029,10 @@ class MainActivity : Activity() {
             }
             val apps = mutableListOf<Pair<AppInfo, Int>>()
             for (cell in 0 until rows * cols) {
-                if (!taken[cell] && next < home.size) apps += home[next++] to cell
+                if (!taken[cell] && next < slots.size) {
+                    val key = slots[next++]
+                    homeByKey[key]?.let { apps += it to cell }
+                }
             }
             result += Page.Home(widgets, apps)
             page++
@@ -1036,6 +1141,46 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun captureReflowPositions(): Map<String, ScreenPosition> {
+        if (!::pager.isInitialized || anim == 0f || entrancePending) return emptyMap()
+        val rv = pager.getChildAt(0) as? RecyclerView ?: return emptyMap()
+        val found = mutableMapOf<String, ScreenPosition>()
+        for (i in 0 until rv.childCount) {
+            val holderView = rv.getChildAt(i)
+            val index = rv.getChildViewHolder(holderView).bindingAdapterPosition
+            if (index == RecyclerView.NO_POSITION) continue
+            val frame = (holderView as? FrameLayout)?.getChildAt(0) as? FrameLayout ?: continue
+            if (frame.tag != "home-page") continue
+            for (n in 0 until frame.childCount) {
+                val child = frame.getChildAt(n)
+                val key = child.tag as? String ?: continue
+                if (!key.startsWith("layout:")) continue
+                val loc = IntArray(2)
+                child.getLocationOnScreen(loc)
+                found[key] = ScreenPosition(index, loc[0], loc[1])
+            }
+        }
+        return found
+    }
+
+    private fun animateReflow(view: View, key: String, pageIndex: Int) {
+        val old = reflowPositions[key] ?: return
+        if (old.page != pageIndex || anim == 0f) return
+        val revision = reflowRevision
+        view.post {
+            if (revision != reflowRevision || !view.isAttachedToWindow) return@post
+            val loc = IntArray(2)
+            view.getLocationOnScreen(loc)
+            val dx = (old.x - loc[0]).toFloat()
+            val dy = (old.y - loc[1]).toFloat()
+            if (abs(dx) < 1f && abs(dy) < 1f) return@post
+            view.translationX = dx
+            view.translationY = dy
+            view.animate().translationX(0f).translationY(0f)
+                .setDuration(dur(260)).setInterpolator(EASE).start()
+        }
+    }
+
     private fun buildHomePage(p: Page.Home, pageIndex: Int): View {
         val frame = FrameLayout(this).apply {
             setPadding(dp(PAGE_PAD), dp(6), dp(PAGE_PAD), 0)
@@ -1050,14 +1195,20 @@ class MainActivity : Activity() {
         }
         for (w in p.widgets) {
             val v = buildWidget(w, pageIndex)
+            val key = "layout:widget:${widgetKey(pageIndex, w)}"
+            v.tag = key
             frame.addView(v, place(w.col, w.row, w.w, w.h))
             entrance(v, w.col, w.row)
+            animateReflow(v, key, pageIndex)
         }
         for ((app, cell) in p.apps) {
             val v = makeAppCell(app, fromDock = false)
+            val key = "layout:app:${app.key}"
+            v.tag = key
             if (drag?.app?.key == app.key) v.alpha = 0.2f
             frame.addView(v, place(cell % cols, cell / cols, 1, 1))
             entrance(v, cell % cols, cell / cols)
+            if (drag?.app?.key != app.key) animateReflow(v, key, pageIndex)
         }
         return frame
     }
@@ -1314,7 +1465,34 @@ class MainActivity : Activity() {
                 widgetFrame(batteryWidget(), "Batteries", { openIntent(Intent(Intent.ACTION_POWER_USAGE_SUMMARY), it) }, null, remove)
             WidgetType.MUSIC ->
                 widgetFrame(musicWidget(), "Now Playing", { musicTapped(it) }, null, remove)
+            WidgetType.APPWIDGET -> buildAppWidget(w, remove)
         }
+    }
+
+    private fun buildAppWidget(w: PlacedWidget, remove: () -> Unit): View {
+        val id = w.id.removePrefix("appwidget_").toIntOrNull()
+        val info = id?.let { appWidgetManager.getAppWidgetInfo(it) }
+        if (id == null || info == null) {
+            return widgetFrame(TextView(this).apply {
+                text = "Widget unavailable"
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+            }, "Widget", {}, null, remove)
+        }
+        val hostView = runCatching { appWidgetHost.createView(this, id, info) }.getOrElse {
+            return widgetFrame(TextView(this).apply {
+                text = "Widget unavailable"
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+            }, "Widget", {}, null, remove)
+        }
+        val inset = ((cellW() - dp(iconDp)) / 2).coerceAtLeast(0)
+        val density = resources.displayMetrics.density
+        val widthDp = ((cellW() * w.w - inset * 2) / density).roundToInt().coerceAtLeast(1)
+        val heightDp = ((dp(CELL_H) * w.h - dp(38)) / density).roundToInt().coerceAtLeast(1)
+        runCatching { hostView.updateAppWidgetSize(null, widthDp, heightDp, widthDp, heightDp) }
+        val name = runCatching { info.loadLabel(packageManager) }.getOrDefault("Widget")
+        return widgetFrame(hostView, name, {}, null, remove)
     }
 
     private fun photoWidget(id: String): View {
@@ -1615,13 +1793,35 @@ class MainActivity : Activity() {
     }
 
     private fun hideWidget(page: Int, w: PlacedWidget) {
+        if (w.id.startsWith("extra_") || w.id.startsWith("appwidget_")) {
+            val json = additionalWidgetData()
+            json.remove(w.id)
+            prefs.edit().putString("additional_widgets", json.toString()).apply()
+            if (w.type == WidgetType.APPWIDGET) {
+                w.id.removePrefix("appwidget_").toIntOrNull()?.let { id ->
+                    runCatching { appWidgetHost.deleteAppWidgetId(id) }
+                }
+            } else if (w.type == WidgetType.PHOTO) {
+                prefs.edit().remove("photo_${w.id}").remove("photo_bw_${w.id}").apply()
+                photoCache.remove(w.id)
+            }
+            rebuild()
+            return
+        }
         settings.hiddenWidgets = settings.hiddenWidgets + widgetKey(page, w)
         rebuild()
     }
 
     private fun showRestoreWidgetsMenu(anchor: View) {
-        val hidden = settings.hiddenWidgets.toList()
-        val items = mutableListOf<MenuItem>()
+        val items = mutableListOf<Pair<String, () -> Unit>>()
+        items += "Widgets from installed apps" to { showInstalledWidgets() }
+        items += "Photo" to { addBuiltInWidget(WidgetType.PHOTO) }
+        items += "Clock" to { addBuiltInWidget(WidgetType.CLOCK_ICON) }
+        items += "Calendar icon" to { addBuiltInWidget(WidgetType.CALENDAR_ICON) }
+        items += "Calendar" to { addBuiltInWidget(WidgetType.CALENDAR) }
+        items += "Batteries" to { addBuiltInWidget(WidgetType.BATTERY) }
+        items += "Now Playing" to { addBuiltInWidget(WidgetType.MUSIC) }
+        val hidden = settings.hiddenWidgets.toList().sorted()
         for (key in hidden) {
             val parts = key.split(':')
             val name = when (parts.getOrNull(1)) {
@@ -1634,14 +1834,165 @@ class MainActivity : Activity() {
                 else -> "Widget"
             }
             val page = (parts.getOrNull(0)?.toIntOrNull() ?: 0) + 1
-            items += MenuItem("Add $name (page $page)") {
-                settings.hiddenWidgets = settings.hiddenWidgets - key
-                rebuild()
-            }
+            items += "Restore $name (page $page)" to { restoreBuiltInWidget(key) }
         }
-        if (items.isEmpty()) items += MenuItem("All widgets are on your Home Screen") {}
-        items += MenuItem("Apple Launcher Settings…") { openSettings() }
-        showContextMenu(anchor, items, lift = false)
+        AlertDialog.Builder(this).setTitle("Add widgets")
+            .setItems(items.map { it.first }.toTypedArray()) { _, which -> items[which].second() }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun findWidgetSpace(width: Int, height: Int): WidgetGrid.Placement? {
+        val last = maxOf(MIN_PAGES - 1, homePageCount() - 1, lastWidgetPage()).coerceAtMost(99)
+        val preferred = pager.currentItem.coerceIn(0, last)
+        val pagesToTry = listOf(preferred) + (0..(last + 1)).filter { it != preferred }
+        val occupied = (0..last).flatMap { page ->
+            widgetsFor(page).filter { widgetVisible(page, it) && it.col + it.w <= cols && it.row + it.h <= rowsPerPage() }
+                .map { WidgetGrid.Placement(page, it.col, it.row, it.w, it.h) }
+        }
+        return WidgetGrid.firstFit(cols, rowsPerPage(), width, height, pagesToTry, occupied)
+    }
+
+    private fun restoreBuiltInWidget(key: String) {
+        val maxPage = maxOf(MIN_PAGES - 1, lastWidgetPage())
+        val found = (0..maxPage).asSequence().flatMap { page ->
+            widgetsFor(page).asSequence().filter { widgetKey(page, it) == key }.map { page to it }
+        }.firstOrNull() ?: return
+        val (page, widget) = found
+        val typeKey = if (widget.type == WidgetType.CLOCK_ICON || widget.type == WidgetType.CALENDAR_ICON) "ICONS" else widget.type.name
+        settings.setWidgetEnabled(typeKey, true)
+        val current = WidgetGrid.Placement(page, widget.col, widget.row, widget.w, widget.h)
+        val occupied = widgetsFor(page).filter { widgetKey(page, it) != key && widgetVisible(page, it) }
+            .map { WidgetGrid.Placement(page, it.col, it.row, it.w, it.h) }
+        val place = if (WidgetGrid.fits(current, cols, rowsPerPage(), occupied)) current
+            else findWidgetSpace(widget.w, widget.h)
+        if (place == null) { toast("There is not enough room for this widget"); return }
+        val positions = widgetPositions()
+        positions.put(key, JSONObject().put("page", place.page).put("col", place.col).put("row", place.row))
+        prefs.edit().putString("widget_positions", positions.toString()).apply()
+        settings.hiddenWidgets = settings.hiddenWidgets - key
+        rebuild()
+        pager.setCurrentItem(place.page, anim > 0f)
+    }
+
+    private fun addBuiltInWidget(type: WidgetType) {
+        val width = when (type) {
+            WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
+            WidgetType.CALENDAR, WidgetType.MUSIC -> cols
+            else -> (cols / 2).coerceAtLeast(1)
+        }
+        val height = if (type == WidgetType.CLOCK_ICON || type == WidgetType.CALENDAR_ICON) 1 else 2
+        val typeKey = if (type == WidgetType.CLOCK_ICON || type == WidgetType.CALENDAR_ICON) "ICONS" else type.name
+        settings.setWidgetEnabled(typeKey, true)
+        val place = findWidgetSpace(width, height)
+        if (place == null) { toast("There is not enough room for this widget"); return }
+        val id = "extra_" + UUID.randomUUID().toString().replace("-", "")
+        val widget = PlacedWidget(type, place.col, place.row, width, height, id, place.page)
+        saveAdditionalWidget(widget, place.page)
+        rebuild()
+        pager.setCurrentItem(place.page, anim > 0f)
+    }
+
+    private fun widgetCellSize(info: AppWidgetProviderInfo): Pair<Int, Int> {
+        val inset = ((cellW() - dp(iconDp)) / 2).coerceAtLeast(0)
+        val minWidth = (info.minWidth + inset * 2).coerceAtLeast(1)
+        val minHeight = (info.minHeight + dp(38)).coerceAtLeast(1)
+        val width = (minWidth + cellW() - 1) / cellW().coerceAtLeast(1)
+        val height = (minHeight + dp(CELL_H) - 1) / dp(CELL_H).coerceAtLeast(1)
+        val targetWidth = if (Build.VERSION.SDK_INT >= 31) info.targetCellWidth.takeIf { it <= cols } ?: 0 else 0
+        val targetHeight = if (Build.VERSION.SDK_INT >= 31) info.targetCellHeight.takeIf { it <= rowsPerPage() } ?: 0 else 0
+        return maxOf(1, width, targetWidth) to maxOf(1, height, targetHeight)
+    }
+
+    private fun showInstalledWidgets() {
+        val profiles = runCatching { getSystemService(UserManager::class.java).userProfiles }.getOrDefault(emptyList())
+        val byProfile = profiles.flatMap { profile ->
+            runCatching { appWidgetManager.getInstalledProvidersForProfile(profile) }.getOrDefault(emptyList())
+        }
+        val installed = if (byProfile.isNotEmpty()) byProfile
+            else runCatching { appWidgetManager.installedProviders }.getOrDefault(emptyList())
+        val providers = installed
+            .distinctBy { "${it.provider.flattenToString()}:${it.profile}" }
+            .filter { it.widgetCategory == 0 || (it.widgetCategory and AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN) != 0 }
+            .sortedBy { runCatching { it.loadLabel(packageManager) }.getOrDefault(it.provider.packageName).lowercase() }
+        if (providers.isEmpty()) {
+            toast("No home-screen widgets were found in your installed apps")
+            return
+        }
+        val labels = providers.map { info ->
+            val name = runCatching { info.loadLabel(packageManager) }.getOrDefault(info.provider.packageName)
+            "$name  ·  ${info.provider.packageName}"
+        }
+        AlertDialog.Builder(this).setTitle("Widgets from apps")
+            .setItems(labels.toTypedArray()) { _, index -> beginAppWidget(providers[index]) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun beginAppWidget(info: AppWidgetProviderInfo) {
+        val (width, height) = widgetCellSize(info)
+        if (findWidgetSpace(width, height) == null) {
+            toast("This widget is too large for this home-screen grid")
+            return
+        }
+        val previous = prefs.getInt("pending_widget_id", AppWidgetManager.INVALID_APPWIDGET_ID)
+        if (previous != AppWidgetManager.INVALID_APPWIDGET_ID) cancelPendingAppWidget(previous)
+        val id = runCatching { appWidgetHost.allocateAppWidgetId() }.getOrElse {
+            toast("Could not add this widget")
+            return
+        }
+        prefs.edit().putInt("pending_widget_id", id).apply()
+        val allowed = runCatching {
+            appWidgetManager.bindAppWidgetIdIfAllowed(id, info.profile, info.provider, null)
+        }.getOrDefault(false)
+        if (allowed) {
+            configureOrAddAppWidget(id)
+            return
+        }
+        val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER_PROFILE, info.profile)
+        runCatching { startActivityForResult(intent, REQ_WIDGET_BIND) }.onFailure {
+            cancelPendingAppWidget(id)
+            toast("Android could not open widget permission")
+        }
+    }
+
+    private fun configureOrAddAppWidget(id: Int) {
+        val info = appWidgetManager.getAppWidgetInfo(id)
+        if (info == null) {
+            cancelPendingAppWidget(id)
+            toast("This widget is no longer available")
+            return
+        }
+        if (info.configure == null) {
+            finishAddingAppWidget(id)
+            return
+        }
+        runCatching {
+            appWidgetHost.startAppWidgetConfigureActivityForResult(this, id, 0, REQ_WIDGET_CONFIGURE, null)
+        }.onFailure {
+            cancelPendingAppWidget(id)
+            toast("Could not open this widget's setup")
+        }
+    }
+
+    private fun cancelPendingAppWidget(id: Int) {
+        if (id != AppWidgetManager.INVALID_APPWIDGET_ID) runCatching { appWidgetHost.deleteAppWidgetId(id) }
+        prefs.edit().remove("pending_widget_id").apply()
+    }
+
+    private fun finishAddingAppWidget(id: Int) {
+        val info = appWidgetManager.getAppWidgetInfo(id)
+        if (info == null) { cancelPendingAppWidget(id); toast("This widget is no longer available"); return }
+        val (width, height) = widgetCellSize(info)
+        val place = findWidgetSpace(width, height)
+        if (place == null) { cancelPendingAppWidget(id); toast("There is not enough room for this widget"); return }
+        val widget = PlacedWidget(WidgetType.APPWIDGET, place.col, place.row, width, height, "appwidget_$id", place.page)
+        saveAdditionalWidget(widget, place.page)
+        prefs.edit().remove("pending_widget_id").apply()
+        rebuild()
+        pager.setCurrentItem(place.page, anim > 0f)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -1798,17 +2149,19 @@ class MainActivity : Activity() {
             .roundToInt().coerceIn(0, (cols - w.w).coerceAtLeast(0))
         val row = ((rawY - loc[1] - frame.paddingTop - d.grabY) / dp(CELL_H))
             .roundToInt().coerceIn(0, (rowsPerPage() - w.h).coerceAtLeast(0))
-        val blocked = target.widgets.any { other ->
-            widgetKey(targetPage, other) != widgetKey(d.page, w) &&
-                col < other.col + other.w && col + w.w > other.col &&
-                row < other.row + other.h && row + w.h > other.row
-        }
+        val occupied = target.widgets.filter { widgetKey(targetPage, it) != widgetKey(d.page, w) }
+            .map { WidgetGrid.Placement(targetPage, it.col, it.row, it.w, it.h) }
+        val blocked = !WidgetGrid.fits(WidgetGrid.Placement(targetPage, col, row, w.w, w.h), cols, rowsPerPage(), occupied)
         if (blocked) {
             toast("Choose a space without another widget")
         } else {
-            val positions = widgetPositions()
-            positions.put(widgetKey(d.page, w), JSONObject().put("page", targetPage).put("col", col).put("row", row))
-            prefs.edit().putString("widget_positions", positions.toString()).apply()
+            if (w.id.startsWith("extra_") || w.id.startsWith("appwidget_")) {
+                saveAdditionalWidget(w.copy(col = col, row = row, originPage = targetPage), targetPage)
+            } else {
+                val positions = widgetPositions()
+                positions.put(widgetKey(d.page, w), JSONObject().put("page", targetPage).put("col", col).put("row", row))
+                prefs.edit().putString("widget_positions", positions.toString()).apply()
+            }
         }
         rebuild()
     }
@@ -1935,9 +2288,30 @@ class MainActivity : Activity() {
         setDock(dock)
     }
 
-    /** Full current home order (keys), including apps not yet in the saved order. */
+    /** Full current home order, preserving explicitly empty cells. */
     private fun currentOrder(): List<String> =
-        homeApps(dockKeys().toSet()).map { it.key }
+        HomeGridOrder.normalize(previewOrder ?: settings.order, homeApps(dockKeys().toSet()).map { it.key })
+
+    /** Map a visible grid cell to its position among cells not occupied by widgets. */
+    private fun slotIndexFor(pageIndex: Int, targetCell: Int): Int? {
+        val rows = rowsPerPage()
+        if (targetCell !in 0 until rows * cols) return null
+        var index = 0
+        for (p in 0..pageIndex) {
+            val page = pages.getOrNull(p) as? Page.Home ?: return null
+            val taken = BooleanArray(rows * cols)
+            page.widgets.forEach { w ->
+                for (r in w.row until minOf(rows, w.row + w.h)) {
+                    for (c in w.col until minOf(cols, w.col + w.w)) taken[r * cols + c] = true
+                }
+            }
+            for (cell in taken.indices) {
+                if (p == pageIndex && cell == targetCell) return if (taken[cell]) null else index
+                if (!taken[cell]) index++
+            }
+        }
+        return null
+    }
 
     private data class GridHit(
         val page: Page.Home, val frame: FrameLayout, val cell: Int,
@@ -1996,12 +2370,7 @@ class MainActivity : Activity() {
         val task = Runnable {
             pendingReorder = null; pendingReorderKey = null
             if (drag?.app?.key != d.app.key) return@Runnable
-            val order = currentOrder().toMutableList()
-            if (!order.remove(d.app.key)) return@Runnable
-            var index = order.indexOf(target.key)
-            if (index < 0) return@Runnable
-            if (after) index++
-            order.add(index.coerceIn(0, order.size), d.app.key)
+            val order = HomeGridOrder.moveAround(currentOrder(), d.app.key, target.key, after)
             if (order != previewOrder) {
                 previewOrder = order
                 rebuild()
@@ -2106,46 +2475,19 @@ class MainActivity : Activity() {
         val hit = gridHit(rawX, rawY)
         val targetApp = if (hit == null) null else hit.page.apps.getOrNull(hit.appIndex)?.first
         if (hit != null && hit.centered && targetApp != null && putIntoFolder(d, targetApp)) return
-        val pageIdx = pager.currentItem
-        val page = pages.getOrNull(pageIdx) as? Page.Home
-        val rv = pager.getChildAt(0) as? RecyclerView
-        val pageFrame = rv?.findViewHolderForAdapterPosition(pageIdx)?.itemView
-            ?.let { (it as? FrameLayout)?.getChildAt(0) }
-        if (page == null || pageFrame == null) {
+        val targetSlot = if (hit == null) null else slotIndexFor(pager.currentItem, hit.cell)
+        if (hit == null || targetSlot == null) {
             previewOrder = null
+            toast("Choose a free app space")
             rebuild(); return
         }
-        val loc = IntArray(2)
-        pageFrame.getLocationOnScreen(loc)
-        val rows = rowsPerPage()
-        val col = ((rawX - loc[0] - pageFrame.paddingLeft) / cellW()).toInt().coerceIn(0, cols - 1)
-        val row = ((rawY - loc[1] - pageFrame.paddingTop) / dp(CELL_H)).toInt().coerceIn(0, rows - 1)
-        val cell = row * cols + col
-
-        val dock = dockKeys().toMutableList()
-        if (d.fromDock) {
-            dock.remove(d.app.key)
-            saveDock(dock)
-        }
+        val order = currentOrder()
+        val moved = if (targetApp == null) HomeGridOrder.moveToEmpty(order, d.app.key, targetSlot)
+            else HomeGridOrder.moveAround(order, d.app.key, targetApp.key, hit.localX > cellW() / 2f)
+        if (d.fromDock) saveDock(dockKeys().filter { it != d.app.key })
         settings.hiddenApps = settings.hiddenApps - d.app.key
-
-        val order = currentOrder().toMutableList()
-        if (!order.contains(d.app.key)) order.add(d.app.key)
-        order.remove(d.app.key)
-        val others = page.apps.filter { it.first.key != d.app.key }
-        val target = others.filter { it.second >= cell }.minByOrNull { it.second }?.first?.key
-        val insertAt = when {
-            target != null -> order.indexOf(target)
-            others.isNotEmpty() -> order.indexOf(others.maxByOrNull { it.second }!!.first.key) + 1
-            else -> {
-                val before = pages.take(pageIdx).filterIsInstance<Page.Home>()
-                    .flatMap { it.apps }.map { it.first.key }.filter { it != d.app.key }
-                before.lastOrNull()?.let { order.indexOf(it) + 1 } ?: 0
-            }
-        }
-        order.add(insertAt.coerceIn(0, order.size), d.app.key)
         previewOrder = null
-        settings.order = order
+        settings.order = moved
         rebuild()
     }
 
@@ -2700,6 +3042,7 @@ class MainActivity : Activity() {
     private fun showHomeMenu(anchor: View) {
         val items = mutableListOf(
             MenuItem("Edit Home Screen") { enterEditMode() },
+            MenuItem("Add Widgets…") { showRestoreWidgetsMenu(anchor) },
             MenuItem("Apple Launcher Settings…") { openSettings() },
             MenuItem("Use Dark Glass Wallpaper") { applyGlassWallpaper() },
             MenuItem("Change Wallpaper…") {
