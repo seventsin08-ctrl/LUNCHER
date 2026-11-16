@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">Luncher</string>
-    <string name="settings_name">Luncher Settings</string>
-    <string name="accessibility_name">Luncher Gestures</string>
-    <string name="accessibility_description">Lets Luncher open Recents when you swipe up, lock the screen when you double-tap the Home Screen, and pull down notifications. Luncher does not read or collect anything on your screen.</string>
+    <string name="app_name">Apple Launcher</string>
+    <string name="settings_name">Apple Launcher Settings</string>
+    <string name="accessibility_name">Apple Launcher Gestures</string>
+    <string name="accessibility_description">Lets Apple Launcher open Recents when you swipe up, lock the screen when you double-tap the Home Screen, and pull down notifications. Apple Launcher does not read or collect anything on your screen.</string>
 </resources>

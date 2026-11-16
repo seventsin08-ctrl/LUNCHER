@@ -383,7 +383,7 @@ class MainActivity : Activity() {
         }
 
         defaultBanner = TextView(this).apply {
-            text = "Tap here to make Luncher your Home app"
+            text = "Tap here to make Apple Launcher your Home app"
             setTextColor(Color.WHITE)
             textSize = 14f
             gravity = Gravity.CENTER
@@ -1512,7 +1512,7 @@ class MainActivity : Activity() {
             }
         }
         if (items.isEmpty()) items += MenuItem("All widgets are on your Home Screen") {}
-        items += MenuItem("Luncher Settings…") { openSettings() }
+        items += MenuItem("Apple Launcher Settings…") { openSettings() }
         showContextMenu(anchor, items, lift = false)
     }
 
@@ -1739,7 +1739,7 @@ class MainActivity : Activity() {
 
     private fun askForGestureHelper(feature: String) {
         showContextMenu(null, listOf(
-            MenuItem("Turn on Luncher Gestures for $feature…") {
+            MenuItem("Turn on Apple Launcher Gestures for $feature…") {
                 runCatching { startActivity(Intent(SysSettings.ACTION_ACCESSIBILITY_SETTINGS)) }
             },
             MenuItem("Not Now") {}
@@ -1902,7 +1902,7 @@ class MainActivity : Activity() {
         when {
             !hasNotificationAccess() -> runCatching {
                 startActivity(Intent(SysSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                toast("Turn on Luncher to see music and badges")
+                toast("Turn on Apple Launcher to see music and badges")
             }
             mediaController != null -> {
                 val launch = packageManager.getLaunchIntentForPackage(mediaController!!.packageName)
@@ -2254,7 +2254,7 @@ class MainActivity : Activity() {
     private fun showHomeMenu(anchor: View) {
         val items = mutableListOf(
             MenuItem("Edit Home Screen") { enterEditMode() },
-            MenuItem("Luncher Settings…") { openSettings() },
+            MenuItem("Apple Launcher Settings…") { openSettings() },
             MenuItem("Use Dark Glass Wallpaper") { applyGlassWallpaper() },
             MenuItem("Change Wallpaper…") {
                 runCatching {

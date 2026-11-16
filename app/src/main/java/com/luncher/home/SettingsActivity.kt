@@ -193,10 +193,10 @@ class SettingsActivity : Activity() {
             info(
                 gest,
                 if (LuncherAccessibility.instance != null) "Gesture helper is on ✓"
-                else "Recents and Double-Tap to Lock need the Luncher Gestures helper."
+                else "Recents and Double-Tap to Lock need the Apple Launcher Gestures helper."
             )
             if (LuncherAccessibility.instance == null) {
-                button(gest, "Turn On Luncher Gestures…", 0xFF0A84FF.toInt()) {
+                button(gest, "Turn On Apple Launcher Gestures…", 0xFF0A84FF.toInt()) {
                     runCatching { startActivity(Intent(SysSettings.ACTION_ACCESSIBILITY_SETTINGS)) }
                 }
             }
@@ -205,7 +205,7 @@ class SettingsActivity : Activity() {
             info(
                 gest,
                 if (hasUsageAccess()) "App Switcher shows every app you recently used ✓"
-                else "App Switcher shows apps opened from Luncher. Allow usage access to include all recent apps."
+                else "App Switcher shows apps opened from Apple Launcher. Allow usage access to include all recent apps."
             )
             if (!hasUsageAccess()) {
                 button(gest, "Allow Usage Access…", 0xFF0A84FF.toInt()) {
@@ -220,7 +220,7 @@ class SettingsActivity : Activity() {
             runCatching { startActivity(Intent(SysSettings.ACTION_HOME_SETTINGS)) }
         }
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
-        info(about, "Luncher $version")
+        info(about, "Apple Launcher $version")
     }
 
     private fun refreshPreview() {

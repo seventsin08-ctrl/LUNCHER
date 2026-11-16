@@ -1,4 +1,4 @@
-# Luncher
+# Apple Launcher
 
 An Android home-screen launcher with an iPhone-style "dark clear glass" look:
 monochrome glass app icons, photo widgets, a live calendar widget, a live

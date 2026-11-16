@@ -36,7 +36,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Luncher (latest build)
+          name: Apple Launcher (latest build)
           target_commitish: ${{ github.sha }}
           make_latest: true
           files: Luncher.apk
