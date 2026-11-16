@@ -213,7 +213,9 @@ class MainActivity : Activity() {
         val source: View,
         val floating: ImageView,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val grabX: Float,
+        val grabY: Float
     )
 
     private data class HomeFolder(val id: String, val name: String, val keys: List<String>)
@@ -1740,6 +1742,10 @@ class MainActivity : Activity() {
         val bitmap = runCatching { source.drawToBitmap() }.getOrNull() ?: return
         val width = source.width.coerceAtLeast(1)
         val height = source.height.coerceAtLeast(1)
+        val sourceLoc = IntArray(2)
+        source.getLocationOnScreen(sourceLoc)
+        val grabX = (rawX - sourceLoc[0]).coerceIn(0f, width.toFloat())
+        val grabY = (rawY - sourceLoc[1]).coerceIn(0f, height.toFloat())
         val floating = ImageView(this).apply {
             setImageBitmap(bitmap)
             elevation = dp(14).toFloat()
@@ -1747,19 +1753,19 @@ class MainActivity : Activity() {
         }
         root.addView(floating, FrameLayout.LayoutParams(width, height))
         val off = rootOffset()
-        floating.x = rawX - off[0] - width / 2f
-        floating.y = rawY - off[1] - height / 2f
+        floating.x = rawX - off[0] - grabX
+        floating.y = rawY - off[1] - grabY
         source.alpha = 0.2f
         pager.isUserInputEnabled = false
         haptic(source)
-        widgetDrag = WidgetDragState(widget, page, source, floating, width, height)
+        widgetDrag = WidgetDragState(widget, page, source, floating, width, height, grabX, grabY)
     }
 
     private fun moveWidgetDrag(rawX: Float, rawY: Float) {
         val d = widgetDrag ?: return
         val off = rootOffset()
-        d.floating.x = rawX - off[0] - d.width / 2f
-        d.floating.y = rawY - off[1] - d.height / 2f
+        d.floating.x = rawX - off[0] - d.grabX
+        d.floating.y = rawY - off[1] - d.grabY
         updateDragEdge(rawX, rawY)
     }
 
@@ -1788,9 +1794,9 @@ class MainActivity : Activity() {
         val loc = IntArray(2)
         frame.getLocationOnScreen(loc)
         val w = d.widget
-        val col = ((rawX - loc[0] - frame.paddingLeft) / cellW() - w.w / 2f)
+        val col = ((rawX - loc[0] - frame.paddingLeft - d.grabX) / cellW())
             .roundToInt().coerceIn(0, (cols - w.w).coerceAtLeast(0))
-        val row = ((rawY - loc[1] - frame.paddingTop) / dp(CELL_H) - w.h / 2f)
+        val row = ((rawY - loc[1] - frame.paddingTop - d.grabY) / dp(CELL_H))
             .roundToInt().coerceIn(0, (rowsPerPage() - w.h).coerceAtLeast(0))
         val blocked = target.widgets.any { other ->
             widgetKey(targetPage, other) != widgetKey(d.page, w) &&
