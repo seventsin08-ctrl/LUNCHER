@@ -1556,6 +1556,7 @@ class MainActivity : Activity() {
         var moved = false
         var blocked = false
         handle.setOnTouchListener { view, event ->
+            android.util.Log.i("ResizeTrace", "event=${event.actionMasked} raw=${event.rawX},${event.rawY} widget=${w.id} preview=$previewW,$previewH")
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     cancelHomeHold()

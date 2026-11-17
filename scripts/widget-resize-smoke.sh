@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euxo pipefail
 package=com.luncher.home.preview3
 mkdir -p smoke-output
 trap 'adb logcat -d -s AndroidRuntime:E > smoke-output/android-runtime.log 2>/dev/null || true' EXIT
@@ -75,6 +75,10 @@ enter_edit
 read -r hx hy <<< "$(handle_point)"
 adb shell input swipe "$hx" "$hy" "$((hx+cell))" "$hy" 1500
 sleep 3
+adb logcat -d -s ResizeTrace:I > smoke-output/resize-trace.txt
+cat smoke-output/resize-trace.txt
+dump
+adb exec-out screencap -p > smoke-output/after-drag.png
 read_prefs
 assert_size 3 2
 adb exec-out screencap -p > smoke-output/expanded.png
