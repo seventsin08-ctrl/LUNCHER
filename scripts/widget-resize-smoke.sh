@@ -8,6 +8,8 @@ adb shell input keyevent 82 || true
 adb install -r app/build/outputs/apk/preview/app-preview.apk
 # Two disposable apps let the emulator exercise real uninstall confirmation without touching user apps.
 build_tools="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)"
+fixture_key="${RUNNER_TEMP:-/tmp}/launcher-ci-fixture.p12"
+keytool -genkeypair -keystore "$fixture_key" -storetype PKCS12 -storepass android -keypass android -alias fixture -dname 'CN=Disposable Test App' -keyalg RSA -validity 2 -noprompt
 for name in one two; do
   case "$name" in one) label='Fixture One';; two) label='Fixture Two';; esac
   mkdir -p "smoke-output/fixture-$name"
@@ -23,7 +25,7 @@ for name in one two; do
 XML
   "$build_tools/aapt" package -f -M "smoke-output/fixture-$name/AndroidManifest.xml" -I "$ANDROID_HOME/platforms/android-35/android.jar" -F "smoke-output/fixture-$name-unsigned.apk"
   "$build_tools/zipalign" -f 4 "smoke-output/fixture-$name-unsigned.apk" "smoke-output/fixture-$name-aligned.apk"
-  "$build_tools/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --ks-key-alias androiddebugkey --out "smoke-output/fixture-$name.apk" "smoke-output/fixture-$name-aligned.apk"
+  "$build_tools/apksigner" sign --ks "$fixture_key" --ks-pass pass:android --ks-key-alias fixture --out "smoke-output/fixture-$name.apk" "smoke-output/fixture-$name-aligned.apk"
   adb install -r "smoke-output/fixture-$name.apk"
 done
 adb shell am start -W -n "$package/com.luncher.home.MainActivity"
