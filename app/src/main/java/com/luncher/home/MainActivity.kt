@@ -102,6 +102,8 @@ class MainActivity : Activity() {
         private const val CELL_H = 94
         private const val PAGE_PAD = 14
         private const val MIN_PAGES = 3
+        private const val KEY_HOME_PAGES = "home_page_count"
+        private const val MAX_HOME_PAGES = 101
         private const val KEY_DOCK = "dock"
         private const val KEY_RECENT = "recent"
         private const val REQ_PHOTO = 4100
@@ -142,6 +144,7 @@ class MainActivity : Activity() {
     private val pagesAdapter = PagesAdapter()
 
     private var allApps: List<AppInfo> = emptyList()
+    private var appsReady = false
     private var pages: List<Page> = emptyList()
     private var searchResults: List<AppInfo> = emptyList()
 
@@ -173,6 +176,8 @@ class MainActivity : Activity() {
     private var editMode = false
     private val jiggles = ArrayList<ObjectAnimator>()
     private var drag: DragState? = null
+    private var dragGhost: ImageView? = null
+    private var activeFolderDialog: FolderDialog? = null
     private var widgetDrag: WidgetDragState? = null
     private var activeResizeHandle: Pair<View, View.OnTouchListener>? = null
     private var pendingHomeHold: Runnable? = null
@@ -321,11 +326,18 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         isActive = false
+        activeFolderDialog?.let { folder ->
+            if (folder.draggingMember) {
+                folder.draggingMember = false
+                folder.dismiss()
+            }
+        }
         if (activeResizeHandle != null) {
             activeResizeHandle = null
             refreshPages()
         }
         if (drag != null) cancelDrag()
+        clearDragGhost()
         if (widgetDrag != null) cancelWidgetDrag()
         cancelHomeHold()
         super.onPause()
@@ -626,6 +638,18 @@ class MainActivity : Activity() {
         editBar.addView(plus, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.START or Gravity.CENTER_VERTICAL).apply {
             marginStart = dp(16)
         })
+        val pageControls = TextView(this).apply {
+            text = "Pages"
+            contentDescription = "Manage home pages"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(dp(15), 0, dp(15), 0)
+            background = Glass.panel(this@MainActivity, 17f)
+            setOnClickListener { showPageMenu() }
+        }
+        pageControls.setOnTouchListener(pressEffect(pageControls, 0.9f))
+        editBar.addView(pageControls, FrameLayout.LayoutParams(WRAP_CONTENT, dp(34), Gravity.CENTER))
         val done = TextView(this).apply {
             text = "Done"
             setTextColor(Color.WHITE)
@@ -837,6 +861,7 @@ class MainActivity : Activity() {
             mainHandler.post {
                 if (!isDestroyed) {
                     allApps = apps
+                    appsReady = true
                     rebuild()
                     mainHandler.postDelayed({ entrancePending = false }, 1200)
                 }
@@ -1045,7 +1070,7 @@ class MainActivity : Activity() {
         var next = 0
         var page = 0
         val lastWidget = lastWidgetPage()
-        while (page < maxOf(MIN_PAGES, temporaryDragPageCount) || next < slots.size || page <= lastWidget) {
+        while (page < maxOf(minimumHomePages(), temporaryDragPageCount) || next < slots.size || page <= lastWidget) {
             val widgets = widgetsFor(page).filter { it.row + it.h <= rows && it.col + it.w <= cols && widgetVisible(page, it) }
             val taken = BooleanArray(rows * cols)
             for (w in widgets) {
@@ -2432,16 +2457,20 @@ class MainActivity : Activity() {
 
     private fun startDrag(app: AppInfo, fromDock: Boolean, source: View, rawX: Float, rawY: Float,
                           originFolderId: String? = null) {
+        if (drag != null) return
+        clearDragGhost()
         temporaryDragPageCount = 0
         previewOrder = currentOrder()
         val size = dp(iconDp)
         val floating = ImageView(this).apply {
             setImageBitmap(app.icon)
+            contentDescription = "Moving ${app.label}"
             outlineProvider = roundedOutline()
             clipToOutline = true
             elevation = dp(14).toFloat()
         }
         root.addView(floating, FrameLayout.LayoutParams(size, size))
+        dragGhost = floating
         val off = rootOffset()
         floating.x = rawX - off[0] - size / 2f
         floating.y = rawY - off[1] - size / 2f
@@ -2501,6 +2530,87 @@ class MainActivity : Activity() {
 
     private fun homePageCount() = pages.count { it is Page.Home }
 
+    private fun minimumHomePages() = prefs.getInt(KEY_HOME_PAGES, MIN_PAGES).coerceIn(1, MAX_HOME_PAGES)
+
+    private fun showPageMenu() {
+        AlertDialog.Builder(this).setTitle("Home pages")
+            .setItems(arrayOf("Add Page", "Remove This Page")) { _, index ->
+                if (index == 0) addHomePage() else confirmRemoveHomePage()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun addHomePage() {
+        val count = homePageCount()
+        if (count >= MAX_HOME_PAGES) { toast("Maximum number of pages reached"); return }
+        prefs.edit().putInt(KEY_HOME_PAGES, count + 1).apply()
+        rebuild()
+        pager.setCurrentItem(count, false)
+        toast("Page added")
+    }
+
+    private fun confirmRemoveHomePage() {
+        val page = pager.currentItem
+        if (pages.getOrNull(page) !is Page.Home) { toast("Choose a home page first"); return }
+        if (homePageCount() <= 1) { toast("Keep at least one home page"); return }
+        AlertDialog.Builder(this).setTitle("Remove this page?")
+            .setMessage("Apps and widgets will move to your other pages if there is enough room. Apps will not be uninstalled.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove page") { _, _ -> removeHomePage(page) }
+            .show()
+    }
+
+    /** Plan first, then persist all positions together so nothing is lost if a page won't fit. */
+    private fun removeHomePage(page: Int) {
+        if (!appsReady) { toast("Apps are still loading. Try again in a moment."); return }
+        val homePages = pages.filterIsInstance<Page.Home>()
+        if (page !in homePages.indices || homePages.size <= 1) return
+        val rows = rowsPerPage()
+        val snapshots = homePages.indices.flatMap { oldPage ->
+            widgetsFor(oldPage).map { widget -> Triple(oldPage, widget, widgetKey(oldPage, widget)) }
+        }
+        val widgets = snapshots.map { (oldPage, widget, key) ->
+            HomePageEditor.Widget(key, WidgetGrid.Placement(oldPage, widget.col, widget.row, widget.w, widget.h),
+                widgetVisible(oldPage, widget) && widget.col + widget.w <= cols && widget.row + widget.h <= rows)
+        }
+        val icons = homePages.flatMapIndexed { oldPage, home ->
+            home.apps.map { (app, cell) -> HomePageEditor.Icon(app.key, oldPage, cell) }
+        }
+        val plan = HomePageEditor.remove(homePages.size, page, cols, rows, widgets, icons)
+        if (plan == null) {
+            toast("Not enough room on the other pages. Move or remove some items first.")
+            return
+        }
+        val positions = widgetPositions()
+        // Old hidden or orphaned positions must not keep a removed page alive.
+        for (key in positions.keys().asSequence().toList()) {
+            val value = positions.optJSONObject(key) ?: continue
+            val oldPage = value.optInt("page", 0)
+            val shifted = when { oldPage < page -> oldPage; oldPage > page -> oldPage - 1; else -> page }
+            value.put("page", shifted.coerceIn(0, plan.pageCount - 1))
+        }
+        val added = additionalWidgetData()
+        for ((_, widget, key) in snapshots) {
+            val dest = plan.widgets[key] ?: return
+            if (widget.id.startsWith("extra_") || widget.id.startsWith("appwidget_")) {
+                val item = added.optJSONObject(widget.id) ?: return
+                item.put("page", dest.page).put("col", dest.col).put("row", dest.row)
+                    .put("w", dest.width).put("h", dest.height)
+            } else {
+                positions.put(key, JSONObject().put("page", dest.page).put("col", dest.col).put("row", dest.row)
+                    .put("w", dest.width).put("h", dest.height))
+            }
+        }
+        previewOrder = null
+        prefs.edit().putString("widget_positions", positions.toString())
+            .putString("additional_widgets", added.toString())
+            .putString("s_order", plan.order.joinToString("|"))
+            .putInt(KEY_HOME_PAGES, plan.pageCount)
+            .putInt("s_version", settings.version + 1).apply()
+        rebuild()
+        pager.setCurrentItem(page.coerceAtMost(plan.pageCount - 1), false)
+        toast("Page removed; its apps and widgets were moved")
+    }
+
     private fun overDock(rawX: Float, rawY: Float): Boolean {
         val loc = IntArray(2)
         dockRow.getLocationOnScreen(loc)
@@ -2532,10 +2642,19 @@ class MainActivity : Activity() {
         edgeDir = 0
         mainHandler.removeCallbacks(edgeFlip)
         pager.isUserInputEnabled = true
+        d.source.animate().cancel()
         d.source.alpha = 1f
-        d.floating.animate().scaleX(1f).scaleY(1f).alpha(0f).setDuration(dur(160))
-            .withEndAction { root.removeView(d.floating) }.start()
+        clearDragGhost()
         haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+
+    /** Remove the drag image immediately even if an animation or touch is cancelled. */
+    private fun clearDragGhost() {
+        dragGhost?.let { ghost ->
+            ghost.animate().cancel()
+            if (::root.isInitialized) root.removeView(ghost)
+        }
+        dragGhost = null
     }
 
     private fun dropIntoDock(d: DragState, rawX: Float) {
@@ -2860,6 +2979,7 @@ class MainActivity : Activity() {
             (resources.displayMetrics.heightPixels * 0.55f).toInt())
         panel.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT, gridHeight))
         val dialog = folderDialog(panel)
+        activeFolderDialog = dialog
         grid.adapter = FolderGridAdapter(members, onTap = { member, _ ->
             dialog.dismiss()
             launch(member, null)
@@ -2875,6 +2995,7 @@ class MainActivity : Activity() {
             dialog.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         })
         dialog.setOnDismissListener {
+            if (activeFolderDialog === dialog) activeFolderDialog = null
             if (dialog.draggingMember) {
                 dialog.draggingMember = false
                 cancelDrag()
@@ -2905,8 +3026,7 @@ class MainActivity : Activity() {
     }
 
     private fun showFolderAppPicker(folderId: String) {
-        val group = folders().firstOrNull { it.id == folderId } ?: return
-        val selected = group.keys.toMutableSet()
+        if (folders().none { it.id == folderId }) return
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = Glass.folder(this@MainActivity, 30f)
@@ -2948,20 +3068,16 @@ class MainActivity : Activity() {
         panel.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT,
             (resources.displayMetrics.heightPixels * 0.54f).toInt().coerceAtLeast(dp(160))))
         val dialog = folderDialog(panel, 0.92f)
-        val adapter = FolderGridAdapter(allApps, selected, onTap = { selectedApp, _ ->
-            if (selectedApp.key !in selected) {
-                addAppToFolder(folderId, selectedApp.key)
-                selected.add(selectedApp.key)
-                grid.adapter?.notifyDataSetChanged()
+        lateinit var adapter: FolderGridAdapter
+        adapter = FolderGridAdapter(availableFolderApps(""), onTap = { selectedApp, _ ->
+            if (addAppToFolder(folderId, selectedApp.key)) {
+                adapter.replaceApps(availableFolderApps(search.text?.toString().orEmpty()))
                 toast("Added ${selectedApp.label}")
             }
         })
         grid.adapter = adapter
         search.addTextChangedListener { text ->
-            val query = text?.toString()?.trim().orEmpty()
-            adapter.replaceApps(if (query.isEmpty()) allApps else allApps.filter {
-                it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true)
-            })
+            adapter.replaceApps(availableFolderApps(text?.toString().orEmpty()))
         }
         done.setOnClickListener {
             dialog.dismiss()
@@ -2970,16 +3086,27 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun addAppToFolder(folderId: String, key: String) {
+    private fun availableFolderApps(queryText: String): List<AppInfo> {
+        val grouped = folders().flatMap { it.keys }.toSet()
+        val available = FolderMembership.available(allApps.map { it.key }, grouped).toSet()
+        val query = queryText.trim()
+        return allApps.filter { it.key in available && (query.isEmpty() ||
+            it.label.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true)) }
+    }
+
+    private fun addAppToFolder(folderId: String, key: String): Boolean {
         val groups = folders()
-        val group = groups.firstOrNull { it.id == folderId } ?: return
+        val group = groups.firstOrNull { it.id == folderId } ?: return false
+        if (groups.any { existing -> existing.keys.any { it.substringBefore('/') == key.substringBefore('/') } }) return false
         val members = FolderMembership.add(group.keys, key, allApps.map { it.key }.toSet())
-        if (members == group.keys) return
+        if (members == group.keys) return false
         saveFolders(groups.map { if (it.id == folderId) it.copy(keys = members) else it })
+        if (key in dockKeys()) saveDock(dockKeys().filter { it != key })
         settings.hiddenApps = settings.hiddenApps - key
         previewOrder = null
         settings.order = currentOrder().filter { it != key }
         rebuild()
+        return true
     }
 
     private fun renameFolder(app: AppInfo) {
@@ -3633,6 +3760,7 @@ class MainActivity : Activity() {
         val items = mutableListOf(
             MenuItem("Edit Home Screen") { enterEditMode() },
             MenuItem("Add Widgets…") { showRestoreWidgetsMenu(anchor) },
+            MenuItem("Manage Pages…") { showPageMenu() },
             MenuItem("Apple Launcher Settings…") { openSettings() },
             MenuItem("Use Dark Glass Wallpaper") { applyGlassWallpaper() },
             MenuItem("Change Wallpaper…") {
