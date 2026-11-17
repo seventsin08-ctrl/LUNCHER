@@ -94,13 +94,26 @@ class SettingsActivity : Activity() {
         }
         addRow(look, previewRow!!, pad = true)
         refreshPreview()
+        segment(look, "Theme Presets", LauncherThemes.presets.map { it.id to it.label },
+            LauncherThemes.matching(s.iconStyle, s.tint, s.glass, s.tintPanels).orEmpty()) { id ->
+            val preset = LauncherThemes.presets.firstOrNull { it.id == id }
+            if (preset != null) {
+                s.iconStyle = preset.iconStyle
+                s.tint = preset.tint
+                s.glass = preset.glass
+                s.tintPanels = preset.tintPanels
+                rebuild()
+            }
+        }
         segment(look, "Icon Style", listOf(
             "clear" to "Glass", "tinted" to "Tinted", "dark" to "Dark", "light" to "Light", "color" to "Color"
-        ), s.iconStyle) { s.iconStyle = it; refreshPreview() }
+        ), s.iconStyle) { s.iconStyle = it; rebuild() }
+        segment(look, "More Icon Styles", listOf("mono" to "Monochrome", "frost" to "Frosted"),
+            s.iconStyle) { s.iconStyle = it; rebuild() }
         info(look, "Glass gives icons a clear look. Color shows the original app icons.")
-        swatches(look, "Accent Color", s.tint) { s.tint = it; refreshPreview() }
-        toggle(look, "Glass Effect", "See-through folders, widgets and dock", s.glass) { s.glass = it }
-        toggle(look, "Tint Widgets & Dock", "Use the accent color on glass panels", s.tintPanels) { s.tintPanels = it }
+        swatches(look, "Accent Color", s.tint) { s.tint = it; rebuild() }
+        toggle(look, "Glass Effect", "See-through folders, widgets and dock", s.glass) { s.glass = it; rebuild() }
+        toggle(look, "Tint Widgets & Dock", "Use the accent color on glass panels", s.tintPanels) { s.tintPanels = it; rebuild() }
         slider(look, "Wallpaper Dimming", 0, 80, s.dim, { "$it%" }) { s.dim = it }
         button(look, "Restore Glass Look", 0xFF0A84FF.toInt()) {
             s.iconStyle = "clear"

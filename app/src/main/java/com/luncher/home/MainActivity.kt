@@ -919,6 +919,7 @@ class MainActivity : Activity() {
         if (w.type == WidgetType.APPWIDGET) return true
         val typeKey = when (w.type) {
             WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> "ICONS"
+            WidgetType.PHOTO_WIDE -> "PHOTO"
             else -> w.type.name
         }
         return settings.widgetEnabled(typeKey) && widgetKey(page, w) !in settings.hiddenWidgets
@@ -1471,7 +1472,62 @@ class MainActivity : Activity() {
             WidgetType.MUSIC ->
                 widgetFrame(musicWidget(), "Now Playing", { musicTapped(it) }, null, remove)
             WidgetType.APPWIDGET -> buildAppWidget(w, remove)
+            WidgetType.DIGITAL_CLOCK ->
+                widgetFrame(MoreWidgets.digitalClock(this, false), "Digital Clock",
+                    { openIntent(Intent(AlarmClock.ACTION_SHOW_ALARMS), it) }, null, remove)
+            WidgetType.WIDE_CLOCK ->
+                widgetFrame(MoreWidgets.digitalClock(this, true), "Wide Clock",
+                    { openIntent(Intent(AlarmClock.ACTION_SHOW_ALARMS), it) }, null, remove)
+            WidgetType.WORLD_CLOCK ->
+                widgetFrame(MoreWidgets.worldClocks(this, WorldClockZones.resolve(prefs.getString("world_zones_${w.id}", null))),
+                    "World Clock", { editWorldClock(w.id) }, null, remove)
+            WidgetType.DATE_CARD ->
+                widgetFrame(MoreWidgets.dateCard(this), "Date", { openCalendar(it) }, null, remove)
+            WidgetType.QUOTE ->
+                widgetFrame(MoreWidgets.quoteCard(this, prefs.getString("quote_${w.id}", null) ?: "One day at a time."),
+                    "Quote", { editQuote(w.id) }, null, remove)
+            WidgetType.PHOTO_WIDE ->
+                widgetFrame(photoWidget(w.id), "Wide Photo", { v -> photoTapped(w.id, v) }, { v -> showPhotoMenu(w.id, v) }, remove)
         }
+    }
+
+    private fun editQuote(id: String) {
+        val input = EditText(this).apply {
+            setText(prefs.getString("quote_$id", null) ?: "One day at a time.")
+            filters = arrayOf(android.text.InputFilter.LengthFilter(140))
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this).setTitle("Edit quote").setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text.toString().trim().ifEmpty { "One day at a time." }
+                prefs.edit().putString("quote_$id", value).apply()
+                refreshPages()
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun editWorldClock(id: String) {
+        val cities = WorldClockZones.choices
+        val saved = WorldClockZones.resolve(prefs.getString("world_zones_$id", null))
+            .map { it.zoneId }.toSet()
+        val selected = BooleanArray(cities.size) { cities[it].zoneId in saved }
+        AlertDialog.Builder(this).setTitle("Choose up to four cities")
+            .setMultiChoiceItems(cities.map { it.label }.toTypedArray(), selected) { dialog, which, checked ->
+                selected[which] = checked
+                if (checked && selected.count { it } > 4) {
+                    selected[which] = false
+                    (dialog as AlertDialog).listView.setItemChecked(which, false)
+                    toast("Choose up to four cities")
+                } else if (!checked && selected.none { it }) {
+                    selected[which] = true
+                    (dialog as AlertDialog).listView.setItemChecked(which, true)
+                    toast("Choose at least one city")
+                }
+            }
+            .setPositiveButton("Save") { _, _ ->
+                val ids = cities.filterIndexed { index, _ -> selected[index] }.joinToString("|") { it.zoneId }
+                prefs.edit().putString("world_zones_$id", ids).apply()
+                refreshPages()
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun buildAppWidget(w: PlacedWidget, remove: () -> Unit): View {
@@ -1806,9 +1862,13 @@ class MainActivity : Activity() {
                 w.id.removePrefix("appwidget_").toIntOrNull()?.let { id ->
                     runCatching { appWidgetHost.deleteAppWidgetId(id) }
                 }
-            } else if (w.type == WidgetType.PHOTO) {
+            } else if (w.type == WidgetType.PHOTO || w.type == WidgetType.PHOTO_WIDE) {
                 prefs.edit().remove("photo_${w.id}").remove("photo_bw_${w.id}").apply()
                 photoCache.remove(w.id)
+            } else if (w.type == WidgetType.QUOTE) {
+                prefs.edit().remove("quote_${w.id}").apply()
+            } else if (w.type == WidgetType.WORLD_CLOCK) {
+                prefs.edit().remove("world_zones_${w.id}").apply()
             }
             rebuild()
             return
@@ -1821,9 +1881,15 @@ class MainActivity : Activity() {
         val items = mutableListOf<Pair<String, () -> Unit>>()
         items += "Widgets from installed apps" to { showInstalledWidgets() }
         items += "Photo" to { addBuiltInWidget(WidgetType.PHOTO) }
+        items += "Wide Photo" to { addBuiltInWidget(WidgetType.PHOTO_WIDE) }
         items += "Clock" to { addBuiltInWidget(WidgetType.CLOCK_ICON) }
+        items += "Digital Clock" to { addBuiltInWidget(WidgetType.DIGITAL_CLOCK) }
+        items += "Wide Digital Clock" to { addBuiltInWidget(WidgetType.WIDE_CLOCK) }
+        items += "World Clock" to { addBuiltInWidget(WidgetType.WORLD_CLOCK) }
         items += "Calendar icon" to { addBuiltInWidget(WidgetType.CALENDAR_ICON) }
         items += "Calendar" to { addBuiltInWidget(WidgetType.CALENDAR) }
+        items += "Date Card" to { addBuiltInWidget(WidgetType.DATE_CARD) }
+        items += "Editable Quote" to { addBuiltInWidget(WidgetType.QUOTE) }
         items += "Batteries" to { addBuiltInWidget(WidgetType.BATTERY) }
         items += "Now Playing" to { addBuiltInWidget(WidgetType.MUSIC) }
         val hidden = settings.hiddenWidgets.toList().sorted()
@@ -1882,11 +1948,16 @@ class MainActivity : Activity() {
     private fun addBuiltInWidget(type: WidgetType) {
         val width = when (type) {
             WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
-            WidgetType.CALENDAR, WidgetType.MUSIC -> cols
+            WidgetType.CALENDAR, WidgetType.MUSIC, WidgetType.PHOTO_WIDE,
+            WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK -> cols
             else -> (cols / 2).coerceAtLeast(1)
         }
         val height = if (type == WidgetType.CLOCK_ICON || type == WidgetType.CALENDAR_ICON) 1 else 2
-        val typeKey = if (type == WidgetType.CLOCK_ICON || type == WidgetType.CALENDAR_ICON) "ICONS" else type.name
+        val typeKey = when (type) {
+            WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> "ICONS"
+            WidgetType.PHOTO_WIDE -> "PHOTO"
+            else -> type.name
+        }
         settings.setWidgetEnabled(typeKey, true)
         val place = findWidgetSpace(width, height)
         if (place == null) { toast("There is not enough room for this widget"); return }

@@ -137,6 +137,8 @@ class CalendarIconView(ctx: Context) : View(ctx) {
         canvas.translate((width - s) / 2f, (height - s) / 2f)
         IconFactory.drawTile(canvas, s, s)
         val today = LocalDate.now()
+        date.color = if (IconFactory.style == "light" || IconFactory.style == "frost")
+            0xFF262628.toInt() else 0xFFF2F2F2.toInt()
         day.textSize = s * 0.19f
         canvas.drawText(
             today.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()),

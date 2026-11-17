@@ -22,6 +22,8 @@ import android.os.Build
  *  dark   – dark tile, original colored glyph
  *  light  – frosted white tile, dark glyph
  *  color  – the app's original icon in a rounded square
+ *  mono   – dark monochrome tile with a light glyph
+ *  frost  – softly tinted pale tile with a dark glyph
  */
 object IconFactory {
 
@@ -38,6 +40,9 @@ object IconFactory {
         val rect = RectF(0f, 0f, w, h)
         val colors = when (style) {
             "tinted" -> intArrayOf(blend(tint, Color.BLACK, 0.72f), blend(tint, Color.BLACK, 0.86f), 0xFF0E0E10.toInt())
+            "mono" -> intArrayOf(0xFF29292C.toInt(), 0xFF151517.toInt(), 0xFF080809.toInt())
+            "frost" -> intArrayOf(blend(tint, 0xFFF9F7F4.toInt(), 0.75f),
+                blend(tint, 0xFFE7E4DF.toInt(), 0.65f), blend(tint, 0xFFD4D0CA.toInt(), 0.55f))
             "dark", "color" -> intArrayOf(0xFF3A3A3E.toInt(), 0xFF242427.toInt(), 0xFF161618.toInt())
             "light" -> intArrayOf(0xF0F7F7F9.toInt(), 0xE6E6E6EA.toInt(), 0xE0D2D2D8.toInt())
             else -> intArrayOf(0x9C77777E.toInt(), 0x7A45454B, 0xA61E1E22.toInt())
@@ -52,7 +57,7 @@ object IconFactory {
 
     fun drawGloss(c: Canvas, w: Float, h: Float, style: String) {
         val r = minOf(w, h) * CORNER
-        val strong = style == "clear" || style == "light"
+        val strong = style == "clear" || style == "light" || style == "frost"
         val gloss = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
                 0f, 0f, 0f, h * 0.5f,
@@ -103,7 +108,8 @@ object IconFactory {
         val g = Canvas(glyph)
         val monoColor: Int? = when (style) {
             "tinted" -> blend(tint, Color.WHITE, 0.15f)
-            "light" -> 0xFF2C2C2E.toInt()
+            "light", "frost" -> 0xFF2C2C2E.toInt()
+            "mono" -> 0xFFF5F5F5.toInt()
             "dark" -> null
             else -> 0xFFF5F5F5.toInt()
         }
@@ -139,7 +145,7 @@ object IconFactory {
 
         val filter: ColorMatrixColorFilter? = if (usedMono) null else when (style) {
             "tinted" -> tintFilter(tint)
-            "light" -> darkGlyph()
+            "light", "frost" -> darkGlyph()
             "dark" -> null
             else -> grayscale(1.2f)
         }

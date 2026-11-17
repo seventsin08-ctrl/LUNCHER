@@ -11,7 +11,7 @@ class Settings(ctx: Context) {
     val version: Int get() = p.getInt("s_version", 0)
 
     // ---- Appearance
-    /** clear | tinted | dark | light | color */
+    /** clear | tinted | dark | light | color | mono | frost */
     var iconStyle: String
         get() = p.getString("s_icon_style", "clear") ?: "clear"
         set(v) = put("s_icon_style", v)
