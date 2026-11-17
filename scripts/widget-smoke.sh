@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euxo pipefail
 package=com.luncher.home.preview3
 mkdir -p smoke-output
+trap 'adb logcat -d -s AndroidRuntime:E > smoke-output/android-runtime.log 2>/dev/null || true' EXIT
 adb shell input keyevent KEYCODE_WAKEUP || true
 adb shell input keyevent 82 || true
 adb install -r app/build/outputs/apk/preview/app-preview.apk
@@ -53,6 +54,7 @@ PY
 tap_item() {
   local point
   point="$(point_for "$1")"
+  echo "Tapping $1 at $point"
   adb shell input tap $point
   sleep 2
   dump
@@ -61,6 +63,8 @@ dump
 grep -qi 'WORLD CLOCK' smoke-output/current.xml
 grep -qi 'One day at a time' smoke-output/current.xml
 tap_item 'WORLD CLOCK'
+cp smoke-output/current.xml smoke-output/after-world.xml
+adb exec-out screencap -p > smoke-output/after-world.png
 grep -qi 'Choose up to four cities' smoke-output/current.xml
 adb exec-out screencap -p > smoke-output/world-clock-dialog.png
 tap_item 'Save'
