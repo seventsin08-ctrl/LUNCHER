@@ -178,6 +178,8 @@ class MainActivity : Activity() {
     private var holdX = 0f
     private var holdY = 0f
     private var previewOrder: List<String>? = null
+    /** A blank page exists only for this drag until an item is dropped on it. */
+    private var temporaryDragPageCount = 0
     private var folderHoverView: View? = null
     private var pendingReorder: Runnable? = null
     private var pendingReorderKey: String? = null
@@ -1022,7 +1024,7 @@ class MainActivity : Activity() {
         var next = 0
         var page = 0
         val lastWidget = lastWidgetPage()
-        while (page < MIN_PAGES || next < slots.size || page <= lastWidget) {
+        while (page < maxOf(MIN_PAGES, temporaryDragPageCount) || next < slots.size || page <= lastWidget) {
             val widgets = widgetsFor(page).filter { it.row + it.h <= rows && it.col + it.w <= cols && widgetVisible(page, it) }
             val taken = BooleanArray(rows * cols)
             for (w in widgets) {
@@ -2094,6 +2096,7 @@ class MainActivity : Activity() {
 
     private fun startWidgetDrag(widget: PlacedWidget, page: Int, source: View, rawX: Float, rawY: Float) {
         val bitmap = runCatching { source.drawToBitmap() }.getOrNull() ?: return
+        temporaryDragPageCount = 0
         val width = source.width.coerceAtLeast(1)
         val height = source.height.coerceAtLeast(1)
         val sourceLoc = IntArray(2)
@@ -2125,6 +2128,7 @@ class MainActivity : Activity() {
 
     private fun finishWidgetDrag(d: WidgetDragState) {
         widgetDrag = null
+        temporaryDragPageCount = 0
         edgeDir = 0
         mainHandler.removeCallbacks(edgeFlip)
         pager.isUserInputEnabled = true
@@ -2143,14 +2147,15 @@ class MainActivity : Activity() {
         val targetPage = pager.currentItem
         val target = pages.getOrNull(targetPage) as? Page.Home
         val frame = currentPageFrame()
+        val onNewPage = temporaryDragPageCount > 0 && targetPage == temporaryDragPageCount - 1
         finishWidgetDrag(d)
-        if (target == null || frame == null || overDock(rawX, rawY)) { rebuild(); return }
+        if (target == null || (frame == null && !onNewPage) || overDock(rawX, rawY)) { rebuild(); return }
         val loc = IntArray(2)
-        frame.getLocationOnScreen(loc)
+        if (frame != null) frame.getLocationOnScreen(loc) else pager.getLocationOnScreen(loc)
         val w = d.widget
-        val col = ((rawX - loc[0] - frame.paddingLeft - d.grabX) / cellW())
+        val col = ((rawX - loc[0] - (frame?.paddingLeft ?: dp(PAGE_PAD)) - d.grabX) / cellW())
             .roundToInt().coerceIn(0, (cols - w.w).coerceAtLeast(0))
-        val row = ((rawY - loc[1] - frame.paddingTop - d.grabY) / dp(CELL_H))
+        val row = ((rawY - loc[1] - (frame?.paddingTop ?: dp(6)) - d.grabY) / dp(CELL_H))
             .roundToInt().coerceIn(0, (rowsPerPage() - w.h).coerceAtLeast(0))
         val occupied = target.widgets.filter { widgetKey(targetPage, it) != widgetKey(d.page, w) }
             .map { WidgetGrid.Placement(targetPage, it.col, it.row, it.w, it.h) }
@@ -2170,6 +2175,7 @@ class MainActivity : Activity() {
     }
 
     private fun startDrag(app: AppInfo, fromDock: Boolean, source: View, rawX: Float, rawY: Float) {
+        temporaryDragPageCount = 0
         previewOrder = currentOrder()
         val size = dp(iconDp)
         val floating = ImageView(this).apply {
@@ -2219,11 +2225,20 @@ class MainActivity : Activity() {
 
     private fun flipPageDuringDrag() {
         if ((drag == null && widgetDrag == null) || edgeDir == 0) return
-        val target = (pager.currentItem + edgeDir).coerceIn(0, homePageCount() - 1)
-        if (target != pager.currentItem) {
-            pager.setCurrentItem(target, anim > 0f)
+        val target = PageDragNavigation.next(pager.currentItem, homePageCount(), edgeDir,
+            temporaryDragPageCount > 0) ?: return
+        cancelPendingReorder()
+        highlightFolderTarget(null)
+        if (target.createPage) {
+            temporaryDragPageCount = target.page + 1
+            rebuild()
+            // Select it immediately so a quick release still drops on the new page.
+            pager.setCurrentItem(target.page, false)
             haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+            return // Do not create many pages while the finger stays at the edge.
         }
+        pager.setCurrentItem(target.page, anim > 0f)
+        haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
         mainHandler.postDelayed(edgeFlip, 900)
     }
 
@@ -2238,8 +2253,9 @@ class MainActivity : Activity() {
 
     private fun endDrag(rawX: Float, rawY: Float) {
         val d = drag ?: return
+        val onNewPage = temporaryDragPageCount > 0 && pager.currentItem == temporaryDragPageCount - 1
         finishDragVisuals(d)
-        if (overDock(rawX, rawY)) dropIntoDock(d, rawX) else dropOnHome(d, rawX, rawY)
+        if (overDock(rawX, rawY)) dropIntoDock(d, rawX) else dropOnHome(d, rawX, rawY, onNewPage)
     }
 
     private fun cancelDrag() {
@@ -2251,6 +2267,7 @@ class MainActivity : Activity() {
 
     private fun finishDragVisuals(d: DragState) {
         drag = null
+        temporaryDragPageCount = 0
         cancelPendingReorder()
         highlightFolderTarget(null)
         edgeDir = 0
@@ -2321,14 +2338,18 @@ class MainActivity : Activity() {
         val appIndex: Int, val centered: Boolean, val localX: Float
     )
 
-    private fun gridHit(rawX: Float, rawY: Float): GridHit? {
+    private fun gridHit(rawX: Float, rawY: Float, allowEdgeDrop: Boolean = false): GridHit? {
         val page = pages.getOrNull(pager.currentItem) as? Page.Home ?: return null
         val frame = currentPageFrame() ?: return null
         val loc = IntArray(2)
         frame.getLocationOnScreen(loc)
-        val x = rawX - loc[0] - frame.paddingLeft
+        var x = rawX - loc[0] - frame.paddingLeft
         val y = rawY - loc[1] - frame.paddingTop
-        if (x < 0 || y < 0 || x >= cellW() * cols || y >= dp(CELL_H) * rowsPerPage()) return null
+        val gridWidth = cellW() * cols
+        if (allowEdgeDrop && x >= -dp(28) && x < gridWidth + dp(28)) {
+            x = x.coerceIn(0f, (gridWidth - 1).toFloat())
+        }
+        if (x < 0 || y < 0 || x >= gridWidth || y >= dp(CELL_H) * rowsPerPage()) return null
         val col = (x / cellW()).toInt()
         val row = (y / dp(CELL_H)).toInt()
         val cell = row * cols + col
@@ -2698,24 +2719,39 @@ class MainActivity : Activity() {
         rebuild()
     }
 
-    private fun dropOnHome(d: DragState, rawX: Float, rawY: Float) {
-        val hit = gridHit(rawX, rawY)
+    private fun dropOnHome(d: DragState, rawX: Float, rawY: Float, onNewPage: Boolean = false) {
+        val hit = gridHit(rawX, rawY, allowEdgeDrop = onNewPage)
         val targetApp = if (hit == null) null else hit.page.apps.getOrNull(hit.appIndex)?.first
         if (hit != null && hit.centered && targetApp != null && putIntoFolder(d, targetApp)) return
-        val targetSlot = if (hit == null) null else slotIndexFor(pager.currentItem, hit.cell)
-        if (hit == null || targetSlot == null) {
+        // The new page can still be laying out when the finger is released.
+        val cell = hit?.cell ?: if (onNewPage) newPageCellAt(rawX, rawY) else null
+        val targetSlot = cell?.let { slotIndexFor(pager.currentItem, it) }
+        if (targetSlot == null) {
             previewOrder = null
             toast("Choose a free app space")
             rebuild(); return
         }
         val order = currentOrder()
         val moved = if (targetApp == null) HomeGridOrder.moveToEmpty(order, d.app.key, targetSlot)
-            else HomeGridOrder.moveAround(order, d.app.key, targetApp.key, hit.localX > cellW() / 2f)
+            else HomeGridOrder.moveAround(order, d.app.key, targetApp.key, hit!!.localX > cellW() / 2f)
         if (d.fromDock) saveDock(dockKeys().filter { it != d.app.key })
         settings.hiddenApps = settings.hiddenApps - d.app.key
         previewOrder = null
         settings.order = moved
         rebuild()
+    }
+
+    /** Resolve a drop even if ViewPager2 has not attached the newly added page yet. */
+    private fun newPageCellAt(rawX: Float, rawY: Float): Int? {
+        val loc = IntArray(2)
+        pager.getLocationOnScreen(loc)
+        val width = cellW() * cols
+        val x = rawX - loc[0] - dp(PAGE_PAD)
+        val y = rawY - loc[1] - dp(6)
+        if (x < -dp(28) || x >= width + dp(28) || y < 0 || y >= dp(CELL_H) * rowsPerPage()) return null
+        val col = (x.coerceIn(0f, (width - 1).toFloat()) / cellW()).toInt()
+        val row = (y / dp(CELL_H)).toInt()
+        return row * cols + col
     }
 
     // ================================================================ gestures

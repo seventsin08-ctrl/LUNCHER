@@ -25,4 +25,16 @@ class HomeGridOrderTest {
     @Test fun removesUnavailableAndDuplicateApps() {
         assertEquals(listOf("a", gap, "b"), HomeGridOrder.normalize(listOf("a", "gone", "a", gap), listOf("a", "b")))
     }
+
+    @Test fun placingAnAppOnANewPageKeepsOtherIconsAndThePageGap() {
+        val moved = HomeGridOrder.moveToEmpty(listOf("a", "b", "c"), "b", 8)
+        assertEquals(listOf("a", gap, "c", gap, gap, gap, gap, gap, "b"), moved)
+        assertEquals(moved, HomeGridOrder.normalize(moved, listOf("a", "b", "c")))
+    }
+
+    @Test fun anAppDraggedFromTheDockCanBePlacedOnANewPage() {
+        val moved = HomeGridOrder.moveToEmpty(listOf("a", "b"), "dockApp", 5)
+        assertEquals(listOf("a", "b", gap, gap, gap, "dockApp"), moved)
+        assertEquals(moved, HomeGridOrder.normalize(moved, listOf("a", "b", "dockApp")))
+    }
 }
