@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Update this number for every release; it also controls the installed app name.
+val launcherNumber = "5"
+
 android {
     namespace = "com.luncher.home"
     compileSdk = 35
@@ -11,14 +14,15 @@ android {
         applicationId = "com.luncher.home"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.8"
+        versionCode = 10
+        versionName = launcherNumber
     }
 
     buildTypes {
         create("preview") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".preview3"
+            resValue("string", "app_name", "Apple Launcher $launcherNumber")
             isDebuggable = true
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("debug")
