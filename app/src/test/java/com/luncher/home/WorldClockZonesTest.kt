@@ -18,6 +18,12 @@ class WorldClockZonesTest {
 
     @Test fun ignoresInvalidOrExtraCities() {
         assertEquals(4, WorldClockZones.resolve("bad").size)
-        assertEquals(4, WorldClockZones.resolve(WorldClockZones.choices.joinToString("|") { it.zoneId }).size)
+        assertEquals(4, WorldClockZones.resolve(WorldClockZones.choices.joinToString("|") { it.key }).size)
+    }
+
+    @Test fun citiesCanShareATimeZoneWithoutLosingTheirNames() {
+        val cities = WorldClockZones.resolve("America/New_York|city:miami")
+        assertEquals(listOf("New York", "Miami"), cities.map { it.label })
+        assertEquals(listOf("America/New_York", "America/New_York"), cities.map { it.zoneId })
     }
 }
