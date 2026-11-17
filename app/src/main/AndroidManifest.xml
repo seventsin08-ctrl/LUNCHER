@@ -74,6 +74,13 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Luncher.Settings" />
 
+        <activity
+            android:name=".ManageAppsActivity"
+            android:exported="false"
+            android:label="Manage apps"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Luncher.Settings" />
+
         <service
             android:name=".LuncherAccessibility"
             android:exported="true"

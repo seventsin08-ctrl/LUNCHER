@@ -81,6 +81,12 @@ class SettingsActivity : Activity() {
             setPadding(dp(4), dp(8), 0, dp(14))
         })
 
+        val apps = section("APPS")
+        button(apps, "Manage & uninstall apps…", 0xFF0A84FF.toInt()) {
+            startActivity(Intent(this, ManageAppsActivity::class.java))
+        }
+        info(apps, "Select apps by icon and use Android's confirmation to uninstall them.")
+
         // ---------------- Appearance
         val look = section("APPEARANCE")
         previewRow = LinearLayout(this).apply {
