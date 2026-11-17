@@ -163,7 +163,7 @@ class SettingsActivity : Activity() {
         button(home, "Reset Home Screen Layout", 0xFFFF453A.toInt()) {
             s.order = emptyList()
             s.hiddenWidgets = emptySet()
-            getSharedPreferences("luncher", MODE_PRIVATE).edit().remove("widget_positions").apply()
+            getSharedPreferences("luncher", MODE_PRIVATE).edit().remove("widget_positions").remove("home_page_count").apply()
             rebuild()
         }
 
