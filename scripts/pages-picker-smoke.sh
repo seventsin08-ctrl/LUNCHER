@@ -76,6 +76,10 @@ def walk(node, ancestors):
                 nums=list(map(int,re.findall(r'\d+',a.get('bounds',''))))
                 if len(nums)==4 and nums[2]>nums[0] and nums[3]>nums[1]:
                     print((nums[0]+nums[2])//2,(nums[1]+nums[3])//2); return True
+        # Android list-dialog rows handle taps in their parent ListView.
+        nums=list(map(int,re.findall(r'\d+',node.get('bounds',''))))
+        if len(nums)==4 and nums[2]>nums[0] and nums[3]>nums[1]:
+            print((nums[0]+nums[2])//2,(nums[1]+nums[3])//2); return True
     return any(walk(c,ancestors+[node]) for c in node)
 assert walk(root,[]), 'Clickable item not found: '+needle
 PY
