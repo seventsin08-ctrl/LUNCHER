@@ -71,12 +71,18 @@ tap_item 'Save'
 tap_item 'One day at a time'
 grep -qi 'Edit quote' smoke-output/current.xml
 adb exec-out screencap -p > smoke-output/quote-dialog.png
-adb shell input keyevent KEYCODE_BACK
-adb shell "run-as $package am start -W -n $package/com.luncher.home.SettingsActivity"
-sleep 3
+tap_item 'Cancel'
+adb shell input swipe 8 245 8 245 1000
+sleep 2
 dump
+grep -qi 'Apple Launcher Settings' smoke-output/current.xml
+tap_item 'Apple Launcher Settings'
 grep -qi 'Theme Presets' smoke-output/current.xml
 grep -qi 'Sage' smoke-output/current.xml
+tap_item 'Sage'
+adb shell "run-as $package cat shared_prefs/luncher.xml" > smoke-output/after-sage-prefs.xml
+grep -q 'name="s_icon_style">tinted' smoke-output/after-sage-prefs.xml
+grep -q 'name="s_tint_panels" value="true"' smoke-output/after-sage-prefs.xml
 adb exec-out screencap -p > smoke-output/settings.png
 adb logcat -d -s AndroidRuntime:E > smoke-output/android-runtime.log
 if grep -q 'FATAL EXCEPTION' smoke-output/android-runtime.log; then

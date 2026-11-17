@@ -1508,8 +1508,8 @@ class MainActivity : Activity() {
     private fun editWorldClock(id: String) {
         val cities = WorldClockZones.choices
         val saved = WorldClockZones.resolve(prefs.getString("world_zones_$id", null))
-            .map { it.zoneId }.toSet()
-        val selected = BooleanArray(cities.size) { cities[it].zoneId in saved }
+            .map { it.key }.toSet()
+        val selected = BooleanArray(cities.size) { cities[it].key in saved }
         AlertDialog.Builder(this).setTitle("Choose up to four cities")
             .setMultiChoiceItems(cities.map { it.label }.toTypedArray(), selected) { dialog, which, checked ->
                 selected[which] = checked
@@ -1524,7 +1524,7 @@ class MainActivity : Activity() {
                 }
             }
             .setPositiveButton("Save") { _, _ ->
-                val ids = cities.filterIndexed { index, _ -> selected[index] }.joinToString("|") { it.zoneId }
+                val ids = cities.filterIndexed { index, _ -> selected[index] }.joinToString("|") { it.key }
                 prefs.edit().putString("world_zones_$id", ids).apply()
                 refreshPages()
             }.setNegativeButton("Cancel", null).show()
