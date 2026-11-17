@@ -14,6 +14,14 @@ object WidgetGrid {
         }
     }
 
+    /** Resize from the top-left corner, rejecting overlaps and off-screen results. */
+    fun resize(current: Placement, width: Int, height: Int, minWidth: Int, minHeight: Int,
+               columns: Int, rows: Int, occupied: List<Placement>): Placement? {
+        if (width < minWidth || height < minHeight) return null
+        val candidate = current.copy(width = width, height = height)
+        return candidate.takeIf { fits(it, columns, rows, occupied) }
+    }
+
     fun firstFit(columns: Int, rows: Int, width: Int, height: Int,
                  pages: List<Int>, occupied: List<Placement>): Placement? {
         if (width <= 0 || height <= 0 || width > columns || height > rows) return null

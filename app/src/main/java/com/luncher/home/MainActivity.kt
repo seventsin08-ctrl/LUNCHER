@@ -896,9 +896,12 @@ class MainActivity : Activity() {
                 val stable = widget.copy(originPage = origin)
                 val saved = positions.optJSONObject(widgetKey(origin, stable))
                 val savedPage = saved?.optInt("page", origin)?.coerceIn(0, 100) ?: origin
+                val width = (saved?.optInt("w", widget.w) ?: widget.w).coerceIn(1, cols)
+                val height = (saved?.optInt("h", widget.h) ?: widget.h).coerceIn(1, rowsPerPage())
                 if (savedPage != page) null else stable.copy(
-                    col = (saved?.optInt("col", widget.col) ?: widget.col).coerceIn(0, (cols - widget.w).coerceAtLeast(0)),
-                    row = (saved?.optInt("row", widget.row) ?: widget.row).coerceIn(0, (rowsPerPage() - widget.h).coerceAtLeast(0))
+                    col = (saved?.optInt("col", widget.col) ?: widget.col).coerceIn(0, cols - width),
+                    row = (saved?.optInt("row", widget.row) ?: widget.row).coerceIn(0, rowsPerPage() - height),
+                    w = width, h = height
                 )
             }
         }
@@ -947,7 +950,7 @@ class MainActivity : Activity() {
                     added.optJSONObject(w.id)?.put("page", target.page)?.put("col", target.col)?.put("row", target.row)
                 } else {
                     builtInPositions.put(widgetKey(page, w), JSONObject().put("page", target.page)
-                        .put("col", target.col).put("row", target.row))
+                        .put("col", target.col).put("row", target.row).put("w", w.w).put("h", w.h))
                 }
                 changed = true
             }
@@ -1201,7 +1204,8 @@ class MainActivity : Activity() {
             setOnClickListener { if (editMode) exitEditMode() }
         }
         for (w in p.widgets) {
-            val v = buildWidget(w, pageIndex)
+            val built = buildWidget(w, pageIndex)
+            val v = if (editMode) withWidgetResizeHandle(built, w, pageIndex) else built
             val key = "layout:widget:${widgetKey(pageIndex, w)}"
             v.tag = key
             frame.addView(v, place(w.col, w.row, w.w, w.h))
@@ -1456,14 +1460,153 @@ class MainActivity : Activity() {
         return outer
     }
 
+    private data class WidgetResizeBounds(val minW: Int, val minH: Int, val maxW: Int, val maxH: Int)
+
+    /** Built-in widgets can resize on both axes; app widgets follow their provider's resize mode. */
+    private fun widgetResizeBounds(w: PlacedWidget): WidgetResizeBounds {
+        val maxW = (cols - w.col).coerceAtLeast(w.w)
+        val maxH = (rowsPerPage() - w.row).coerceAtLeast(w.h)
+        if (w.type == WidgetType.APPWIDGET) {
+            val id = w.id.removePrefix("appwidget_").toIntOrNull()
+            val info = id?.let { appWidgetManager.getAppWidgetInfo(it) }
+                ?: return WidgetResizeBounds(w.w, w.h, w.w, w.h)
+            val horizontal = info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
+            val vertical = info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+            val inset = ((cellW() - dp(iconDp)) / 2).coerceAtLeast(0)
+            val minWidthPx = (if (info.minResizeWidth > 0) info.minResizeWidth else info.minWidth) + inset * 2
+            val minHeightPx = (if (info.minResizeHeight > 0) info.minResizeHeight else info.minHeight) + dp(38)
+            val minW = ((minWidthPx + cellW() - 1) / cellW()).coerceIn(1, w.w)
+            val minH = ((minHeightPx + dp(CELL_H) - 1) / dp(CELL_H)).coerceIn(1, w.h)
+            return WidgetResizeBounds(if (horizontal) minW else w.w, if (vertical) minH else w.h,
+                if (horizontal) maxW else w.w, if (vertical) maxH else w.h)
+        }
+        val (minW, minH) = when (w.type) {
+            WidgetType.PHOTO, WidgetType.PHOTO_WIDE, WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1 to 1
+            WidgetType.BATTERY -> 1 to 2
+            else -> 2 to 2
+        }
+        return WidgetResizeBounds(minW.coerceAtMost(w.w), minH.coerceAtMost(w.h), maxW, maxH)
+    }
+
+    private fun widgetResizeCandidate(page: Int, w: PlacedWidget, width: Int, height: Int): WidgetGrid.Placement? {
+        val bounds = widgetResizeBounds(w)
+        if (width !in bounds.minW..bounds.maxW || height !in bounds.minH..bounds.maxH) return null
+        val occupied = widgetsFor(page).filter { widgetVisible(page, it) && widgetKey(page, it) != widgetKey(page, w) }
+            .map { WidgetGrid.Placement(page, it.col, it.row, it.w, it.h) }
+        return WidgetGrid.resize(WidgetGrid.Placement(page, w.col, w.row, w.w, w.h),
+            width, height, bounds.minW, bounds.minH, cols, rowsPerPage(), occupied)
+    }
+
+    private fun saveWidgetSize(page: Int, w: PlacedWidget, width: Int, height: Int) {
+        if (widgetResizeCandidate(page, w, width, height) == null) {
+            toast("There isn't room for that widget size")
+            rebuild()
+            return
+        }
+        if (w.id.startsWith("extra_") || w.id.startsWith("appwidget_")) {
+            saveAdditionalWidget(w.copy(w = width, h = height), page)
+        } else {
+            val positions = widgetPositions()
+            positions.put(widgetKey(page, w), JSONObject().put("page", page).put("col", w.col).put("row", w.row)
+                .put("w", width).put("h", height))
+            prefs.edit().putString("widget_positions", positions.toString()).apply()
+        }
+        rebuild()
+    }
+
+    private fun showWidgetSizeMenu(page: Int, w: PlacedWidget) {
+        val bounds = widgetResizeBounds(w)
+        val sizes = (bounds.minH..bounds.maxH).flatMap { h ->
+            (bounds.minW..bounds.maxW).mapNotNull { width -> widgetResizeCandidate(page, w, width, h) }
+        }
+        if (sizes.isEmpty()) { toast("There isn't room to resize this widget"); return }
+        val labels = sizes.map { "${it.width} × ${it.height}" +
+            if (it.width == w.w && it.height == w.h) "  ·  current" else "" }
+        AlertDialog.Builder(this).setTitle("Widget size · columns × rows")
+            .setItems(labels.toTypedArray()) { _, index ->
+                val selected = sizes[index]
+                if (selected.width != w.w || selected.height != w.h)
+                    saveWidgetSize(page, w, selected.width, selected.height)
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun withWidgetResizeHandle(content: View, w: PlacedWidget, page: Int): View {
+        val outer = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
+        outer.addView(content, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        val bounds = widgetResizeBounds(w)
+        if (bounds.minW == bounds.maxW && bounds.minH == bounds.maxH) return outer
+        val handle = TextView(this).apply {
+            text = "↘"
+            textSize = 22f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            contentDescription = "Resize widget. Drag the handle or tap for sizes."
+            background = Glass.circle(0xF0505055.toInt())
+            elevation = dp(6).toFloat()
+            setOnClickListener { showWidgetSizeMenu(page, w) }
+        }
+        outer.addView(handle, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.BOTTOM or Gravity.END).apply {
+            bottomMargin = dp(2); marginEnd = dp(2)
+        })
+        var startX = 0f
+        var startY = 0f
+        var previewW = w.w
+        var previewH = w.h
+        var moved = false
+        var blocked = false
+        handle.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    cancelHomeHold()
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
+                    startX = event.rawX; startY = event.rawY
+                    previewW = w.w; previewH = w.h; moved = false; blocked = false
+                    haptic(view, HapticFeedbackConstants.CONTEXT_CLICK)
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - startX
+                    val dy = event.rawY - startY
+                    if (hypot(dx, dy) > dp(10)) moved = true
+                    val width = (w.w + (dx / cellW()).roundToInt()).coerceIn(bounds.minW, bounds.maxW)
+                    val height = (w.h + (dy / dp(CELL_H)).roundToInt()).coerceIn(bounds.minH, bounds.maxH)
+                    if (widgetResizeCandidate(page, w, width, height) != null) {
+                        previewW = width; previewH = height; blocked = false
+                        outer.layoutParams = outer.layoutParams.apply { this.width = cellW() * width; this.height = dp(CELL_H) * height }
+                    } else blocked = true
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    if (!moved) view.performClick()
+                    else if (previewW != w.w || previewH != w.h) saveWidgetSize(page, w, previewW, previewH)
+                    else if (blocked) toast("Choose a space without another widget")
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    outer.layoutParams = outer.layoutParams.apply { width = cellW() * w.w; height = dp(CELL_H) * w.h }
+                    true
+                }
+                else -> true
+            }
+        }
+        return outer
+    }
+
     private fun buildWidget(w: PlacedWidget, page: Int): View {
         val remove = { hideWidget(page, w) }
         return when (w.type) {
             WidgetType.CLOCK_ICON ->
-                makeCell(AnalogClockView(this), "Clock", null,
+                if (w.w == 1 && w.h == 1) makeCell(AnalogClockView(this), "Clock", null,
+                    { openIntent(Intent(AlarmClock.ACTION_SHOW_ALARMS), it) }, null, remove)
+                else widgetFrame(AnalogClockView(this), "Clock",
                     { openIntent(Intent(AlarmClock.ACTION_SHOW_ALARMS), it) }, null, remove)
             WidgetType.CALENDAR_ICON ->
-                makeCell(CalendarIconView(this), "Calendar", null, { openCalendar(it) }, null, remove)
+                if (w.w == 1 && w.h == 1) makeCell(CalendarIconView(this), "Calendar", null,
+                    { openCalendar(it) }, null, remove)
+                else widgetFrame(CalendarIconView(this), "Calendar", { openCalendar(it) }, null, remove)
             WidgetType.PHOTO ->
                 widgetFrame(photoWidget(w.id), "Photo", { v -> photoTapped(w.id, v) }, { v -> showPhotoMenu(w.id, v) }, remove)
             WidgetType.CALENDAR ->
@@ -1939,7 +2082,8 @@ class MainActivity : Activity() {
             else findWidgetSpace(widget.w, widget.h)
         if (place == null) { toast("There is not enough room for this widget"); return }
         val positions = widgetPositions()
-        positions.put(key, JSONObject().put("page", place.page).put("col", place.col).put("row", place.row))
+        positions.put(key, JSONObject().put("page", place.page).put("col", place.col).put("row", place.row)
+            .put("w", widget.w).put("h", widget.h))
         prefs.edit().putString("widget_positions", positions.toString()).apply()
         settings.hiddenWidgets = settings.hiddenWidgets - key
         rebuild()
@@ -2239,7 +2383,8 @@ class MainActivity : Activity() {
                 saveAdditionalWidget(w.copy(col = col, row = row, originPage = targetPage), targetPage)
             } else {
                 val positions = widgetPositions()
-                positions.put(widgetKey(d.page, w), JSONObject().put("page", targetPage).put("col", col).put("row", row))
+                positions.put(widgetKey(d.page, w), JSONObject().put("page", targetPage).put("col", col).put("row", row)
+                    .put("w", w.w).put("h", w.h))
                 prefs.edit().putString("widget_positions", positions.toString()).apply()
             }
         }
