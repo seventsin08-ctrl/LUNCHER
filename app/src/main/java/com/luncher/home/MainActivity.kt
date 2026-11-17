@@ -561,7 +561,7 @@ class MainActivity : Activity() {
         })
 
         root.addView(content, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        buildEditBar()
+        buildEditBar(pillHolder)
         buildSearchOverlay()
         restylePersistent()
 
@@ -572,8 +572,6 @@ class MainActivity : Activity() {
             insetBottom = bars.bottom
             content.setPadding(0, bars.top, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
-            (editBar.layoutParams as FrameLayout.LayoutParams).topMargin = bars.top + dp(4)
-            editBar.requestLayout()
             insets
         }
 
@@ -630,7 +628,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun buildEditBar() {
+    private fun buildEditBar(host: FrameLayout) {
         editBar = FrameLayout(this).apply { visibility = View.GONE }
         val plus = TextView(this).apply {
             text = "＋"
@@ -670,7 +668,8 @@ class MainActivity : Activity() {
         editBar.addView(done, FrameLayout.LayoutParams(WRAP_CONTENT, dp(34), Gravity.END or Gravity.CENTER_VERTICAL).apply {
             marginEnd = dp(16)
         })
-        root.addView(editBar, FrameLayout.LayoutParams(MATCH_PARENT, dp(40), Gravity.TOP))
+        // The existing search strip gives edit controls their own space above the dock.
+        host.addView(editBar, FrameLayout.LayoutParams(MATCH_PARENT, dp(40), Gravity.CENTER))
     }
 
     private fun buildSearchOverlay() {
@@ -2021,6 +2020,11 @@ class MainActivity : Activity() {
         if (searchOverlay.visibility == View.VISIBLE) closeSearch(false)
         editMode = true
         haptic(root)
+        mainHandler.removeCallbacks(showSearchPill)
+        searchPill.animate().cancel()
+        dots.animate().cancel()
+        searchPill.visibility = View.GONE
+        dots.visibility = View.GONE
         editBar.visibility = View.VISIBLE
         editBar.alpha = 0f
         editBar.animate().alpha(1f).setDuration(dur(200)).start()
@@ -2033,7 +2037,11 @@ class MainActivity : Activity() {
     private fun exitEditMode() {
         if (!editMode) return
         editMode = false
-        editBar.animate().alpha(0f).setDuration(dur(180)).withEndAction { editBar.visibility = View.GONE }.start()
+        editBar.animate().cancel()
+        editBar.visibility = View.GONE
+        searchPill.visibility = View.VISIBLE
+        dots.visibility = View.VISIBLE
+        setPillMode(search = true)
         refreshPages()
         buildDock(dockApps())
     }
