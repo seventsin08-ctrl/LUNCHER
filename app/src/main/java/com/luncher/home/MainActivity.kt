@@ -1480,8 +1480,8 @@ class MainActivity : Activity() {
 
     /** Built-in widgets can resize on both axes; app widgets follow their provider's resize mode. */
     private fun widgetResizeBounds(w: PlacedWidget): WidgetResizeBounds {
-        val maxW = (cols - w.col).coerceAtLeast(w.w)
-        val maxH = (rowsPerPage() - w.row).coerceAtLeast(w.h)
+        var maxW = (cols - w.col).coerceAtLeast(w.w)
+        var maxH = (rowsPerPage() - w.row).coerceAtLeast(w.h)
         if (w.type == WidgetType.APPWIDGET) {
             val id = w.id.removePrefix("appwidget_").toIntOrNull()
             val info = id?.let { appWidgetManager.getAppWidgetInfo(it) }
@@ -1493,6 +1493,12 @@ class MainActivity : Activity() {
             val minHeightPx = (if (info.minResizeHeight > 0) info.minResizeHeight else info.minHeight) + dp(38)
             val minW = ((minWidthPx + cellW() - 1) / cellW()).coerceIn(1, w.w)
             val minH = ((minHeightPx + dp(CELL_H) - 1) / dp(CELL_H)).coerceIn(1, w.h)
+            if (Build.VERSION.SDK_INT >= 31) {
+                if (info.maxResizeWidth > 0)
+                    maxW = minOf(maxW, ((info.maxResizeWidth + inset * 2) / cellW()).coerceAtLeast(w.w))
+                if (info.maxResizeHeight > 0)
+                    maxH = minOf(maxH, ((info.maxResizeHeight + dp(38)) / dp(CELL_H)).coerceAtLeast(w.h))
+            }
             return WidgetResizeBounds(if (horizontal) minW else w.w, if (vertical) minH else w.h,
                 if (horizontal) maxW else w.w, if (vertical) maxH else w.h)
         }
@@ -1572,7 +1578,6 @@ class MainActivity : Activity() {
         var moved = false
         var blocked = false
         val resizeListener = View.OnTouchListener { view, event ->
-            android.util.Log.i("ResizeTrace", "event=${event.actionMasked} raw=${event.rawX},${event.rawY} widget=${w.id} preview=$previewW,$previewH")
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     cancelHomeHold()
