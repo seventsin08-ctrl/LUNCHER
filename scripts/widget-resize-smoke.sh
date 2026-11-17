@@ -10,7 +10,8 @@ adb install -r app/build/outputs/apk/preview/app-preview.apk
 build_tools="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)"
 for name in one two; do
   case "$name" in one) label='Fixture One';; two) label='Fixture Two';; esac
-  cat > "smoke-output/fixture-$name.xml" <<XML
+  mkdir -p "smoke-output/fixture-$name"
+  cat > "smoke-output/fixture-$name/AndroidManifest.xml" <<XML
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.launcherfixture.$name">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
   <application android:label="$label" android:icon="@android:drawable/sym_def_app_icon" android:hasCode="false">
@@ -20,7 +21,7 @@ for name in one two; do
   </application>
 </manifest>
 XML
-  "$build_tools/aapt" package -f -M "smoke-output/fixture-$name.xml" -I "$ANDROID_HOME/platforms/android-35/android.jar" -F "smoke-output/fixture-$name-unsigned.apk"
+  "$build_tools/aapt" package -f -M "smoke-output/fixture-$name/AndroidManifest.xml" -I "$ANDROID_HOME/platforms/android-35/android.jar" -F "smoke-output/fixture-$name-unsigned.apk"
   "$build_tools/zipalign" -f 4 "smoke-output/fixture-$name-unsigned.apk" "smoke-output/fixture-$name-aligned.apk"
   "$build_tools/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --ks-key-alias androiddebugkey --out "smoke-output/fixture-$name.apk" "smoke-output/fixture-$name-aligned.apk"
   adb install -r "smoke-output/fixture-$name.apk"
