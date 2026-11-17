@@ -377,6 +377,12 @@ class MainActivity : Activity() {
         menuLayer != null || switcher.isShowing || searchOverlay.visibility == View.VISIBLE
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // A new touch means an earlier drag lost its UP/CANCEL event; never leave its image stuck.
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN && (drag != null || widgetDrag != null)) {
+            if (drag != null) cancelDrag() else cancelWidgetDrag()
+        } else if (ev.actionMasked == MotionEvent.ACTION_DOWN && dragGhost != null) {
+            clearDragGhost()
+        }
         // Route the small resize handle before the page and app drag gestures see it.
         if (editMode && ev.actionMasked == MotionEvent.ACTION_DOWN) {
             activeResizeHandle = resizeHandleAt(ev.rawX, ev.rawY)
@@ -2894,6 +2900,11 @@ class MainActivity : Activity() {
             lastRawY = event.rawY
             if (draggingMember) {
                 when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        draggingMember = false
+                        cancelDrag()
+                        dismiss()
+                    }
                     MotionEvent.ACTION_MOVE -> {
                         if (hypot(event.rawX - dragStartX, event.rawY - dragStartY) > dp(8)) movedMember = true
                         moveDrag(event.rawX, event.rawY)
