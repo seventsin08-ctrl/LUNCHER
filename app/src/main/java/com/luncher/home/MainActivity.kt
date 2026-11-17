@@ -2546,11 +2546,146 @@ class MainActivity : Activity() {
 
     private fun minimumHomePages() = prefs.getInt(KEY_HOME_PAGES, MIN_PAGES).coerceIn(1, MAX_HOME_PAGES)
 
+    private class PageSheetAction(
+        val title: String,
+        val detail: String,
+        val symbol: String,
+        val destructive: Boolean = false,
+        val run: () -> Unit
+    )
+
+    private fun pageSheetBackground() = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(24).toFloat()
+        setColor(0xF526262B.toInt())
+        setStroke(maxOf(1, dp(0.7f)), 0x25FFFFFF)
+    }
+
+    /** A compact, bottom-aligned action sheet matching the launcher's dark glass style. */
+    private fun showPageSheet(title: String, subtitle: String, actions: List<PageSheetAction>) {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = pageSheetBackground()
+            outlineProvider = roundedOutline(24f)
+            clipToOutline = true
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(16))
+        }
+        header.addView(TextView(this).apply {
+            text = title
+            textSize = 20f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            maxLines = 2
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        header.addView(TextView(this).apply {
+            text = subtitle
+            textSize = 13f
+            setTextColor(0xFFB4B4BC.toInt())
+            setLineSpacing(dp(2).toFloat(), 1f)
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(5) })
+        card.addView(header)
+        actions.forEach { action ->
+            card.addView(View(this).apply { setBackgroundColor(0x24FFFFFF) },
+                LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(0.6f))).apply {
+                    marginStart = dp(20)
+                    marginEnd = dp(20)
+                })
+            val tint = if (action.destructive) 0xFFFF6961.toInt() else 0xFF64ADFF.toInt()
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(20), dp(10), dp(20), dp(10))
+                minimumHeight = dp(66)
+                isClickable = true
+                isFocusable = true
+                background = android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(0x22FFFFFF), null, null
+                )
+                setOnClickListener { dialog.dismiss(); action.run() }
+            }
+            row.addView(TextView(this).apply {
+                text = action.symbol
+                textSize = 22f
+                gravity = Gravity.CENTER
+                setTextColor(tint)
+                background = Glass.circle(if (action.destructive) 0x33FF6961 else 0x3364ADFF)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(14) })
+            val labels = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            labels.addView(TextView(this).apply {
+                text = action.title
+                textSize = 16f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(if (action.destructive) tint else Color.WHITE)
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            labels.addView(TextView(this).apply {
+                text = action.detail
+                textSize = 12f
+                setTextColor(0xFFB4B4BC.toInt())
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
+            row.addView(labels, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            row.addView(TextView(this).apply {
+                text = "›"
+                textSize = 24f
+                setTextColor(0xFF8E8E98.toInt())
+                gravity = Gravity.CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(18), dp(36)))
+            card.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+        sheet.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        val cancel = TextView(this).apply {
+            text = "Cancel"
+            textSize = 16f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setTextColor(0xFF64ADFF.toInt())
+            background = pageSheetBackground()
+            setOnClickListener { dialog.dismiss() }
+        }
+        sheet.addView(cancel, LinearLayout.LayoutParams(MATCH_PARENT, dp(54)).apply { topMargin = dp(8) })
+        dialog.setContentView(sheet)
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.60f)
+            setGravity(Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+            setLayout(minOf(dp(440), (resources.displayMetrics.widthPixels - dp(32)).coerceAtLeast(1)), WRAP_CONTENT)
+            attributes = attributes.apply { y = dp(12) }
+        }
+        if (anim > 0f) {
+            sheet.alpha = 0f
+            sheet.translationY = dp(14).toFloat()
+            sheet.animate().alpha(1f).translationY(0f).setDuration(dur(240)).setInterpolator(EASE).start()
+        }
+    }
+
     private fun showPageMenu() {
-        AlertDialog.Builder(this).setTitle("Home pages")
-            .setItems(arrayOf("Add Page", "Remove This Page")) { _, index ->
-                if (index == 0) addHomePage() else confirmRemoveHomePage()
-            }.setNegativeButton("Cancel", null).show()
+        val count = homePageCount()
+        val index = pager.currentItem
+        val subtitle = if (pages.getOrNull(index) is Page.Home) "Page ${index + 1} of $count"
+            else "$count home pages"
+        showPageSheet("Home Pages", subtitle, listOf(
+            PageSheetAction("Add Page", "Create a new home screen", "＋") { addHomePage() },
+            PageSheetAction("Remove This Page", "Move its items to other pages", "−", destructive = true) {
+                confirmRemoveHomePage()
+            }
+        ))
     }
 
     private fun addHomePage() {
@@ -2566,11 +2701,13 @@ class MainActivity : Activity() {
         val page = pager.currentItem
         if (pages.getOrNull(page) !is Page.Home) { toast("Choose a home page first"); return }
         if (homePageCount() <= 1) { toast("Keep at least one home page"); return }
-        AlertDialog.Builder(this).setTitle("Remove this page?")
-            .setMessage("Apps and widgets will move to your other pages if there is enough room. Apps will not be uninstalled.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Remove page") { _, _ -> removeHomePage(page) }
-            .show()
+        showPageSheet(
+            "Remove this page?",
+            "Apps and widgets will move to other pages if there is room. Apps will not be uninstalled.",
+            listOf(PageSheetAction("Remove Page", "Move items and remove this page", "−", destructive = true) {
+                removeHomePage(page)
+            })
+        )
     }
 
     /** Plan first, then persist all positions together so nothing is lost if a page won't fit. */
