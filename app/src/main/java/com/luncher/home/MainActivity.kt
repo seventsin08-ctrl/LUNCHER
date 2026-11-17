@@ -174,6 +174,7 @@ class MainActivity : Activity() {
     private val jiggles = ArrayList<ObjectAnimator>()
     private var drag: DragState? = null
     private var widgetDrag: WidgetDragState? = null
+    private var activeResizeHandle: Pair<View, View.OnTouchListener>? = null
     private var pendingHomeHold: Runnable? = null
     private var holdX = 0f
     private var holdY = 0f
@@ -320,6 +321,10 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         isActive = false
+        if (activeResizeHandle != null) {
+            activeResizeHandle = null
+            refreshPages()
+        }
         if (drag != null) cancelDrag()
         if (widgetDrag != null) cancelWidgetDrag()
         cancelHomeHold()
@@ -360,6 +365,17 @@ class MainActivity : Activity() {
         menuLayer != null || switcher.isShowing || searchOverlay.visibility == View.VISIBLE
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Route the small resize handle before the page and app drag gestures see it.
+        if (editMode && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            activeResizeHandle = resizeHandleAt(ev.rawX, ev.rawY)
+            if (activeResizeHandle != null) cancelHomeHold()
+        }
+        activeResizeHandle?.let { (view, listener) ->
+            listener.onTouch(view, ev)
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL)
+                activeResizeHandle = null
+            return true
+        }
         if (drag != null || widgetDrag != null) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_MOVE -> if (drag != null) moveDrag(ev.rawX, ev.rawY)
@@ -1555,7 +1571,7 @@ class MainActivity : Activity() {
         var previewH = w.h
         var moved = false
         var blocked = false
-        handle.setOnTouchListener { view, event ->
+        val resizeListener = View.OnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     cancelHomeHold()
@@ -1592,6 +1608,8 @@ class MainActivity : Activity() {
                 else -> true
             }
         }
+        handle.tag = resizeListener
+        handle.setOnTouchListener(resizeListener)
         return outer
     }
 
@@ -2270,6 +2288,21 @@ class MainActivity : Activity() {
         val rv = pager.getChildAt(0) as? RecyclerView ?: return null
         val holder = rv.findViewHolderForAdapterPosition(pager.currentItem)?.itemView as? FrameLayout ?: return null
         return holder.getChildAt(0) as? FrameLayout
+    }
+
+    private fun resizeHandleAt(rawX: Float, rawY: Float): Pair<View, View.OnTouchListener>? {
+        val page = pages.getOrNull(pager.currentItem) as? Page.Home ?: return null
+        val frame = currentPageFrame() ?: return null
+        for (i in page.widgets.indices) {
+            val wrapper = frame.getChildAt(i) as? FrameLayout ?: continue
+            val handle = wrapper.getChildAt(1) ?: continue
+            val listener = handle.tag as? View.OnTouchListener ?: continue
+            val loc = IntArray(2)
+            handle.getLocationOnScreen(loc)
+            if (handle.isShown && rawX >= loc[0] && rawX < loc[0] + handle.width &&
+                rawY >= loc[1] && rawY < loc[1] + handle.height) return handle to listener
+        }
+        return null
     }
 
     /** Hold an icon or built-in widget directly on the home screen to pick it up. */
