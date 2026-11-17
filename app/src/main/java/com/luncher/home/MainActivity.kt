@@ -221,7 +221,8 @@ class MainActivity : Activity() {
         val fromDock: Boolean,
         val source: View,
         val floating: ImageView,
-        val size: Int
+        val size: Int,
+        val originFolderId: String? = null
     )
 
     private class WidgetDragState(
@@ -2245,7 +2246,8 @@ class MainActivity : Activity() {
         rebuild()
     }
 
-    private fun startDrag(app: AppInfo, fromDock: Boolean, source: View, rawX: Float, rawY: Float) {
+    private fun startDrag(app: AppInfo, fromDock: Boolean, source: View, rawX: Float, rawY: Float,
+                          originFolderId: String? = null) {
         temporaryDragPageCount = 0
         previewOrder = currentOrder()
         val size = dp(iconDp)
@@ -2263,7 +2265,7 @@ class MainActivity : Activity() {
         source.animate().alpha(0.2f).setDuration(dur(120)).start()
         pager.isUserInputEnabled = false
         haptic(source)
-        drag = DragState(app, fromDock, source, floating, size)
+        drag = DragState(app, fromDock, source, floating, size, originFolderId)
     }
 
     private fun moveDrag(rawX: Float, rawY: Float) {
@@ -2326,7 +2328,9 @@ class MainActivity : Activity() {
         val d = drag ?: return
         val onNewPage = temporaryDragPageCount > 0 && pager.currentItem == temporaryDragPageCount - 1
         finishDragVisuals(d)
-        if (overDock(rawX, rawY)) dropIntoDock(d, rawX) else dropOnHome(d, rawX, rawY, onNewPage)
+        if (overDock(rawX, rawY)) {
+            if (detachFolderMemberForDrag(d)) dropIntoDock(d, rawX) else { previewOrder = null; rebuild() }
+        } else dropOnHome(d, rawX, rawY, onNewPage)
     }
 
     private fun cancelDrag() {
@@ -2456,7 +2460,9 @@ class MainActivity : Activity() {
             return
         }
         highlightFolderTarget(null)
-        if (d.fromDock || target == null || target.key == d.app.key) { cancelPendingReorder(); return }
+        if (d.fromDock || d.originFolderId != null || target == null || target.key == d.app.key) {
+            cancelPendingReorder(); return
+        }
         val after = hit.localX > cellW() / 2f
         val key = "${d.app.key}|${target.key}|$after|${pager.currentItem}"
         if (pendingReorderKey == key) return
@@ -2508,7 +2514,7 @@ class MainActivity : Activity() {
         private var apps: List<AppInfo>,
         private val selected: Set<String> = emptySet(),
         private val onTap: (AppInfo, View) -> Unit,
-        private val onHold: ((AppInfo) -> Unit)? = null
+        private val onHold: ((AppInfo, View) -> Unit)? = null
     ) : RecyclerView.Adapter<FolderGridAdapter.Holder>() {
         inner class Holder(val tile: LinearLayout, val icon: ImageView, val badge: TextView,
                            val label: TextView) : RecyclerView.ViewHolder(tile)
@@ -2563,7 +2569,7 @@ class MainActivity : Activity() {
             holder.tile.contentDescription = if (app.key in selected) "${app.label}, added" else app.label
             holder.tile.setOnClickListener { onTap(app, holder.icon) }
             holder.tile.setOnLongClickListener {
-                if (onHold == null) false else { onHold.invoke(app); true }
+                if (onHold == null) false else { onHold.invoke(app, holder.icon); true }
             }
         }
 
@@ -2571,9 +2577,44 @@ class MainActivity : Activity() {
         fun replaceApps(newApps: List<AppInfo>) { apps = newApps; notifyDataSetChanged() }
     }
 
+    /** Keep the original gesture in the dialog window while the icon moves over the home screen. */
+    private inner class FolderDialog : Dialog(this@MainActivity) {
+        var lastRawX = 0f
+        var lastRawY = 0f
+        var draggingMember = false
+        var dragStartX = 0f
+        var dragStartY = 0f
+        var movedMember = false
+
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            lastRawX = event.rawX
+            lastRawY = event.rawY
+            if (draggingMember) {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> {
+                        if (hypot(event.rawX - dragStartX, event.rawY - dragStartY) > dp(8)) movedMember = true
+                        moveDrag(event.rawX, event.rawY)
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        draggingMember = false
+                        if (movedMember) endDrag(event.rawX, event.rawY) else cancelDrag()
+                        dismiss()
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        draggingMember = false
+                        cancelDrag()
+                        dismiss()
+                    }
+                }
+                return true
+            }
+            return super.dispatchTouchEvent(event)
+        }
+    }
+
     /** A compact, rounded panel over the home screen, with system back/outside tap to close. */
-    private fun folderDialog(panel: View, widthFraction: Float = 0.88f): Dialog {
-        val dialog = Dialog(this)
+    private fun folderDialog(panel: View, widthFraction: Float = 0.88f): FolderDialog {
+        val dialog = FolderDialog()
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         dialog.setContentView(panel)
         dialog.setCanceledOnTouchOutside(true)
@@ -2638,13 +2679,23 @@ class MainActivity : Activity() {
         grid.adapter = FolderGridAdapter(members, onTap = { member, _ ->
             dialog.dismiss()
             launch(member, null)
-        }, onHold = { member ->
-            AlertDialog.Builder(this).setTitle(member.label)
-                .setItems(arrayOf("Remove from folder")) { _, _ ->
-                    dialog.dismiss()
-                    removeFolderMember(app, member.key)
-                }.setNegativeButton("Cancel", null).show()
+        }, onHold = { member, source ->
+            // Do not remove the member until a valid drop; cancellation leaves the folder intact.
+            enterEditMode(refresh = false)
+            startDrag(member, false, source, dialog.lastRawX, dialog.lastRawY, id)
+            dialog.dragStartX = dialog.lastRawX
+            dialog.dragStartY = dialog.lastRawY
+            dialog.movedMember = false
+            dialog.draggingMember = true
+            panel.visibility = View.INVISIBLE
+            dialog.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         })
+        dialog.setOnDismissListener {
+            if (dialog.draggingMember) {
+                dialog.draggingMember = false
+                cancelDrag()
+            }
+        }
         add.setOnClickListener {
             dialog.dismiss()
             showFolderAppPicker(id)
@@ -2790,10 +2841,24 @@ class MainActivity : Activity() {
         rebuild()
     }
 
+    /** Commit removal only after the drag has a valid destination. */
+    private fun detachFolderMemberForDrag(d: DragState): Boolean {
+        val id = d.originFolderId ?: return true
+        val groups = folders()
+        val group = groups.firstOrNull { it.id == id } ?: return false
+        val extraction = FolderExtraction.take(group.keys, d.app.key,
+            folderComponent(id).flattenToString(), currentOrder()) ?: return false
+        saveFolders(if (extraction.dissolve) groups.filter { it.id != id }
+            else groups.map { if (it.id == id) it.copy(keys = extraction.remaining) else it })
+        settings.hiddenApps = settings.hiddenApps - d.app.key
+        previewOrder = null
+        settings.order = extraction.order
+        return true
+    }
+
     private fun dropOnHome(d: DragState, rawX: Float, rawY: Float, onNewPage: Boolean = false) {
         val hit = gridHit(rawX, rawY, allowEdgeDrop = onNewPage)
         val targetApp = if (hit == null) null else hit.page.apps.getOrNull(hit.appIndex)?.first
-        if (hit != null && hit.centered && targetApp != null && putIntoFolder(d, targetApp)) return
         // The new page can still be laying out when the finger is released.
         val cell = hit?.cell ?: if (onNewPage) newPageCellAt(rawX, rawY) else null
         val targetSlot = cell?.let { slotIndexFor(pager.currentItem, it) }
@@ -2802,6 +2867,13 @@ class MainActivity : Activity() {
             toast("Choose a free app space")
             rebuild(); return
         }
+        // Dropping back on the source folder leaves it unchanged.
+        if (d.originFolderId != null && targetApp != null && folderId(targetApp) == d.originFolderId) {
+            previewOrder = null
+            rebuild(); return
+        }
+        if (!detachFolderMemberForDrag(d)) { previewOrder = null; rebuild(); return }
+        if (hit != null && hit.centered && targetApp != null && putIntoFolder(d, targetApp)) return
         val order = currentOrder()
         val moved = if (targetApp == null) HomeGridOrder.moveToEmpty(order, d.app.key, targetSlot)
             else HomeGridOrder.moveAround(order, d.app.key, targetApp.key, hit!!.localX > cellW() / 2f)
