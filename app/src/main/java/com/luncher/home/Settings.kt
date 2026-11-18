@@ -87,6 +87,11 @@ class Settings(ctx: Context) {
             else -> "none"
         }
         set(v) = put("s_swipe_up", v)
+    /** AirPods-style card when headphones connect. */
+    var headsetPopup: Boolean
+        get() = p.getBoolean("s_headset_popup", true)
+        set(v) = put("s_headset_popup", v)
+
     var doubleTapLock: Boolean
         get() = p.getBoolean("s_dtap_lock", false)
         set(v) = put("s_dtap_lock", v)

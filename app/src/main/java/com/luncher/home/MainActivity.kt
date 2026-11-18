@@ -142,6 +142,7 @@ class MainActivity : Activity() {
     private lateinit var editBar: FrameLayout
     private lateinit var gestures: GestureDetector
     private lateinit var switcher: AppSwitcher
+    private lateinit var headsetPopup: HeadsetPopup
 
     private val searchAdapter by lazy {
         AppListAdapter(false, { a, v -> launch(a, v) }, { a, v -> showAppMenu(a, v) })
@@ -273,6 +274,8 @@ class MainActivity : Activity() {
         ContextCompat.registerReceiver(
             this, unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_EXPORTED
         )
+        headsetPopup = HeadsetPopup(this, root, { settings.headsetPopup }, { settings.haptics })
+        runCatching { headsetPopup.start() }
 
         switcher = AppSwitcher(
             this, root,
@@ -437,6 +440,7 @@ class MainActivity : Activity() {
         dockWidthSpring?.cancel()
         dockWidthSpring = null
         runCatching { unregisterReceiver(unlockReceiver) }
+        if (::headsetPopup.isInitialized) headsetPopup.stop()
         NotificationService.onChange = null
         runCatching { unregisterReceiver(packageReceiver) }
         runCatching { unregisterReceiver(batteryReceiver) }
@@ -449,6 +453,13 @@ class MainActivity : Activity() {
         stopJiggle()
         io.shutdownNow()
         super.onDestroy()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == HeadsetPopup.REQ_BLUETOOTH && ::headsetPopup.isInitialized) {
+            headsetPopup.onPermissionResult()
+        }
     }
 
     @Deprecated("Uses the classic result API, which is fine for a plain Activity")
@@ -615,6 +626,7 @@ class MainActivity : Activity() {
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             insetTop = bars.top
             insetBottom = bars.bottom
+            if (::headsetPopup.isInitialized) headsetPopup.bottomInset = bars.bottom
             content.setPadding(0, bars.top, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
             insets

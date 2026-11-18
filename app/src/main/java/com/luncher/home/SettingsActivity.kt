@@ -229,6 +229,12 @@ class SettingsActivity : Activity() {
                 }
             }
         }
+        // ---------------- Connections
+        val conn = section("CONNECTIONS")
+        toggle(conn, "Headphone Pop-up",
+            "Show a card with battery when AirPods-style, Bluetooth or wired headphones connect",
+            s.headsetPopup) { s.headsetPopup = it }
+
         // ---------------- About
         val about = section("GENERAL")
         button(about, "Default Home App…", 0xFF0A84FF.toInt()) {
