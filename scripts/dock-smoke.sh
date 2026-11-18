@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euxo pipefail
-package=com.luncher.home.preview3
+package=com.applelauncher.home.preview3
 mkdir -p dock-smoke
 trap 'adb logcat -d -s AndroidRuntime:E > dock-smoke/android-runtime.log 2>/dev/null || true; adb logcat -d -s ActivityTaskManager:I ActivityManager:I > dock-smoke/activity.log 2>/dev/null || true' EXIT
 adb shell input keyevent KEYCODE_WAKEUP || true
@@ -18,7 +18,7 @@ raw=open('dock-smoke/activities.txt').read()
 components=[]
 for match in re.finditer(r'(?m)^\s*([A-Za-z][\w.]+)/([\w.$]+)\s*$',raw):
     pkg,cls=match.groups()
-    if pkg=='com.luncher.home.preview3': continue
+    if pkg=='com.applelauncher.home.preview3': continue
     if cls.startswith('.'): cls=pkg+cls
     elif '.' not in cls: cls=pkg+'.'+cls
     key=pkg+'/'+cls
