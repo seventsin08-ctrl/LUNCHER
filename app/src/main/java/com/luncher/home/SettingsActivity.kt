@@ -144,7 +144,7 @@ class SettingsActivity : Activity() {
 
         // ---------------- Home Screen
         val home = section("HOME SCREEN")
-        slider(home, "Icon Size", 50, 70, s.iconSize, { "${it}" }) { s.iconSize = it }
+        slider(home, "Icon Size", 50, 86, s.iconSize, { "${it}" }) { s.iconSize = it }
         toggle(home, "Show App Names", null, s.showLabels) { s.showLabels = it }
         segment(home, "Columns", listOf("4" to "4", "5" to "5"), s.columns.toString()) { s.columns = it.toInt() }
         toggle(home, "Notification Badges", null, s.badges) { s.badges = it }

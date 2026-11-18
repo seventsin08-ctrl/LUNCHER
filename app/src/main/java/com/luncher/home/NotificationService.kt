@@ -16,11 +16,22 @@ class NotificationService : NotificationListenerService() {
         /** Package name -> unread count. Only touched on the main thread. */
         val counts = HashMap<String, Int>()
         var onChange: (() -> Unit)? = null
+        /** (package, title, text) for each newly posted, user-visible notification. */
+        var onPosted: ((String, String, String) -> Unit)? = null
         private val main = Handler(Looper.getMainLooper())
     }
 
     override fun onListenerConnected() = recount()
-    override fun onNotificationPosted(sbn: StatusBarNotification) = recount()
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        recount()
+        val n = sbn.notification
+        if (sbn.packageName == packageName || sbn.isOngoing || !sbn.isClearable) return
+        if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        val title = n.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+        val text = n.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        if (title.isBlank() && text.isBlank()) return
+        main.post { onPosted?.invoke(sbn.packageName, title, text) }
+    }
     override fun onNotificationRemoved(sbn: StatusBarNotification) = recount()
 
     override fun onListenerDisconnected() {

@@ -138,12 +138,17 @@ class MainActivity : Activity() {
     private lateinit var searchField: EditText
     private lateinit var searchHeader: TextView
     private lateinit var calcRow: TextView
+    private lateinit var searchExtras: LinearLayout
     private lateinit var webRow: TextView
     private lateinit var editBar: FrameLayout
     private lateinit var gestures: GestureDetector
     private lateinit var switcher: AppSwitcher
     private lateinit var headsetPopup: HeadsetPopup
     private lateinit var island: DynamicIsland
+    private lateinit var controlCenter: ControlCenter
+    private var focusId: String? = null
+    private val timerListener: () -> Unit = { refreshIslandTimer() }
+    private var timerWasRunning = false
     private lateinit var spatialWall: SpatialImageView
     private var spatialWallUri: String? = null
     private var wasCharging: Boolean? = null
@@ -280,7 +285,22 @@ class MainActivity : Activity() {
         )
         headsetPopup = HeadsetPopup(this, root, { settings.headsetPopup }, { settings.haptics })
         runCatching { headsetPopup.start() }
-        island = DynamicIsland(this, root, { openAssistant() }, { showVolumePanel() }, { settings.haptics })
+        island = DynamicIsland(this, root, { openAssistant() }, { openControlCenter() }, { settings.haptics })
+        controlCenter = ControlCenter(this, root,
+            music = { currentMusic() },
+            musicPlaying = { mediaController?.playbackState?.state == PlaybackState.STATE_PLAYING },
+            playPause = { togglePlay() },
+            next = { mediaController?.transportControls?.skipToNext() },
+            prev = { mediaController?.transportControls?.skipToPrevious() },
+            focusLabel = { Focus.current(this)?.name ?: "Off" },
+            onFocus = { showFocusSheet() },
+            onTimer = { showTimerPicker(null) },
+            onLock = { lockScreen() },
+            onBlur = { on -> animateBlur(if (on) dp(26).toFloat() else 0f, dur(260)) },
+            haptics = { settings.haptics })
+        TimerState.load(this)
+        TimerState.add(timerListener)
+        focusId = Focus.current(this)?.id
         island.enabled = settings.island
         loadSpatialWallpaper()
         ViewCompat.requestApplyInsets(root)
@@ -296,11 +316,16 @@ class MainActivity : Activity() {
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null || overlayOpen() || editMode || drag != null) return false
                 if (::island.isInitialized && island.hit(e1.rawX, e1.rawY)) return false
+                if (SmartStackView.touching) return false
                 if (pages.getOrNull(pager.currentItem) is Page.Library) return false
                 val dy = e2.y - e1.y
                 val dx = e2.x - e1.x
                 if (abs(dy) < abs(dx) * 1.5f) return false
                 if (dy > dp(70) && velocityY > 700) {
+                    // Like iPhone: swipe down from the top-right corner for Control Center.
+                    if (e1.rawX > root.width * 0.62f && e1.rawY < insetTop + dp(110)) {
+                        openControlCenter(); return true
+                    }
                     onSwipeDown(); return true
                 }
                 if (dy < -dp(80) && velocityY < -700) {
@@ -320,6 +345,7 @@ class MainActivity : Activity() {
         })
 
         NotificationService.onChange = { updateBadges() }
+        NotificationService.onPosted = { pkg, title, text -> showNotificationInIsland(pkg, title, text) }
         registerReceivers()
         appliedVersion = settings.version
         reloadApps()
@@ -338,6 +364,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Tilt.resume()
+        if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
         defaultBanner.visibility = if (isDefaultHome()) View.GONE else View.VISIBLE
         if (settings.version != appliedVersion) applySettings()
@@ -398,14 +425,20 @@ class MainActivity : Activity() {
             widgetDrag != null -> cancelWidgetDrag()
             menuLayer != null -> dismissMenu()
             switcher.isShowing -> switcher.hide(anim)
+            ::controlCenter.isInitialized && controlCenter.isShowing -> controlCenter.hide()
             searchOverlay.visibility == View.VISIBLE -> closeSearch()
             editMode -> exitEditMode()
-            pager.currentItem != 0 -> pager.currentItem = 0
+            pager.currentItem != homePageIndex() -> pager.currentItem = homePageIndex()
         }
     }
 
+    /** The page Home returns to: page 1, or the page chosen for the current Focus. */
+    private fun homePageIndex(): Int =
+        focusId?.let { Focus.homePage(this, it) }?.coerceIn(0, (homePageCount() - 1).coerceAtLeast(0)) ?: 0
+
     private fun overlayOpen() =
-        menuLayer != null || switcher.isShowing || searchOverlay.visibility == View.VISIBLE
+        menuLayer != null || switcher.isShowing || searchOverlay.visibility == View.VISIBLE ||
+            (::controlCenter.isInitialized && controlCenter.isShowing)
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // A new touch means an earlier drag lost its UP/CANCEL event; never leave its image stuck.
@@ -453,6 +486,8 @@ class MainActivity : Activity() {
         runCatching { unregisterReceiver(unlockReceiver) }
         if (::headsetPopup.isInitialized) headsetPopup.stop()
         NotificationService.onChange = null
+        NotificationService.onPosted = null
+        TimerState.remove(timerListener)
         runCatching { unregisterReceiver(packageReceiver) }
         runCatching { unregisterReceiver(batteryReceiver) }
         if (mediaListening) {
@@ -543,7 +578,7 @@ class MainActivity : Activity() {
     }
 
     private fun restylePersistent() {
-        scrim.alpha = settings.dim / 100f
+        scrim.alpha = ((settings.dim + Focus.extraDim(focusId)).coerceAtMost(95)) / 100f
         searchPill.background = Glass.panel(this, 16f)
         dots.background = Glass.panel(this, 16f)
         dockRow.background = Glass.panel(this, 36f)
@@ -655,7 +690,10 @@ class MainActivity : Activity() {
         }
 
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
-            override fun onPageSelected(position: Int) = updateDots(position)
+            override fun onPageSelected(position: Int) {
+                updateDots(position)
+                if (pager.scrollState != ViewPager2.SCROLL_STATE_IDLE) haptic(root, HapticFeedbackConstants.CLOCK_TICK)
+            }
 
             override fun onPageScrollStateChanged(state: Int) {
                 mainHandler.removeCallbacks(showSearchPill)
@@ -803,6 +841,8 @@ class MainActivity : Activity() {
             }
         }
         searchOverlay.addView(calcRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+        searchExtras = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        searchOverlay.addView(searchExtras, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         searchHeader = TextView(this).apply {
             text = "Suggestions"
@@ -1222,13 +1262,13 @@ class MainActivity : Activity() {
     }
 
     private fun dockKeys(): List<String> =
-        prefs.getString(KEY_DOCK, "").orEmpty().split('|').filter { it.isNotEmpty() }
+        prefs.getString(dockPrefKey(), "").orEmpty().split('|').filter { it.isNotEmpty() }
 
     private fun dockApps(): List<AppInfo> {
         val byKey = allApps.associateBy { it.key }
-        if (prefs.contains(KEY_DOCK)) return dockKeys().mapNotNull { byKey[it] }.take(cols)
+        if (prefs.contains(dockPrefKey())) return dockKeys().mapNotNull { byKey[it] }.take(cols)
         val defaults = defaultDock()
-        if (defaults.isNotEmpty()) prefs.edit().putString(KEY_DOCK, defaults.joinToString("|") { it.key }).apply()
+        if (defaults.isNotEmpty()) prefs.edit().putString(dockPrefKey(), defaults.joinToString("|") { it.key }).apply()
         return defaults
     }
 
@@ -1254,7 +1294,7 @@ class MainActivity : Activity() {
     }
 
     private fun saveDock(keys: List<String>) {
-        prefs.edit().putString(KEY_DOCK, keys.distinct().joinToString("|")).apply()
+        prefs.edit().putString(dockPrefKey(), keys.distinct().joinToString("|")).apply()
     }
 
     private fun setDock(keys: List<String>) {
@@ -1420,18 +1460,32 @@ class MainActivity : Activity() {
             topMargin = dp(10); bottomMargin = dp(8)
         })
 
-        val libAdapter = AppListAdapter(true, { a, v -> launch(a, v) }, { a, v -> showAppMenu(a, v) })
-        libAdapter.submit(allApps)
-        field.addTextChangedListener(afterTextChanged = { s ->
-            val q = s?.toString().orEmpty().trim()
-            libAdapter.submit(if (q.isEmpty()) allApps else allApps.filter { it.label.contains(q, true) })
-        })
+        // Search results (shown while typing) and the smart folders (shown otherwise).
+        val libAdapter = AppListAdapter(false, { a, v -> launch(a, v) }, { a, v -> showAppMenu(a, v) })
         val list = RecyclerView(this).apply {
-            layoutManager = GridLayoutManager(this@MainActivity, cols)
+            layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = libAdapter
             overScrollMode = View.OVER_SCROLL_NEVER
+            visibility = View.GONE
         }
-        col.addView(list, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        val categories = android.widget.ScrollView(this).apply {
+            overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalScrollBarEnabled = false
+        }
+        categories.addView(buildLibraryFolders())
+        field.addTextChangedListener(afterTextChanged = { s ->
+            val q = s?.toString().orEmpty().trim()
+            if (q.isEmpty()) {
+                list.visibility = View.GONE; categories.visibility = View.VISIBLE
+            } else {
+                libAdapter.submit(allApps.filter { it.label.contains(q, true) }.sortedBy { !it.label.startsWith(q, true) })
+                list.visibility = View.VISIBLE; categories.visibility = View.GONE
+            }
+        })
+        val body = FrameLayout(this)
+        body.addView(categories, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        body.addView(list, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        col.addView(body, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         return col
     }
 
@@ -1490,7 +1544,7 @@ class MainActivity : Activity() {
         icon.outlineProvider = roundedOutline()
         icon.clipToOutline = true
         holder.addView(icon, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        if (badgePackage != null && settings.badges && !editMode) {
+        if (badgePackage != null && badgesOn() && !editMode) {
             val badge = makeBadge()
             holder.addView(badge, FrameLayout.LayoutParams(WRAP_CONTENT, dp(21), Gravity.TOP or Gravity.END).apply {
                 topMargin = -dp(7); marginEnd = -dp(8)
@@ -1547,7 +1601,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyBadge(badge: TextView, count: Int) {
-        if (count <= 0 || !settings.badges) {
+        if (count <= 0 || !badgesOn()) {
             badge.visibility = View.GONE
             return
         }
@@ -1681,7 +1735,7 @@ class MainActivity : Activity() {
         if (sizes.isEmpty()) { toast("There isn't room to resize this widget"); return }
         val labels = sizes.map { "${it.width} × ${it.height}" +
             if (it.width == w.w && it.height == w.h) "  ·  current" else "" }
-        AlertDialog.Builder(this).setTitle("Widget size · columns × rows")
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Widget size · columns × rows")
             .setItems(labels.toTypedArray()) { _, index ->
                 val selected = sizes[index]
                 if (selected.width != w.w || selected.height != w.h)
@@ -1793,16 +1847,27 @@ class MainActivity : Activity() {
                     "Quote", { editQuote(w.id) }, null, remove)
             WidgetType.PHOTO_WIDE ->
                 widgetFrame(photoWidget(w.id), "Wide Photo", { v -> photoTapped(w.id, v) }, { v -> showPhotoMenu(w.id, v) }, remove)
+            WidgetType.TIMER ->
+                widgetFrame(TimerWidget.create(this), "Timer", { v -> showTimerPicker(v) }, null, remove)
+            WidgetType.STACK -> {
+                // Smart Stack: swipe up/down between date, batteries, timer and clock.
+                val stack = SmartStackView(this, listOf(
+                    MoreWidgets.dateCard(this), batteryWidget(), TimerWidget.create(this),
+                    MoreWidgets.digitalClock(this, false)
+                ))
+                widgetFrame(stack, "Smart Stack", { }, null, remove)
+            }
         }
     }
 
     private fun editQuote(id: String) {
-        val input = EditText(this).apply {
-            setText(prefs.getString("quote_$id", null) ?: "One day at a time.")
+        val input = glassField(prefs.getString("quote_$id", null) ?: "One day at a time.").apply {
+            isSingleLine = false
+            maxLines = 4
             filters = arrayOf(android.text.InputFilter.LengthFilter(140))
             setSelection(text.length)
         }
-        AlertDialog.Builder(this).setTitle("Edit quote").setView(input)
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Edit quote").setView(wrapField(input))
             .setPositiveButton("Save") { _, _ ->
                 val value = input.text.toString().trim().ifEmpty { "One day at a time." }
                 prefs.edit().putString("quote_$id", value).apply()
@@ -1815,7 +1880,7 @@ class MainActivity : Activity() {
         val saved = WorldClockZones.resolve(prefs.getString("world_zones_$id", null))
             .map { it.key }.toSet()
         val selected = BooleanArray(cities.size) { cities[it].key in saved }
-        AlertDialog.Builder(this).setTitle("Choose up to four cities")
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Choose up to four cities")
             .setMultiChoiceItems(cities.map { it.label }.toTypedArray(), selected) { dialog, which, checked ->
                 selected[which] = checked
                 if (checked && selected.count { it } > 4) {
@@ -2297,6 +2362,8 @@ class MainActivity : Activity() {
         items += "Editable Quote" to { addBuiltInWidget(WidgetType.QUOTE) }
         items += "Batteries" to { addBuiltInWidget(WidgetType.BATTERY) }
         items += "Now Playing" to { addBuiltInWidget(WidgetType.MUSIC) }
+        items += "Smart Stack (swipe between widgets)" to { addBuiltInWidget(WidgetType.STACK) }
+        items += "Timer (Live Activity)" to { addBuiltInWidget(WidgetType.TIMER) }
         val hidden = settings.hiddenWidgets.toList().sorted()
         for (key in hidden) {
             val parts = key.split(':')
@@ -2312,7 +2379,7 @@ class MainActivity : Activity() {
             val page = (parts.getOrNull(0)?.toIntOrNull() ?: 0) + 1
             items += "Restore $name (page $page)" to { restoreBuiltInWidget(key) }
         }
-        AlertDialog.Builder(this).setTitle("Add widgets")
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Add widgets")
             .setItems(items.map { it.first }.toTypedArray()) { _, which -> items[which].second() }
             .setNegativeButton("Cancel", null).show()
     }
@@ -2404,7 +2471,7 @@ class MainActivity : Activity() {
             val name = runCatching { info.loadLabel(packageManager) }.getOrDefault(info.provider.packageName)
             "$name  ·  ${info.provider.packageName}"
         }
-        AlertDialog.Builder(this).setTitle("Widgets from apps")
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Widgets from apps")
             .setItems(labels.toTypedArray()) { _, index -> beginAppWidget(providers[index]) }
             .setNegativeButton("Cancel", null).show()
     }
@@ -3327,17 +3394,29 @@ class MainActivity : Activity() {
         header.addView(more, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(8) })
         header.addView(add, LinearLayout.LayoutParams(dp(38), dp(38)))
         panel.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        // Adaptive size: small folders open compact, big ones open wide and tall.
+        val folderCols = if (members.size <= 4) 2 else 3
         val grid = RecyclerView(this).apply {
-            layoutManager = GridLayoutManager(this@MainActivity, 3)
+            layoutManager = GridLayoutManager(this@MainActivity, folderCols)
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             clipToPadding = false
             setPadding(0, dp(8), 0, 0)
         }
-        val gridHeight = minOf(dp(108) * maxOf(1, (members.size + 2) / 3) + dp(8),
+        val gridHeight = minOf(dp(108) * maxOf(1, (members.size + folderCols - 1) / folderCols) + dp(8),
             (resources.displayMetrics.heightPixels * 0.55f).toInt())
         panel.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT, gridHeight))
-        val dialog = folderDialog(panel)
+        val dialog = folderDialog(panel, when {
+            members.size <= 2 -> 0.58f
+            members.size <= 4 -> 0.66f
+            else -> 0.88f
+        })
         activeFolderDialog = dialog
+        haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+        if (anim > 0f) {
+            panel.alpha = 0f
+            Motion.scaleTo(panel, 1f, Motion.BOUNCY, start = 0.72f)
+            Motion.alphaTo(panel, 1f, Motion.SNAPPY)
+        }
         grid.adapter = FolderGridAdapter(members, onTap = { member, _ ->
             dialog.dismiss()
             launch(member, null)
@@ -3369,7 +3448,7 @@ class MainActivity : Activity() {
                     dialog.dismiss(); renameFolder(app); true
                 }
                 menu.add("Remove an app").setOnMenuItemClickListener {
-                    AlertDialog.Builder(this@MainActivity).setTitle("Remove app from folder")
+                    AlertDialog.Builder(this@MainActivity, R.style.Theme_Luncher_Dialog).setTitle("Remove app from folder")
                         .setItems(members.map { it.label }.toTypedArray()) { _, index ->
                             dialog.dismiss(); removeFolderMember(app, members[index].key)
                         }.setNegativeButton("Cancel", null).show()
@@ -3469,8 +3548,8 @@ class MainActivity : Activity() {
 
     private fun renameFolder(app: AppInfo) {
         val id = folderId(app) ?: return
-        val input = EditText(this).apply { setText(app.label); setSingleLine(); selectAll() }
-        AlertDialog.Builder(this).setTitle("Folder name").setView(input)
+        val input = glassField(app.label)
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Folder name").setView(wrapField(input))
             .setPositiveButton("Save") { _, _ ->
                 val name = input.text.toString().trim().take(40).ifEmpty { "Folder" }
                 saveFolders(folders().map { if (it.id == id) it.copy(name = name) else it })
@@ -3999,6 +4078,7 @@ class MainActivity : Activity() {
         } else {
             calcRow.visibility = View.GONE
         }
+        renderSearchExtras(query)
         if (query.isNotEmpty() && math == null) {
             webRow.text = "Search the web for “$query”"
             webRow.visibility = View.VISIBLE
@@ -4235,6 +4315,359 @@ class MainActivity : Activity() {
                     spatialWall.bitmap = bmp
                     spatialWall.animate().alpha(1f).setDuration(dur(400)).start()
                 } else toast("Couldn't open that wallpaper photo")
+            }
+        }
+    }
+
+    // ================================================================ Control Center, Focus, Timer, Library
+
+    private fun openControlCenter() {
+        if (!::controlCenter.isInitialized) return
+        if (menuLayer != null) dismissMenu(immediate = true)
+        if (searchOverlay.visibility == View.VISIBLE) closeSearch(false)
+        island.collapse(false)
+        controlCenter.show(insetTop, insetBottom)
+    }
+
+    private fun currentMusic(): Triple<String, String, Bitmap?>? {
+        val meta = mediaController?.metadata ?: return null
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
+            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: return null
+        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        return Triple(title, meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "", art)
+    }
+
+    private fun badgesOn() = settings.badges && !Focus.hidesBadges(focusId)
+
+    /** Each Focus keeps its own dock (copied from the normal dock the first time). */
+    private fun dockPrefKey(): String {
+        val id = focusId ?: return KEY_DOCK
+        val key = "dock_focus_$id"
+        if (!prefs.contains(key) && prefs.contains(KEY_DOCK)) {
+            prefs.edit().putString(key, prefs.getString(KEY_DOCK, "")).apply()
+        }
+        return key
+    }
+
+    /** Rounded glass text field used by the launcher's dialogs (iOS style). */
+    private fun glassField(value: String): EditText = EditText(this).apply {
+        setText(value)
+        setSingleLine()
+        selectAll()
+        setTextColor(Color.WHITE)
+        setHintTextColor(0x80FFFFFF.toInt())
+        textSize = 17f
+        background = GradientDrawable().apply {
+            cornerRadius = dp(12).toFloat()
+            setColor(Color.argb(60, 255, 255, 255))
+            setStroke(maxOf(1, dp(1)), Color.argb(60, 255, 255, 255))
+        }
+        setPadding(dp(14), dp(11), dp(14), dp(11))
+    }
+
+    private fun wrapField(field: View): View = FrameLayout(this).apply {
+        setPadding(dp(20), dp(6), dp(20), dp(2))
+        addView(field, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+    }
+
+    private fun setFocus(id: String?) {
+        Focus.set(this, id)
+        prefs.edit().putBoolean("focus_auto", false).apply()
+        applyFocusState(announce = true)
+    }
+
+    private fun applyFocusState(announce: Boolean) {
+        focusId = Focus.current(this)?.id
+        restylePersistent()
+        rebuild()
+        haptic(root, HapticFeedbackConstants.CONFIRM)
+        val f = Focus.current(this)
+        pager.setCurrentItem(homePageIndex(), anim > 0f)
+        if (announce && ::island.isInitialized) {
+            island.flash(IslandActivity("focus", null, R.drawable.ic_bolt, f?.color ?: Color.WHITE,
+                if (f == null) "Focus Off" else "${f.emoji} ${f.name}", f?.desc ?: "",
+                if (f == null) null else "On", false, f?.color ?: Color.WHITE), 2500)
+        }
+        if (f != null && Focus.silences(this, f.id) && !Focus.hasDndAccess(this)) {
+            toast("Allow Do Not Disturb access so ${f.name} can silence notifications")
+        }
+    }
+
+    /** Focus sheet: pick a mode, its home page, notification silencing and the Sleep schedule. */
+    private fun showFocusSheet() {
+        if (menuLayer != null) dismissMenu(immediate = true)
+        val layer = FrameLayout(this).apply {
+            setBackgroundColor(Color.argb(120, 0, 0, 0)); isClickable = true
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(16))
+            background = Glass.menu(this@MainActivity, 30f)
+            isClickable = true
+        }
+        fun close() {
+            animateBlur(0f, dur(220))
+            layer.animate().alpha(0f).setDuration(dur(200)).withEndAction { root.removeView(layer) }.start()
+        }
+        layer.setOnClickListener { close() }
+        card.addView(TextView(this).apply {
+            text = "Focus"; setTextColor(Color.WHITE); textSize = 26f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        })
+        val cur = Focus.current(this)?.id
+        for (m in Focus.modes) {
+            val on = m.id == cur
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(18).toFloat(); setColor(Color.argb(40, 255, 255, 255))
+                    if (on) setStroke(dp(2), m.color)
+                }
+                setOnClickListener { close(); setFocus(if (on) null else m.id) }
+            }
+            row.addView(TextView(this).apply {
+                text = m.emoji; textSize = 18f; gravity = Gravity.CENTER
+                background = Glass.circle(m.color)
+            }, LinearLayout.LayoutParams(dp(42), dp(42)))
+            val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+            texts.addView(TextView(this).apply {
+                text = m.name; setTextColor(Color.WHITE); textSize = 16f
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            })
+            texts.addView(TextView(this).apply { text = m.desc; setTextColor(0x99FFFFFF.toInt()); textSize = 12f })
+            row.addView(texts, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            if (on) row.addView(TextView(this).apply { text = "On"; setTextColor(m.color); textSize = 15f })
+            card.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
+        }
+        if (cur != null) {
+            val mode = Focus.modes.first { it.id == cur }
+            card.addView(TextView(this).apply {
+                text = "Home page for ${mode.name}"; setTextColor(0xB3FFFFFF.toInt()); textSize = 13f
+                setPadding(dp(4), dp(16), 0, dp(6))
+            })
+            val pagesRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val chosen = Focus.homePage(this, cur)
+            for (pIdx in 0 until homePageCount().coerceIn(1, 6)) {
+                pagesRow.addView(TextView(this).apply {
+                    text = "${pIdx + 1}"; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 15f
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(12).toFloat(); setColor(Color.argb(40, 255, 255, 255))
+                        if (pIdx == chosen) setStroke(dp(2), mode.color)
+                    }
+                    setOnClickListener {
+                        Focus.setHomePage(this@MainActivity, cur, pIdx); close()
+                        pager.setCurrentItem(pIdx, anim > 0f); haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+                    }
+                }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
+            }
+            card.addView(pagesRow)
+            val silence = Focus.silences(this, cur)
+            card.addView(TextView(this).apply {
+                text = if (silence) "🔕 Silencing notifications · tap to allow" else "🔔 Allowing notifications · tap to silence"
+                setTextColor(Color.WHITE); textSize = 14f; setPadding(dp(4), dp(14), 0, dp(4))
+                setOnClickListener {
+                    Focus.setSilences(this@MainActivity, cur, !silence); close()
+                    if (!silence && !Focus.hasDndAccess(this@MainActivity)) {
+                        runCatching { startActivity(Focus.dndSettingsIntent()) }
+                    }
+                }
+            })
+        }
+        val sched = Focus.sleepSchedule(this)
+        card.addView(TextView(this).apply {
+            text = if (sched) "🌙 Sleep schedule 10:30 PM–7 AM: On" else "🌙 Sleep schedule 10:30 PM–7 AM: Off"
+            setTextColor(0xB3FFFFFF.toInt()); textSize = 13f; setPadding(dp(4), dp(10), 0, 0)
+            setOnClickListener { Focus.setSleepSchedule(this@MainActivity, !sched); close() }
+        })
+        layer.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
+            setMargins(dp(10), 0, dp(10), insetBottom + dp(10))
+        })
+        root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        animateBlur(dp(22).toFloat(), dur(260))
+        layer.alpha = 0f
+        layer.animate().alpha(1f).setDuration(dur(200)).start()
+        Motion.spring(card, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_Y, 0f, Motion.FLUID,
+            start = dp(600).toFloat())
+    }
+
+    private fun showTimerPicker(anchor: View?) {
+        val items = mutableListOf<MenuItem>()
+        if (TimerState.running) items += MenuItem("Cancel Timer (${TimerState.format(TimerState.remaining)} left)", destructive = true) {
+            TimerState.cancel(this)
+        }
+        for (m in listOf(1, 3, 5, 10, 15, 30, 60)) items += MenuItem(if (m == 60) "1 hour" else "$m minutes") {
+            TimerState.start(this, m)
+        }
+        showContextMenu(anchor, items)
+    }
+
+    /** Live Activity: the running timer counts down in the Dynamic Island. */
+    private fun refreshIslandTimer() {
+        if (!::island.isInitialized) return
+        if (TimerState.running) {
+            timerWasRunning = true
+            island.put(IslandActivity("timer", null, R.drawable.ic_bolt, 0xFFFF9F0A.toInt(), "Timer",
+                "Ends in ${TimerState.format(TimerState.remaining)}", TimerState.format(TimerState.remaining),
+                false, 0xFFFF9F0A.toInt(), listOf(
+                    "Cancel" to { TimerState.cancel(this) },
+                    "+1 min" to { TimerState.start(this, ((TimerState.remaining / 60000L).toInt() + 1).coerceAtLeast(1)) }
+                )))
+        } else {
+            island.remove("timer")
+            if (timerWasRunning) {
+                timerWasRunning = false
+                haptic(root, HapticFeedbackConstants.CONFIRM)
+                island.flash(IslandActivity("timerdone", null, R.drawable.ic_bolt, 0xFFFF9F0A.toInt(),
+                    "Timer done", "", "00:00", false, 0xFFFF9F0A.toInt()), 4000)
+            }
+        }
+    }
+
+    /** New notifications appear briefly in the Dynamic Island (not during a silencing Focus). */
+    private val lastIslandNote = HashMap<String, Long>()
+    private fun showNotificationInIsland(pkg: String, title: String, text: String) {
+        if (!::island.isInitialized || !settings.island || !isActive) return
+        val f = focusId
+        if (f != null && Focus.silences(this, f)) return
+        if (mediaController?.packageName == pkg) return
+        val now = System.currentTimeMillis()
+        if (now - (lastIslandNote[pkg] ?: 0L) < 4000L) return
+        lastIslandNote[pkg] = now
+        val app = allApps.firstOrNull { it.packageName == pkg }
+        island.flash(IslandActivity("note", app?.icon, R.drawable.ic_music, Color.WHITE,
+            title.ifBlank { app?.label ?: "Notification" }, text, null, false, Color.WHITE,
+            if (app != null) listOf("Open" to { launch(app, null) }) else emptyList()), 4500)
+        haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+
+    /** App Library smart folders: 3 big icons + a mini cluster that opens the whole folder. */
+    private fun buildLibraryFolders(): View {
+        val groups = AppCategories.build(this, allApps, recentKeys())
+        val grid = GridLayout(this).apply { columnCount = 2 }
+        val half = (resources.displayMetrics.widthPixels - dp(32) - dp(16)) / 2
+        val big = (half - dp(12) * 2 - dp(20)) / 2
+        for ((name, apps) in groups) {
+            val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            val box = GridLayout(this).apply {
+                columnCount = 2
+                background = Glass.panel(this@MainActivity, 26f)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+            }
+            val showBig = if (apps.size <= 4) apps.size else 3
+            for (k in 0 until showBig) {
+                val a = apps[k]
+                val iv = ImageView(this).apply {
+                    setImageBitmap(a.icon)
+                    outlineProvider = roundedOutline(); clipToOutline = true
+                    contentDescription = a.label
+                    setOnClickListener { launch(a, it) }
+                    setOnLongClickListener { showAppMenu(a, it); true }
+                }
+                iv.setOnTouchListener(pressEffect(iv))
+                box.addView(iv, GridLayout.LayoutParams().apply { width = big; height = big; setMargins(dp(5), dp(5), dp(5), dp(5)) })
+            }
+            if (apps.size > 4) {
+                val mini = GridLayout(this).apply {
+                    columnCount = 2
+                    setOnClickListener { showLibraryFolder(name, apps) }
+                }
+                val small = (big - dp(6)) / 2
+                for (a in apps.drop(3).take(4)) {
+                    mini.addView(ImageView(this).apply {
+                        setImageBitmap(a.icon); outlineProvider = roundedOutline(); clipToOutline = true
+                    }, GridLayout.LayoutParams().apply { width = small; height = small; setMargins(dp(1), dp(1), dp(1), dp(1)) })
+                }
+                mini.setOnTouchListener(pressEffect(mini))
+                box.addView(mini, GridLayout.LayoutParams().apply { width = big; height = big; setMargins(dp(5), dp(5), dp(5), dp(5)) })
+            }
+            cell.addView(box)
+            cell.addView(TextView(this).apply {
+                text = name; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER
+                setShadowLayer(6f, 0f, 1f, 0x99000000.toInt()); setPadding(0, dp(6), 0, dp(12))
+                setOnClickListener { showLibraryFolder(name, apps) }
+            })
+            grid.addView(cell, GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED),
+                GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply { width = 0 })
+        }
+        return grid
+    }
+
+    private fun showLibraryFolder(name: String, apps: List<AppInfo>) {
+        haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Glass.folder(this@MainActivity, 30f)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        panel.addView(TextView(this).apply {
+            text = name; textSize = 20f; setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        })
+        val colsN = if (apps.size <= 4) 2 else 3
+        val grid = RecyclerView(this).apply { layoutManager = GridLayoutManager(this@MainActivity, colsN) }
+        panel.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT,
+            minOf(dp(108) * ((apps.size + colsN - 1) / colsN) + dp(8), (resources.displayMetrics.heightPixels * 0.6f).toInt())))
+        val dialog = folderDialog(panel, if (apps.size <= 4) 0.66f else 0.88f)
+        grid.adapter = AppListAdapter(true, { a, v -> dialog.dismiss(); launch(a, v) }, { a, v -> showAppMenu(a, v) })
+            .apply { submit(apps) }
+        if (anim > 0f) {
+            panel.alpha = 0f
+            Motion.scaleTo(panel, 1f, Motion.BOUNCY, start = 0.72f)
+            Motion.alphaTo(panel, 1f, Motion.SNAPPY)
+        }
+    }
+
+    /** Spotlight: quick actions, settings and contacts above the app results. */
+    private fun renderSearchExtras(query: String) {
+        if (!::searchExtras.isInitialized) return
+        searchExtras.removeAllViews()
+        if (query.length < 2) return
+        fun section(title: String) = searchExtras.addView(TextView(this).apply {
+            text = title; setTextColor(0xB3FFFFFF.toInt()); textSize = 13f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL); setPadding(dp(4), dp(14), 0, dp(6))
+        })
+        fun row(icon: String, title: String, sub: String, onClick: () -> Unit) {
+            val r = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(9), dp(12), dp(9))
+                background = Glass.panel(this@MainActivity, 16f)
+            }
+            r.addView(TextView(this).apply {
+                text = icon; textSize = 18f; gravity = Gravity.CENTER; background = Glass.circle(0x33FFFFFF)
+            }, LinearLayout.LayoutParams(dp(40), dp(40)))
+            r.addView(TextView(this).apply {
+                text = if (sub.isEmpty()) title else "$title\n$sub"; setTextColor(Color.WHITE); textSize = 15f
+                setPadding(dp(12), 0, 0, 0)
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            r.setOnClickListener { haptic(r, HapticFeedbackConstants.CONTEXT_CLICK); closeSearch(false); onClick() }
+            searchExtras.addView(r, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) })
+        }
+
+        val shortcuts = SpotlightExtras.shortcuts(query, { m -> TimerState.start(this, m) }, { openControlCenter() },
+            { id -> setFocus(id) })
+        if (shortcuts.isNotEmpty()) { section("Shortcuts"); shortcuts.forEach { r -> row(r.icon, r.title, r.subtitle, r.action) } }
+        val sets = SpotlightExtras.settings(query) { intent ->
+            runCatching { startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+        if (sets.isNotEmpty()) { section("Settings"); sets.forEach { r -> row(r.icon, r.title, r.subtitle, r.action) } }
+        if (SpotlightExtras.hasContactsPermission(this)) {
+            val people = SpotlightExtras.contacts(this, query)
+            if (people.isNotEmpty()) {
+                section("Contacts")
+                for (c in people) row("👤", c.name, c.number ?: "") {
+                    val num = c.number
+                    runCatching {
+                        startActivity(if (num != null) Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(num)))
+                            else Intent(Intent.ACTION_VIEW, c.uri))
+                    }
+                }
+            }
+        } else if (!prefs.getBoolean("asked_contacts", false)) {
+            section("Contacts")
+            row("👤", "Show contacts in Search", "Tap to allow") {
+                prefs.edit().putBoolean("asked_contacts", true).apply()
+                requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 4400)
             }
         }
     }
