@@ -304,7 +304,14 @@ class MainActivity : Activity() {
         focusId = Focus.current(this)?.id
         island.enabled = settings.island
         island.popupMs = settings.islandPopupMs.toLong()
-        island.allow = { id -> settings.islandAllows(if (id == "timerdone") "timer" else id) }
+        island.allow = { id ->
+            settings.islandAllows(when {
+                id == "timerdone" -> "timer"
+                id.startsWith("ongoing:") -> id.split(":")[1]
+                id == "mic" || id == "camera" -> "privacy"
+                else -> id
+            })
+        }
         loadSpatialWallpaper()
         ViewCompat.requestApplyInsets(root)
 
@@ -349,6 +356,8 @@ class MainActivity : Activity() {
 
         NotificationService.onChange = { updateBadges() }
         NotificationService.onPosted = { pkg, title, text -> showNotificationInIsland(pkg, title, text) }
+        NotificationService.onOngoing = { refreshOngoing() }
+        startPrivacyWatch()
         registerReceivers()
         appliedVersion = settings.version
         reloadApps()
@@ -369,6 +378,7 @@ class MainActivity : Activity() {
         Tilt.resume()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
+        refreshOngoing()
         if (::headsetPopup.isInitialized) headsetPopup.hostResumed = true
         defaultBanner.visibility = if (isDefaultHome()) View.GONE else View.VISIBLE
         if (settings.version != appliedVersion) applySettings()
@@ -492,6 +502,9 @@ class MainActivity : Activity() {
         if (::headsetPopup.isInitialized) headsetPopup.detach(this)
         NotificationService.onChange = null
         NotificationService.onPosted = null
+        NotificationService.onOngoing = null
+        stopPrivacyWatch()
+        mainHandler.removeCallbacks(ongoingTicker)
         TimerState.remove(timerListener)
         runCatching { unregisterReceiver(packageReceiver) }
         runCatching { unregisterReceiver(batteryReceiver) }
@@ -4295,6 +4308,8 @@ class MainActivity : Activity() {
         val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
         val pkg = c.packageName
+        // Settings › Island Services › Audio Sources
+        if (settings.islandAudioMode == "chosen" && pkg !in settings.islandAudioApps) { island.remove("music"); return }
         val appIcon = allApps.firstOrNull { it.packageName == pkg }?.icon
         val duration = meta.getLong(MediaMetadata.METADATA_KEY_DURATION)
         val media = IslandMedia(
@@ -4319,6 +4334,119 @@ class MainActivity : Activity() {
             "music", art, R.drawable.ic_music, Color.WHITE, title, artist, null, playing, 0xFFFF9F0A.toInt(),
             media = media
         ))
+    }
+
+    // ================================================================ Island services
+
+    private val ongoingTicker = object : Runnable {
+        override fun run() {
+            refreshOngoing()
+        }
+    }
+
+    /** Mirror ongoing activities (navigation, clock, calls, recording, transfers, sport) into the island. */
+    private fun refreshOngoing() {
+        if (!::island.isInitialized) return
+        mainHandler.removeCallbacks(ongoingTicker)
+        val items = NotificationService.ongoing.values.filter { settings.islandAllows(it.type) }.takeLast(2)
+        val wanted = items.map { "ongoing:${it.type}:${it.key}" }.toSet()
+        for (id in island.ids()) if (id.startsWith("ongoing:") && id !in wanted) island.remove(id)
+        var ticking = false
+        for (o in items) {
+            val app = allApps.firstOrNull { it.packageName == o.pkg }
+            val accent = when (o.type) {
+                "navigation", "call" -> 0xFF30D158.toInt()
+                "clock" -> 0xFFFF9F0A.toInt()
+                "recording" -> 0xFFFF453A.toInt()
+                "workout" -> 0xFFA7F432.toInt()
+                else -> 0xFF0A84FF.toInt()
+            }
+            val acts = ArrayList<Pair<String, () -> Unit>>()
+            for ((name, pi) in o.actions) acts += name to { IslandServices.send(this, pi) }
+            o.contentIntent?.let { pi -> acts += "Open" to { IslandServices.send(this, pi) } }
+            if (o.chronoBase > 0) ticking = true
+            island.put(IslandActivity("ongoing:${o.type}:${o.key}", app?.icon, R.drawable.ic_bolt, accent,
+                o.title, o.text, o.trailing(), o.type == "recording", accent, acts.take(4)))
+        }
+        if (ticking && isActive) mainHandler.postDelayed(ongoingTicker, 1000)
+    }
+
+    /** Copy & go: when something useful was just copied, offer what to do with it. */
+    private fun checkCopyAndGo() {
+        if (!::island.isInitialized || !settings.island || !settings.islandAllows("copy")) return
+        val c = IslandServices.checkClipboard(this) ?: return
+        val acts = ArrayList<Pair<String, () -> Unit>>()
+        fun go(i: Intent) {
+            runCatching { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { toast("No app can open this") }
+        }
+        val (title, icon) = when (c.kind) {
+            "phone" -> {
+                acts += "Call" to { go(IslandServices.dial(c.text)) }
+                acts += "Message" to { go(IslandServices.sms(c.text)) }
+                acts += "Save" to { go(IslandServices.saveContact(c.text)) }
+                "Copied number" to "📞"
+            }
+            "meeting" -> {
+                acts += "Join" to { go(IslandServices.open(c.text)) }
+                acts += "Share" to { go(IslandServices.share(c.text)) }
+                "Copied meeting" to "📅"
+            }
+            else -> {
+                acts += "Open" to { go(IslandServices.open(c.text)) }
+                acts += "Share" to { go(IslandServices.share(c.text)) }
+                "Copied link" to "🔗"
+            }
+        }
+        // Pinned services: send straight to your favourite apps.
+        for (pkg in settings.islandPinned.take(2)) {
+            val label = allApps.firstOrNull { it.packageName == pkg }?.label ?: continue
+            acts += label to { go(IslandServices.share(c.text, pkg)) }
+        }
+        island.flash(IslandActivity("copy", null, R.drawable.ic_search, Color.WHITE,
+            "$icon $title", c.text, null, false, 0xFF0A84FF.toInt(), acts.take(4)), 8000)
+        haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Android only lets the app in front read the clipboard.
+        if (hasFocus) mainHandler.postDelayed({ runCatching { checkCopyAndGo() } }, 350)
+    }
+
+    private var recordingCallback: android.media.AudioManager.AudioRecordingCallback? = null
+    private var cameraCallback: android.hardware.camera2.CameraManager.AvailabilityCallback? = null
+    private val camerasInUse = HashSet<String>()
+
+    /** Microphone & camera in use: like the iPhone's orange/green dots, but in the island. */
+    private fun startPrivacyWatch() {
+        val am = getSystemService(android.media.AudioManager::class.java)
+        val rc = object : android.media.AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: MutableList<android.media.AudioRecordingConfiguration>?) {
+                if (!::island.isInitialized) return
+                if (!configs.isNullOrEmpty()) island.put(IslandActivity("mic", null, R.drawable.ic_bolt,
+                    0xFFFF9F0A.toInt(), "Microphone in use", "An app is recording audio", "●", true, 0xFFFF9F0A.toInt()))
+                else island.remove("mic")
+            }
+        }
+        runCatching { am.registerAudioRecordingCallback(rc, mainHandler); recordingCallback = rc }
+        val cm = getSystemService(android.hardware.camera2.CameraManager::class.java)
+        val cc = object : android.hardware.camera2.CameraManager.AvailabilityCallback() {
+            override fun onCameraUnavailable(cameraId: String) { camerasInUse += cameraId; update() }
+            override fun onCameraAvailable(cameraId: String) { camerasInUse -= cameraId; update() }
+            fun update() {
+                if (!::island.isInitialized) return
+                if (camerasInUse.isNotEmpty()) island.put(IslandActivity("camera", null, R.drawable.ic_bolt,
+                    0xFF30D158.toInt(), "Camera in use", "An app is using the camera", "●", false, 0xFF30D158.toInt()))
+                else island.remove("camera")
+            }
+        }
+        runCatching { cm.registerAvailabilityCallback(cc, mainHandler); cameraCallback = cc }
+    }
+
+    private fun stopPrivacyWatch() {
+        recordingCallback?.let { cb -> runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioRecordingCallback(cb) } }
+        cameraCallback?.let { cb -> runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).unregisterAvailabilityCallback(cb) } }
     }
 
     private fun headphonesConnected(): Boolean = runCatching {

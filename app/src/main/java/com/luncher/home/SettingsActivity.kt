@@ -265,6 +265,27 @@ class SettingsActivity : Activity() {
             Triple("focus", "Focus", "When a Focus mode turns on or off"),
             Triple("note", "Notifications", "New notifications pop up briefly")
         )) toggle(content, label, sub, s.islandAllows(type)) { s.setIslandAllows(type, it) }
+        // Origin-island-style services
+        val services = section("ISLAND SERVICES")
+        for ((id, name, desc) in IslandServices.services)
+            toggle(services, name, desc, s.islandAllows(id)) { s.setIslandAllows(id, it) }
+        button(services, "Pinned Services (${s.islandPinned.size})…", 0xFF0A84FF.toInt()) {
+            val targets = IslandServices.shareTargets(this)
+            chooseApps("Pinned services", targets, s.islandPinned.toSet()) { chosen ->
+                // Keep the order you already had, add new ones at the end.
+                s.islandPinned = s.islandPinned.filter { it in chosen } + chosen.filter { it !in s.islandPinned }
+            }
+        }
+        info(services, "Pinned services appear when you copy something, so you can send it straight to those apps.")
+        segment(services, "Music Player Sources", listOf("all" to "All Apps", "chosen" to "Chosen Apps"),
+            s.islandAudioMode) { s.islandAudioMode = it }
+        button(services, "Manage Audio Sources (${s.islandAudioApps.size})…", 0xFF0A84FF.toInt()) {
+            chooseApps("Audio sources", launchableApps(), s.islandAudioApps) { chosen ->
+                s.islandAudioApps = chosen
+                if (chosen.isNotEmpty()) s.islandAudioMode = "chosen"
+            }
+        }
+
         segment(content, "Notifications from", listOf("all" to "All Apps", "chosen" to "Chosen Apps"),
             s.islandNoteMode) { s.islandNoteMode = it }
         button(content, "Choose Apps (${s.islandNoteApps.size})…", 0xFF0A84FF.toInt()) { chooseIslandApps() }
@@ -411,28 +432,35 @@ class SettingsActivity : Activity() {
 
     // ================================================================ building blocks
 
-    /** Pick which apps' notifications may pop up in the Dynamic Island. */
-    private fun chooseIslandApps() {
+    private fun launchableApps(): List<Pair<String, String>> {
         val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = packageManager.queryIntentActivities(main, 0)
+        return packageManager.queryIntentActivities(main, 0)
             .map { it.activityInfo.packageName to it.loadLabel(packageManager).toString() }
             .filter { it.first != packageName }
             .distinctBy { it.first }
             .sortedBy { it.second.lowercase() }
-        val chosen = s.islandNoteApps.toMutableSet()
+    }
+
+    /** Tick-list of apps; [onDone] gets the chosen package names, then the page refreshes. */
+    private fun chooseApps(title: String, apps: List<Pair<String, String>>, current: Set<String>, onDone: (Set<String>) -> Unit) {
+        val chosen = current.toMutableSet()
         val checked = BooleanArray(apps.size) { apps[it].first in chosen }
         android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
-            .setTitle("Island notifications")
+            .setTitle(title)
             .setMultiChoiceItems(apps.map { it.second }.toTypedArray(), checked) { _, i, on ->
                 if (on) chosen += apps[i].first else chosen -= apps[i].first
             }
-            .setPositiveButton("Done") { _, _ ->
-                s.islandNoteApps = chosen
-                if (chosen.isNotEmpty()) s.islandNoteMode = "chosen"
-                recreate()
-            }
+            .setPositiveButton("Done") { _, _ -> onDone(chosen); recreate() }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    /** Pick which apps' notifications may pop up in the Dynamic Island. */
+    private fun chooseIslandApps() {
+        chooseApps("Island notifications", launchableApps(), s.islandNoteApps) { chosen ->
+            s.islandNoteApps = chosen
+            if (chosen.isNotEmpty()) s.islandNoteMode = "chosen"
+        }
     }
 
     private fun section(title: String): LinearLayout {

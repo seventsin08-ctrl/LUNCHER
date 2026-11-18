@@ -213,6 +213,8 @@ class DynamicIsland(
     /** Length of short pop-ups (0 = use the caller's own length). */
     var popupMs = 0L
 
+    fun ids(): Set<String> = activities.keys.toSet()
+
     /** Drops anything that is no longer allowed. */
     fun applyFilter() {
         val gone = activities.keys.filter { !allow(it) }

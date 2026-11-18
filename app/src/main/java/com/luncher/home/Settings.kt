@@ -106,6 +106,18 @@ class Settings(ctx: Context) {
         get() = p.getInt("s_isl_nudge", 0)
         set(v) = put("s_isl_nudge", v)
 
+    /** Share targets shown with Copy & go (package names, in order). */
+    var islandPinned: List<String>
+        get() = (p.getString("s_isl_pinned", "") ?: "").split('|').filter { it.isNotEmpty() }
+        set(v) = put("s_isl_pinned", v.joinToString("|"))
+    /** all | chosen — which music apps may appear in the island player. */
+    var islandAudioMode: String
+        get() = p.getString("s_isl_audio_mode", "all") ?: "all"
+        set(v) = put("s_isl_audio_mode", v)
+    var islandAudioApps: Set<String>
+        get() = p.getStringSet("s_isl_audio_apps", emptySet())?.toSet() ?: emptySet()
+        set(v) = putSet("s_isl_audio_apps", v)
+
     /** Which kinds of live activity may appear in the island. */
     fun islandAllows(type: String): Boolean = p.getBoolean("s_isl_$type", true)
     fun setIslandAllows(type: String, on: Boolean) = put("s_isl_$type", on)
