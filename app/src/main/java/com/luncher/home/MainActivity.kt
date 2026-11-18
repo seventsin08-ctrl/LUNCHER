@@ -299,6 +299,28 @@ class MainActivity : Activity() {
             onLock = { lockScreen() },
             onBlur = { on -> animateBlur(if (on) dp(26).toFloat() else 0f, dur(260)) },
             haptics = { settings.haptics })
+        controlCenter.media = { currentIslandMedia() }
+        controlCenter.mediaTitle = {
+            mediaController?.metadata?.let { m ->
+                (m.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Now Playing") to (m.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "")
+            }
+        }
+        controlCenter.musicApp = { mediaController?.packageName?.let { packageManager.getLaunchIntentForPackage(it) } }
+        controlCenter.onVolumePanel = { showVolumePanel() }
+        controlCenter.tileStyle = settings.ccStyle
+        applyIslandLook()
+        island.onMoved = { _, dy ->
+            // Remember where you dragged it (saved in dp so it fits any screen density).
+            val d = resources.displayMetrics.density
+            settings.islandX = (island.offsetX / d).roundToInt()
+            settings.islandNudge = (settings.islandNudge + dy / d).roundToInt().coerceIn(-20, 400)
+            appliedVersion = settings.version
+            ViewCompat.requestApplyInsets(root)
+        }
+        // Re-colour everything when the wallpaper changes.
+        ThemeEngine.watch(this) {
+            applyStyleGlobals(); restylePersistent(); applyIslandLook(); rebuild()
+        }
         TimerState.load(this)
         TimerState.add(timerListener)
         focusId = Focus.current(this)?.id
@@ -503,6 +525,7 @@ class MainActivity : Activity() {
         NotificationService.onChange = null
         NotificationService.onPosted = null
         NotificationService.onOngoing = null
+        ThemeEngine.unwatch(this)
         stopPrivacyWatch()
         mainHandler.removeCallbacks(ongoingTicker)
         TimerState.remove(timerListener)
@@ -558,8 +581,15 @@ class MainActivity : Activity() {
 
     private fun applyStyleGlobals() {
         Glass.glass = settings.glass
-        Glass.tint = settings.tint
-        Glass.tintPanels = settings.tintPanels
+        // Theme: colours follow the wallpaper (or system / your pick) unless set to Mono.
+        ThemeEngine.resolve(this, settings)
+        if (ThemeEngine.colorful) {
+            Glass.tint = ThemeEngine.accent
+            Glass.tintPanels = settings.themeSurfaces || settings.tintPanels
+        } else {
+            Glass.tint = settings.tint
+            Glass.tintPanels = settings.tintPanels
+        }
         // Liquid Glass slider: 0 = frosted (more opaque), 100 = crystal clear.
         Glass.opacity = 1.6f - settings.glassClarity / 100f * 1.2f
         IconFactory.style = settings.iconStyle
@@ -588,9 +618,11 @@ class MainActivity : Activity() {
         if (::island.isInitialized) {
             island.enabled = settings.island
             island.popupMs = settings.islandPopupMs.toLong()
+            applyIslandLook()
             island.applyFilter()
             ViewCompat.requestApplyInsets(root)
         }
+        if (::controlCenter.isInitialized) controlCenter.tileStyle = settings.ccStyle
         loadSpatialWallpaper()
         appliedVersion = settings.version
         applyStyleGlobals()
@@ -598,6 +630,15 @@ class MainActivity : Activity() {
         applyPageEffect()
         if (currentBlur > 0f && !settings.blur) animateBlur(0f, 1)
         reloadApps()
+    }
+
+    private fun applyIslandLook() {
+        if (!::island.isInitialized) return
+        island.sizeScale = settings.islandScale / 100f
+        island.style = settings.islandStyle
+        island.anim = settings.islandAnim
+        island.offsetX = dp(settings.islandX).toFloat()
+        island.applyLook()
     }
 
     private fun restylePersistent() {
@@ -710,7 +751,10 @@ class MainActivity : Activity() {
             val base = if (settings.islandPlacement == "statusbar") ((band - dp(36)) / 2).coerceAtLeast(dp(3))
                 else bars.top + dp(4)
             val islandTop = (base + dp(settings.islandNudge)).coerceAtLeast(dp(2))
-            val islandRoom = if (settings.island) (islandTop + dp(36) + dp(6) - bars.top).coerceAtLeast(0) else 0
+            // Only push the Home Screen down when the island sits near the top; lower down it floats.
+            val islandBottom = islandTop + (dp(36) * settings.islandScale / 100f).toInt()
+            val islandRoom = if (settings.island && islandTop < bars.top + dp(70))
+                (islandBottom + dp(6) - bars.top).coerceAtLeast(0) else 0
             if (::island.isInitialized) island.setTopInset(islandTop)
             content.setPadding(0, bars.top + islandRoom, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
@@ -4312,24 +4356,7 @@ class MainActivity : Activity() {
         if (settings.islandAudioMode == "chosen" && pkg !in settings.islandAudioApps) { island.remove("music"); return }
         val appIcon = allApps.firstOrNull { it.packageName == pkg }?.icon
         val duration = meta.getLong(MediaMetadata.METADATA_KEY_DURATION)
-        val media = IslandMedia(
-            appIcon = appIcon,
-            duration = duration,
-            position = {
-                val ps = c.playbackState
-                if (ps == null) 0L else if (ps.state == PlaybackState.STATE_PLAYING)
-                    ps.position + ((SystemClock.elapsedRealtime() - ps.lastPositionUpdateTime) * ps.playbackSpeed).toLong()
-                else ps.position
-            },
-            playing = { c.playbackState?.state == PlaybackState.STATE_PLAYING },
-            outputIconRes = if (headphonesConnected()) R.drawable.ic_headphones else R.drawable.ic_speaker,
-            onPlayPause = { togglePlay() },
-            onPrev = { c.transportControls.skipToPrevious() },
-            onNext = { c.transportControls.skipToNext() },
-            onSeek = { pos -> c.transportControls.seekTo(pos) },
-            onAdd = { addCurrentSong(c) },
-            onOutput = { openMediaOutput(pkg) }
-        )
+        val media = buildMedia(c, appIcon, duration, pkg)
         island.put(IslandActivity(
             "music", art, R.drawable.ic_music, Color.WHITE, title, artist, null, playing, 0xFFFF9F0A.toInt(),
             media = media
@@ -4447,6 +4474,36 @@ class MainActivity : Activity() {
     private fun stopPrivacyWatch() {
         recordingCallback?.let { cb -> runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioRecordingCallback(cb) } }
         cameraCallback?.let { cb -> runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).unregisterAvailabilityCallback(cb) } }
+    }
+
+    private fun buildMedia(c: MediaController, appIcon: Bitmap?, duration: Long, pkg: String): IslandMedia {
+        return IslandMedia(
+            appIcon = appIcon,
+            duration = duration,
+            position = {
+                val ps = c.playbackState
+                if (ps == null) 0L else if (ps.state == PlaybackState.STATE_PLAYING)
+                    ps.position + ((SystemClock.elapsedRealtime() - ps.lastPositionUpdateTime) * ps.playbackSpeed).toLong()
+                else ps.position
+            },
+            playing = { c.playbackState?.state == PlaybackState.STATE_PLAYING },
+            outputIconRes = if (headphonesConnected()) R.drawable.ic_headphones else R.drawable.ic_speaker,
+            onPlayPause = { togglePlay() },
+            onPrev = { c.transportControls.skipToPrevious() },
+            onNext = { c.transportControls.skipToNext() },
+            onSeek = { pos -> c.transportControls.seekTo(pos) },
+            onAdd = { addCurrentSong(c) },
+            onOutput = { openMediaOutput(pkg) }
+        )
+    }
+
+    /** The playing song for Control Center's music tile (null when nothing is playing). */
+    private fun currentIslandMedia(): IslandMedia? {
+        val c = mediaController ?: return null
+        val meta = c.metadata ?: return null
+        val pkg = c.packageName
+        return buildMedia(c, allApps.firstOrNull { it.packageName == pkg }?.icon,
+            meta.getLong(MediaMetadata.METADATA_KEY_DURATION), pkg)
     }
 
     private fun headphonesConnected(): Boolean = runCatching {

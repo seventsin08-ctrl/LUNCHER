@@ -77,151 +77,237 @@ class ControlCenter(
 
     private fun circle(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
 
+    /** Set by the launcher: the current song for the big music tile. */
+    var media: (() -> IslandMedia?)? = null
+    var mediaTitle: (() -> Pair<String, String>?)? = null
+    var onVolumePanel: (() -> Unit)? = null
+    /** dark = solid dark tiles like iOS 18, glass = see-through Liquid Glass tiles */
+    var tileStyle = "dark"
+
+    private var musicTicker: Runnable? = null
+
+    private fun tileBg(radius: Float, active: Boolean = false, activeColor: Int = ThemeEngine.accent): GradientDrawable =
+        GradientDrawable().apply {
+            cornerRadius = radius
+            if (active) setColor(activeColor)
+            else if (tileStyle == "glass") {
+                colors = intArrayOf(Color.argb((70 * Glass.opacity).toInt().coerceIn(30, 200), 255, 255, 255),
+                    Color.argb((28 * Glass.opacity).toInt().coerceIn(12, 160), 255, 255, 255))
+                orientation = GradientDrawable.Orientation.TL_BR
+                setStroke(maxOf(1, dp(1)), Color.argb(70, 255, 255, 255))
+            } else {
+                // Dark tiles, slightly tinted with the theme colour.
+                val base = Color.argb(200, 30, 30, 33)
+                setColor(if (ThemeEngine.colorful) IconFactory.blend(base, ThemeEngine.alpha(ThemeEngine.accent, 200), 0.10f) else base)
+            }
+        }
+
+    private fun icon(res: Int, tint: Int) = ImageView(act).apply {
+        setImageResource(res); setColorFilter(tint); scaleType = ImageView.ScaleType.FIT_CENTER
+    }
+
+    /** Round button with a vector icon; white/accent background when on. */
+    private fun round(res: Int, active: Boolean, size: Int, iconSize: Int = (size * 0.42f).toInt(),
+                      activeColor: Int = ThemeEngine.accent, onClick: (View) -> Unit): FrameLayout {
+        val f = FrameLayout(act).apply {
+            background = tileBg(size / 2f, active, activeColor)
+            setOnClickListener { tick(it); press(it); onClick(it) }
+        }
+        val tint = if (active) (if (ThemeEngine.luminance(activeColor) > 0.5f) 0xFF1C1C1E.toInt() else Color.WHITE) else Color.WHITE
+        f.addView(icon(res, tint), FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+        return f
+    }
+
+    private fun press(v: View) {
+        v.animate().scaleX(0.9f).scaleY(0.9f).setDuration(70).withEndAction {
+            Motion.scaleTo(v, 1f, Motion.BOUNCY)
+        }.start()
+    }
+
+    /** Wide pill: round icon on the left, two lines of text. */
+    private fun pill(res: Int, title: String, sub: String, h: Int, iconCircle: Int?, onClick: () -> Unit): LinearLayout {
+        val p = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = tileBg(h / 2f)
+            setPadding(dp(12), 0, dp(14), 0)
+            setOnClickListener { tick(it); press(it); onClick() }
+        }
+        val ic = FrameLayout(act).apply { if (iconCircle != null) background = circle(iconCircle) }
+        val iconTint = if (iconCircle != null && ThemeEngine.luminance(iconCircle) > 0.5f) 0xFF1C1C1E.toInt() else Color.WHITE
+        ic.addView(icon(res, iconTint), FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+        p.addView(ic, LinearLayout.LayoutParams((h * 0.62f).toInt(), (h * 0.62f).toInt()))
+        p.addView(TextView(act).apply {
+            text = if (sub.isEmpty()) title else "$title\n$sub"
+            setTextColor(Color.WHITE); textSize = 14f; maxLines = 2
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(10), 0, 0, 0)
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        return p
+    }
+
+    private fun lp(w: Int, h: Int, l: Int = 0, t: Int = 0) =
+        FrameLayout.LayoutParams(w, h).apply { leftMargin = l; topMargin = t }
+
     fun show(topInset: Int, bottomInset: Int) {
         if (layer != null) return
+        lastTop = topInset; lastBottom = bottomInset
         val l = FrameLayout(act).apply {
-            setBackgroundColor(Color.argb(110, 0, 0, 0))
+            setBackgroundColor(Color.argb(120, 0, 0, 0))
             alpha = 0f
             isClickable = true
             setOnClickListener { hide() }
         }
+        val pad = dp(20)
+        val gap = dp(14)
+        val W = act.resources.displayMetrics.widthPixels - pad * 2
+        val c = (W - gap * 3) / 4          // one grid cell
+        val two = c * 2 + gap              // two cells + gap
         val panel = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), topInset + dp(46), dp(18), dp(18))
+            setPadding(pad, topInset + dp(40), pad, bottomInset + dp(24))
             isClickable = true
         }
+        val accent = ThemeEngine.accent
 
-        // Row 0: iOS 27 "Start Timer" dial — swipe the ruler to pick a time, tap to start.
-        panel.addView(TimerDial(), LinearLayout.LayoutParams(MATCH_PARENT, dp(92)).apply { bottomMargin = dp(14) })
-
-        // Row 1: connectivity cluster + music.
-        val row1 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        val conn = GridLayout(act).apply {
-            columnCount = 2
-            background = glass(26)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-        }
+        // ---- Block 1: connectivity (2x2) + brightness & volume sliders.
+        val b1 = FrameLayout(act)
+        val conn = FrameLayout(act).apply { background = tileBg(dp(34).toFloat()) }
+        val ip = dp(12)
+        val big = (two - ip * 3) / 2
         val airplane = Settings.Global.getInt(act.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
         val wifi = runCatching { act.applicationContext.getSystemService(WifiManager::class.java).isWifiEnabled }.getOrDefault(false)
-        val bt = runCatching {
-            act.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled == true
+        val bt = runCatching { act.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled == true }.getOrDefault(false)
+        val loc = runCatching {
+            if (Build.VERSION.SDK_INT >= 28) act.getSystemService(android.location.LocationManager::class.java).isLocationEnabled else false
         }.getOrDefault(false)
-        conn.addView(roundButton("✈", if (airplane) 0xFFFF9F0A.toInt() else null) {
+        conn.addView(round(R.drawable.ic_cc_airplane, airplane, big, activeColor = 0xFFFF9F0A.toInt()) {
             openPanel(Settings.ACTION_AIRPLANE_MODE_SETTINGS, null)
-        })
-        conn.addView(roundButton("📶", if (wifi) 0xFF0A84FF.toInt() else null) {
+        }, lp(big, big, ip, ip))
+        conn.addView(round(R.drawable.ic_broadcast, false, big) { openHotspot() }, lp(big, big, ip * 2 + big, ip))
+        conn.addView(round(R.drawable.ic_cc_wifi, wifi, big, activeColor = if (ThemeEngine.colorful) accent else 0xFF0A84FF.toInt()) {
             openPanel(Settings.ACTION_WIFI_SETTINGS, if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else null)
-        })
-        conn.addView(roundButton("ᛒ", if (bt) 0xFF0A84FF.toInt() else null) {
+        }, lp(big, big, ip, ip * 2 + big))
+        val mini = (big - dp(6)) / 2
+        val mx = ip * 2 + big; val my = ip * 2 + big
+        conn.addView(round(R.drawable.ic_cc_cell, true, mini, activeColor = 0xFF30D158.toInt()) {
+            openPanel(Settings.ACTION_DATA_ROAMING_SETTINGS, if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_INTERNET_CONNECTIVITY else null)
+        }, lp(mini, mini, mx, my))
+        conn.addView(round(R.drawable.ic_cc_bluetooth, bt, mini, activeColor = 0xFF0A84FF.toInt()) {
             openPanel(Settings.ACTION_BLUETOOTH_SETTINGS, null)
-        })
-        conn.addView(roundButton("⇅", 0xFF30D158.toInt()) {
-            openPanel(Settings.ACTION_DATA_ROAMING_SETTINGS,
-                if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_INTERNET_CONNECTIVITY else null)
-        })
-        row1.addView(conn, LinearLayout.LayoutParams(0, dp(164), 1f).apply { marginEnd = dp(7) })
+        }, lp(mini, mini, mx + mini + dp(6), my))
+        conn.addView(round(R.drawable.ic_cc_vpn, false, mini) { openPanel(Settings.ACTION_VPN_SETTINGS, null) },
+            lp(mini, mini, mx, my + mini + dp(6)))
+        conn.addView(round(R.drawable.ic_cc_location, loc, mini, activeColor = 0xFF0A84FF.toInt()) {
+            openPanel(Settings.ACTION_LOCATION_SOURCE_SETTINGS, null)
+        }, lp(mini, mini, mx + mini + dp(6), my + mini + dp(6)))
+        b1.addView(conn, lp(two, two))
+        b1.addView(brightnessSlider(), lp(c, two, two + gap, 0))
+        b1.addView(volumeSlider(), lp(c, two, two + gap * 2 + c, 0))
+        panel.addView(b1, LinearLayout.LayoutParams(W, two))
 
-        val musicTile = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            background = glass(26)
-            setPadding(dp(14), dp(14), dp(14), dp(12))
-        }
-        val info = music()
-        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val art = ImageView(act).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) =
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(9).toFloat())
-            }
-            clipToOutline = true
-            if (info?.third != null) setImageBitmap(info.third)
-            else { setImageResource(R.drawable.ic_music); setColorFilter(Color.WHITE); background = glass(9) }
-        }
-        head.addView(art, LinearLayout.LayoutParams(dp(42), dp(42)))
-        head.addView(TextView(act).apply {
-            text = if (info == null) "Not Playing" else "${info.first}\n${info.second}"
-            setTextColor(Color.WHITE); textSize = 12f; maxLines = 3
-            setPadding(dp(8), 0, 0, 0)
-        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        musicTile.addView(head)
-        musicTile.addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
-        val controls = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        val playBtn = iconText(if (musicPlaying()) "⏸" else "▶", 24f)
-        controls.addView(iconText("⏮", 20f).apply { setOnClickListener { tick(it); prev() } }, LinearLayout.LayoutParams(0, dp(36), 1f))
-        controls.addView(playBtn.apply {
-            setOnClickListener {
-                tick(it); playPause()
-                postDelayed({ text = if (musicPlaying()) "⏸" else "▶" }, 250)
-            }
-        }, LinearLayout.LayoutParams(0, dp(36), 1f))
-        controls.addView(iconText("⏭", 20f).apply { setOnClickListener { tick(it); next() } }, LinearLayout.LayoutParams(0, dp(36), 1f))
-        musicTile.addView(controls)
-        row1.addView(musicTile, LinearLayout.LayoutParams(0, dp(164), 1f).apply { marginStart = dp(7) })
-        panel.addView(row1)
+        // ---- Row 2: battery saver, screen record, Focus / Do Not Disturb.
+        val r2 = FrameLayout(act)
+        val saver = runCatching { act.getSystemService(android.os.PowerManager::class.java).isPowerSaveMode }.getOrDefault(false)
+        r2.addView(round(R.drawable.ic_cc_battery, saver, c, activeColor = 0xFFFFD60A.toInt()) {
+            openPanel(Settings.ACTION_BATTERY_SAVER_SETTINGS, null)
+        }, lp(c, c))
+        r2.addView(round(R.drawable.ic_cc_record, false, c) { openQuickSettings("Tap Screen record in Quick Settings") }, lp(c, c, c + gap))
+        val focusName = focusLabel()
+        r2.addView(pill(R.drawable.ic_cc_moon, if (focusName == "Off") "Do Not Disturb" else focusName,
+            if (focusName == "Off") "Focus off" else "On", c, if (focusName == "Off") Color.WHITE else accent) {
+            hide(); onFocus()
+        }, lp(two, c, two + gap))
+        panel.addView(r2, LinearLayout.LayoutParams(W, c).apply { topMargin = gap })
 
-        // Row 2: small buttons on the left, brightness + volume sliders on the right.
-        val row2 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        val leftCol = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        val smalls = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        smalls.addView(squareTile("🔒") { hide(); onLock() }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(7) })
-        smalls.addView(squareTile("📷") {
+        // ---- Music tile.
+        panel.addView(musicTile(W, (c * 1.75f).toInt()), LinearLayout.LayoutParams(W, (c * 1.75f).toInt()).apply { topMargin = gap })
+
+        // ---- Block 3: orientation lock (2x2) + flashlight, dark mode, music app, ring/silent.
+        val b3 = FrameLayout(act)
+        val autoRotate = runCatching { Settings.System.getInt(act.contentResolver, Settings.System.ACCELEROMETER_ROTATION) == 1 }.getOrDefault(true)
+        val orient = FrameLayout(act).apply {
+            background = tileBg(dp(34).toFloat(), !autoRotate, Color.WHITE)
+            setPadding(dp(18), dp(18), dp(18), dp(16))
+        }
+        val oTint = if (!autoRotate) 0xFFFF453A.toInt() else Color.WHITE
+        orient.addView(icon(R.drawable.ic_cc_rotation, oTint), FrameLayout.LayoutParams(dp(38), dp(38), Gravity.TOP or Gravity.START))
+        val oText = TextView(act).apply {
+            text = "Orientation\n${if (autoRotate) "Unlocked" else "Locked"}"
+            setTextColor(if (!autoRotate) 0xFF1C1C1E.toInt() else Color.WHITE); textSize = 15f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        orient.addView(oText, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.BOTTOM or Gravity.START))
+        orient.setOnClickListener { v -> tick(v); press(v); toggleRotation() }
+        b3.addView(orient, lp(two, two))
+        lateinit var torch: FrameLayout
+        torch = round(R.drawable.ic_cc_flashlight, torchOn, c, activeColor = Color.WHITE) {
+            if (setTorch(!torchOn)) {
+                torch.background = tileBg(c / 2f, torchOn, Color.WHITE)
+                (torch.getChildAt(0) as ImageView).setColorFilter(if (torchOn) 0xFF1C1C1E.toInt() else Color.WHITE)
+            }
+        }
+        b3.addView(torch, lp(c, c, two + gap, 0))
+        val night = (act.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        b3.addView(round(R.drawable.ic_cc_contrast, night, c, activeColor = Color.WHITE) {
             hide()
-            runCatching { act.startActivity(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(7) })
-        leftCol.addView(smalls)
-        val focus = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = glass(22)
-            setPadding(dp(12), 0, dp(12), 0)
-            setOnClickListener { tick(it); hide(); onFocus() }
+            val ok = runCatching { act.startActivity(Intent("android.settings.DARK_THEME_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+            if (!ok) runCatching { act.startActivity(Intent(Settings.ACTION_DISPLAY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }, lp(c, c, two + gap * 2 + c, 0))
+        b3.addView(round(R.drawable.ic_cc_notes, musicPlaying(), c) { hide(); openMusicApp() }, lp(c, c, two + gap, c + gap))
+        val audio = act.getSystemService(AudioManager::class.java)
+        lateinit var bell: FrameLayout
+        fun bellIcon() = if (audio.ringerMode == AudioManager.RINGER_MODE_NORMAL) R.drawable.ic_cc_bell else R.drawable.ic_cc_bell_off
+        bell = round(bellIcon(), false, c) {
+            runCatching {
+                audio.ringerMode = if (audio.ringerMode == AudioManager.RINGER_MODE_NORMAL) AudioManager.RINGER_MODE_VIBRATE
+                    else AudioManager.RINGER_MODE_NORMAL
+            }
+            (bell.getChildAt(0) as ImageView).setImageResource(bellIcon())
+            toast(if (audio.ringerMode == AudioManager.RINGER_MODE_NORMAL) "Ring" else "Silent (vibrate)")
         }
-        focus.addView(TextView(act).apply {
-            text = "🌙"; gravity = Gravity.CENTER; background = circle(0xFF5E5CE6.toInt()); textSize = 16f
-        }, LinearLayout.LayoutParams(dp(38), dp(38)))
-        focus.addView(TextView(act).apply {
-            text = "Focus\n${focusLabel()}"; setTextColor(Color.WHITE); textSize = 13f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(dp(10), 0, 0, 0)
-        })
-        leftCol.addView(focus, LinearLayout.LayoutParams(MATCH_PARENT, dp(72)).apply { topMargin = dp(14) })
-        row2.addView(leftCol, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(7) })
+        b3.addView(bell, lp(c, c, two + gap * 2 + c, c + gap))
+        panel.addView(b3, LinearLayout.LayoutParams(W, two).apply { topMargin = gap })
 
-        val sliders = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        sliders.addView(brightnessSlider(), LinearLayout.LayoutParams(0, dp(158), 1f).apply { marginEnd = dp(7) })
-        sliders.addView(volumeSlider(), LinearLayout.LayoutParams(0, dp(158), 1f).apply { marginStart = dp(7) })
-        row2.addView(sliders, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(7) })
-        panel.addView(row2, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+        // ---- Row 4: Recognise Music + Headphone Level.
+        val ph = (c * 0.86f).toInt()
+        val r4 = FrameLayout(act)
+        r4.addView(pill(R.drawable.ic_cc_shazam, "Recognise", "Music", ph, null) { hide(); recogniseMusic() }, lp(two, ph))
+        val hp = headphoneName()
+        r4.addView(pill(R.drawable.ic_headphones, "Headphone", if (hp != null) "Level" else "Level", ph, null) {
+            hide(); onVolumePanel?.invoke()
+        }, lp(two, ph, two + gap))
+        panel.addView(r4, LinearLayout.LayoutParams(W, ph).apply { topMargin = gap })
 
-        // Row 3: flashlight, timer, calculator, voice recorder.
-        val row3 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        lateinit var torchTile: TextView
-        torchTile = squareTile("🔦", if (torchOn) Color.WHITE else null) {
-            if (setTorch(!torchOn)) torchTile.background = if (torchOn) glass(22, Color.WHITE) else glass(22)
-        }
-        row3.addView(torchTile, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginEnd = dp(7) })
-        row3.addView(squareTile("⏱") { hide(); onTimer() }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { setMargins(dp(7), 0, dp(7), 0) })
-        row3.addView(squareTile("🧮") {
+        // ---- Start Timer dial.
+        panel.addView(TimerDial(), LinearLayout.LayoutParams(W, dp(92)).apply { topMargin = gap })
+
+        // ---- Row 5: lock, camera, calculator, voice recorder.
+        val r5 = FrameLayout(act)
+        r5.addView(round(R.drawable.ic_cc_lock, false, c) { hide(); onLock() }, lp(c, c))
+        r5.addView(round(R.drawable.ic_cc_camera, false, c) {
+            hide(); runCatching { act.startActivity(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }, lp(c, c, c + gap))
+        r5.addView(round(R.drawable.ic_cc_calc, false, c) {
             hide()
             runCatching {
-                act.startActivity(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                act.startActivity(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }.onFailure { toast("No calculator app found") }
-        }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { setMargins(dp(7), 0, dp(7), 0) })
-        row3.addView(squareTile("🎙") {
+        }, lp(c, c, (c + gap) * 2))
+        r5.addView(round(R.drawable.ic_cc_record, false, c) {
             hide()
-            runCatching {
-                act.startActivity(Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }.onFailure { toast("No voice recorder app found") }
-        }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(7) })
-        panel.addView(row3, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+            runCatching { act.startActivity(Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { toast("No voice recorder app found") }
+        }.also { (it.getChildAt(0) as ImageView).setImageResource(R.drawable.ic_cc_mic) }, lp(c, c, (c + gap) * 3))
+        panel.addView(r5, LinearLayout.LayoutParams(W, c).apply { topMargin = gap })
 
-        // Scrolls on shorter screens so nothing gets cut off.
         val scroll = android.widget.ScrollView(act).apply {
             isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER
             addView(panel, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
-        l.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
+        l.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.TOP))
+        // Tapping empty space in the panel closes it too.
+        panel.setOnClickListener { hide() }
         root.addView(l, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         layer = l
         onBlur(true)
@@ -229,14 +315,148 @@ class ControlCenter(
         l.animate().alpha(1f).setDuration((220 * Motion.scale).toLong()).start()
         // Tiles drop in from the top with a spring, a touch staggered.
         for (i in 0 until panel.childCount) {
-            val c = panel.getChildAt(i)
-            c.alpha = 0f
-            c.postDelayed({
-                Motion.spring(c, DynamicAnimation.TRANSLATION_Y, 0f, Motion.BOUNCY, start = -dp(60).toFloat())
-                Motion.alphaTo(c, 1f, Motion.SNAPPY)
-            }, (i * 35L * Motion.scale).toLong())
+            val ch = panel.getChildAt(i)
+            ch.alpha = 0f
+            ch.postDelayed({
+                Motion.spring(ch, DynamicAnimation.TRANSLATION_Y, 0f, Motion.BOUNCY, start = -dp(60).toFloat())
+                Motion.alphaTo(ch, 1f, Motion.SNAPPY)
+            }, (i * 30L * Motion.scale).toLong())
         }
     }
+
+    /** iOS 18-style Now Playing tile: artwork, title, AirPlay-like output, controls and progress. */
+    private fun musicTile(w: Int, h: Int): View {
+        val tile = FrameLayout(act).apply { background = tileBg(dp(34).toFloat()); isClickable = true }
+        val m = media?.invoke()
+        val t = mediaTitle?.invoke()
+        val info = music()
+        val p = dp(16)
+        val artSize = h - p * 2
+        val art = ImageView(act).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, dp(18).toFloat())
+            }
+            clipToOutline = true
+            if (info?.third != null) setImageBitmap(info.third)
+            else { setImageResource(R.drawable.ic_music); setColorFilter(0x88FFFFFF.toInt()); background = circle(0); setPadding(dp(24), dp(24), dp(24), dp(24))
+                setBackgroundColor(Color.argb(60, 255, 255, 255)) }
+        }
+        tile.addView(art, lp(artSize, artSize, p, p))
+        val right = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(TextView(act).apply {
+            text = if (t == null) "Not Playing" else "${t.first}\n${t.second}"
+            setTextColor(Color.WHITE); textSize = 15f; maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        head.addView(round(R.drawable.ic_broadcast, false, dp(40)) { hide(); m?.onOutput?.invoke() }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        right.addView(head)
+        right.addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
+        val ctr = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        fun cbtn(res: Int, size: Int, fn: () -> Unit) = ImageView(act).apply {
+            setImageResource(res); setColorFilter(if (m == null) 0x66FFFFFF else Color.WHITE)
+            setOnClickListener { v -> tick(v); press(v); fn() }
+        }.also { ctr.addView(it, LinearLayout.LayoutParams(0, dp(size), 1f)) }
+        cbtn(R.drawable.ic_island_prev, 26) { prev() }
+        val play = cbtn(if (musicPlaying()) R.drawable.ic_island_pause else R.drawable.ic_island_play, 32) { playPause() }
+        cbtn(R.drawable.ic_island_next, 26) { next() }
+        right.addView(ctr)
+        val bar = IslandProgressView(act)
+        right.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, dp(14)).apply { topMargin = dp(8) })
+        val times = FrameLayout(act)
+        val el = TextView(act).apply { setTextColor(0x99FFFFFF.toInt()); textSize = 11f }
+        val rem = TextView(act).apply { setTextColor(0x99FFFFFF.toInt()); textSize = 11f }
+        times.addView(el, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.START))
+        times.addView(rem, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.END))
+        right.addView(times)
+        tile.addView(right, lp(w - artSize - p * 3, h - p * 2, artSize + p * 2, p))
+        if (m != null && m.duration > 0) {
+            bar.onSeek = { f -> m.onSeek((f * m.duration).toLong()) }
+            fun f(ms: Long): String { val s = (ms / 1000).coerceAtLeast(0); return String.format("%d:%02d", s / 60, s % 60) }
+            val r = object : Runnable {
+                override fun run() {
+                    if (layer == null) return
+                    val pos = m.position().coerceIn(0, m.duration)
+                    bar.fraction = pos.toFloat() / m.duration
+                    el.text = f(pos); rem.text = "-" + f(m.duration - pos)
+                    play.setImageResource(if (m.playing()) R.drawable.ic_island_pause else R.drawable.ic_island_play)
+                    tile.postDelayed(this, 500)
+                }
+            }
+            musicTicker = r
+            r.run()
+        } else bar.visibility = View.INVISIBLE
+        return tile
+    }
+
+    private fun openHotspot() {
+        hide()
+        val tries = listOf(
+            Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings"),
+            Intent("android.settings.TETHER_SETTINGS"),
+            Intent(Settings.ACTION_WIRELESS_SETTINGS)
+        )
+        for (i in tries) if (runCatching { act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+    }
+
+    /** Opens Android's Quick Settings (for tiles a launcher can't run itself, like screen recording). */
+    private fun openQuickSettings(hint: String) {
+        hide()
+        val ok = LuncherAccessibility.perform(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS) || runCatching {
+            @Suppress("WrongConstant")
+            val sb = act.getSystemService("statusbar")
+            sb.javaClass.getMethod("expandSettingsPanel").invoke(sb)
+        }.isSuccess
+        if (ok) toast(hint)
+    }
+
+    private fun toggleRotation() {
+        if (!Settings.System.canWrite(act)) {
+            toast("Allow “Modify system settings” to lock rotation")
+            runCatching {
+                act.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${act.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            return
+        }
+        val cur = Settings.System.getInt(act.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1)
+        runCatching { Settings.System.putInt(act.contentResolver, Settings.System.ACCELEROMETER_ROTATION, if (cur == 1) 0 else 1) }
+        toast(if (cur == 1) "Orientation Locked" else "Orientation Unlocked")
+        // Rebuild so the tile shows the new state.
+        layer?.let { root.removeView(it); layer = null; onBlur(false) }
+        show(lastTop, lastBottom)
+    }
+    private var lastTop = 0
+    private var lastBottom = 0
+
+    private fun openMusicApp() {
+        val i = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
+        runCatching { act.startActivity((musicApp?.invoke() ?: i).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { toast("No music app found") }
+    }
+    /** Launch intent of the app that's playing, set by the launcher. */
+    var musicApp: (() -> Intent?)? = null
+
+    private fun recogniseMusic() {
+        val pm = act.packageManager
+        val shazam = pm.getLaunchIntentForPackage("com.shazam.android")
+        val tries = listOfNotNull(
+            shazam,
+            Intent("com.google.android.googlequicksearchbox.MUSIC_SEARCH"),
+            Intent("android.media.action.MEDIA_PLAY_FROM_SEARCH").setPackage("com.google.android.googlequicksearchbox")
+        )
+        for (i in tries) if (runCatching { act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+        toast("Install Shazam or the Google app to recognise music")
+    }
+
+    private fun headphoneName(): String? = runCatching {
+        act.getSystemService(AudioManager::class.java).getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET
+        }?.productName?.toString()
+    }.getOrNull()
 
     fun hide() {
         val l = layer ?: return
@@ -323,10 +543,10 @@ class ControlCenter(
         private val listener: () -> Unit = { invalidate() }
 
         init {
-            background = glass(26)
+            background = tileBg(dp(30).toFloat())
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) =
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(26).toFloat())
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(30).toFloat())
             }
             clipToOutline = true
         }
@@ -454,17 +674,17 @@ class ControlCenter(
     }
 
     private inner class GlassSlider(
-        private val icon: String,
+        private val iconRes: Int,
         private var value: Float,
         private val onChange: (Float) -> Unit
     ) : View(act) {
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-        private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = dp(20).toFloat() }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ThemeEngine.accent }
+        private val iconDr = act.getDrawable(iconRes)?.mutate()
         init {
-            background = glass(24)
+            background = tileBg(dp(34).toFloat())
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) =
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(24).toFloat())
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(34).toFloat())
             }
             clipToOutline = true
         }
@@ -472,8 +692,11 @@ class ControlCenter(
         override fun onDraw(canvas: Canvas) {
             val h = height.toFloat()
             canvas.drawRect(0f, h * (1f - value), width.toFloat(), h, fill)
-            text.color = if (value > 0.12f) 0xFF555555.toInt() else Color.WHITE
-            canvas.drawText(icon, width / 2f, h - dp(16), text)
+            val s = dp(28)
+            val top = (h - dp(18) - s).toInt()
+            iconDr?.setBounds((width - s) / 2, top, (width + s) / 2, top + s)
+            iconDr?.setTint(if (value * h > h - top - dp(4)) (if (ThemeEngine.luminance(ThemeEngine.accent) > 0.5f) 0xFF6E6E73.toInt() else Color.WHITE) else Color.WHITE)
+            iconDr?.draw(canvas)
         }
 
         private var startY = 0f
@@ -501,7 +724,7 @@ class ControlCenter(
             Settings.System.getInt(act.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
         }.getOrDefault(0.5f)
         var asked = false
-        return GlassSlider("☀", cur) { v ->
+        return GlassSlider(R.drawable.ic_cc_sun, cur) { v ->
             if (Settings.System.canWrite(act)) {
                 runCatching {
                     Settings.System.putInt(act.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
@@ -529,7 +752,7 @@ class ControlCenter(
     private fun volumeSlider(): View {
         val audio = act.getSystemService(AudioManager::class.java)
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        return GlassSlider("🔊", audio.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()) { v ->
+        return GlassSlider(R.drawable.ic_speaker, audio.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()) { v ->
             runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, (v * max).roundToInt(), 0) }
         }
     }

@@ -23,6 +23,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.dynamicanimation.animation.DynamicAnimation
 import androidx.dynamicanimation.animation.FloatValueHolder
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
@@ -174,8 +175,10 @@ class DynamicIsland(
             }
             override fun onLongPress(e: MotionEvent) {
                 buzz()
-                collapse()
-                onVolume()
+                if (expanded) { collapse(); onVolume(); return }
+                // Long-press and drag to move the island; let go without moving for volume.
+                dragging = true
+                Motion.scaleTo(pill, sizeScale * 1.12f, Motion.SNAPPY)
             }
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
                 if (e1 == null) return false
@@ -190,7 +193,12 @@ class DynamicIsland(
                 return false
             }
         })
-        pill.setOnTouchListener { _, e -> detector.onTouchEvent(e); true }
+        pill.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.pivotX = v.width / 2f; v.pivotY = 0f }
+        pill.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) { downRawX = e.rawX; downRawY = e.rawY }
+            if (dragging) drag(e) else detector.onTouchEvent(e)
+            true
+        }
     }
 
     /** True if a screen point lands on the island (so the home swipe-down ignores it). */
@@ -202,7 +210,31 @@ class DynamicIsland(
             rawY >= loc[1] - dp(10) && rawY <= loc[1] + pill.height + dp(14)
     }
 
+    private fun drag(e: MotionEvent) {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                pill.translationX = offsetX + (e.rawX - downRawX)
+                pill.translationY = e.rawY - downRawY
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                dragging = false
+                val dx = pill.translationX - offsetX
+                val dy = pill.translationY
+                Motion.scaleTo(pill, sizeScale, Motion.BOUNCY)
+                if (abs(dx) < dp(8) && abs(dy) < dp(8)) {
+                    pill.translationX = offsetX; pill.translationY = 0f
+                    onVolume()
+                } else {
+                    buzz()
+                    offsetX += dx
+                    onMoved?.invoke(dx, dy)
+                }
+            }
+        }
+    }
+
     fun setTopInset(px: Int) {
+        pill.translationY = 0f
         topMargin = px
         (pill.layoutParams as FrameLayout.LayoutParams).topMargin = px
         pill.requestLayout()
@@ -214,6 +246,41 @@ class DynamicIsland(
     var popupMs = 0L
 
     fun ids(): Set<String> = activities.keys.toSet()
+
+    // ---- Look & feel (Settings › Dynamic Island)
+    /** Size of the small island, 0.8..1.3. */
+    var sizeScale = 1f
+    /** black | glass | outline | color */
+    var style = "black"
+    /** spring | fade | slide | zoom */
+    var anim = "spring"
+    /** Sideways position (px) from the centre. */
+    var offsetX = 0f
+    /** Called after you long-press and drag the island somewhere new (dx, dy in px). */
+    var onMoved: ((Float, Float) -> Unit)? = null
+
+    private var dragging = false
+    private var downRawX = 0f
+    private var downRawY = 0f
+
+    /** Re-apply size, colour style and position. */
+    fun applyLook() {
+        val r = (pill.background as? GradientDrawable)?.cornerRadius ?: dp(18).toFloat()
+        pill.background = GradientDrawable().apply {
+            cornerRadius = r
+            when (style) {
+                "glass" -> { setColor(Color.argb(175, 18, 18, 20)); setStroke(maxOf(1, dp(1)), Color.argb(80, 255, 255, 255)) }
+                "outline" -> { setColor(Color.BLACK); setStroke(maxOf(2, dp(2)), ThemeEngine.alpha(ThemeEngine.accent, 220)) }
+                "color" -> setColor(IconFactory.blend(Color.BLACK, ThemeEngine.accent, 0.38f))
+                else -> setColor(Color.BLACK)
+            }
+        }
+        if (!expanded && !dragging) {
+            pill.pivotY = 0f
+            pill.scaleX = sizeScale; pill.scaleY = sizeScale
+            pill.translationX = offsetX
+        }
+    }
 
     /** Drops anything that is no longer allowed. */
     fun applyFilter() {
@@ -275,8 +342,13 @@ class DynamicIsland(
         if (!enabled || a == null) {
             if (expanded) collapse(animate = false)
             if (pill.visibility == View.VISIBLE) {
-                pill.animate().alpha(0f).scaleX(0.6f).scaleY(0.6f).setDuration((180 * Motion.scale).toLong())
-                    .withEndAction { pill.visibility = View.GONE }.start()
+                val a = pill.animate().alpha(0f).setDuration((200 * Motion.scale).toLong())
+                when (anim) {
+                    "fade" -> {}
+                    "slide" -> a.translationY(-dp(60).toFloat())
+                    else -> a.scaleX(0.6f * sizeScale).scaleY(0.6f * sizeScale)
+                }
+                a.withEndAction { pill.visibility = View.GONE; pill.translationY = 0f }.start()
             }
             return
         }
@@ -284,9 +356,29 @@ class DynamicIsland(
         if (pill.visibility != View.VISIBLE) {
             pill.visibility = View.VISIBLE
             pill.alpha = 0f
-            pill.scaleX = 0.5f; pill.scaleY = 0.5f
-            Motion.scaleTo(pill, 1f, Motion.BOUNCY)
-            Motion.alphaTo(pill, 1f, Motion.SNAPPY)
+            pill.translationX = offsetX
+            when (anim) {
+                "fade" -> {
+                    pill.scaleX = sizeScale; pill.scaleY = sizeScale
+                    pill.animate().alpha(1f).setDuration((320 * Motion.scale).toLong()).start()
+                }
+                "slide" -> {
+                    pill.scaleX = sizeScale; pill.scaleY = sizeScale
+                    Motion.spring(pill, DynamicAnimation.TRANSLATION_Y, 0f, Motion.BOUNCY, start = -dp(60).toFloat())
+                    Motion.alphaTo(pill, 1f, Motion.SNAPPY)
+                }
+                "zoom" -> {
+                    pill.scaleX = 0f; pill.scaleY = 0f
+                    pill.animate().scaleX(sizeScale).scaleY(sizeScale).alpha(1f)
+                        .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
+                        .setDuration((280 * Motion.scale).toLong()).start()
+                }
+                else -> {
+                    pill.scaleX = 0.5f * sizeScale; pill.scaleY = 0.5f * sizeScale
+                    Motion.scaleTo(pill, sizeScale, Motion.BOUNCY)
+                    Motion.alphaTo(pill, 1f, Motion.SNAPPY)
+                }
+            }
         }
         if (!expanded) animateSize(compactWidth(a), dp(36), dp(18).toFloat())
         else bindExpanded(a)
@@ -480,6 +572,8 @@ class DynamicIsland(
         expanded = true
         buzz()
         bindExpanded(a)
+        Motion.scaleTo(pill, 1f, Motion.FLUID)
+        pill.animate().translationX(0f).setDuration((260 * Motion.scale).toLong()).start()
         compact.animate().alpha(0f).setDuration(120).start()
         expandedView.visibility = View.VISIBLE
         expandedView.alpha = 0f
@@ -503,6 +597,8 @@ class DynamicIsland(
         expandedView.animate().cancel()
         expandedView.visibility = View.GONE
         compact.animate().alpha(1f).setDuration(if (animate) 180 else 0).start()
+        Motion.scaleTo(pill, sizeScale, Motion.FLUID)
+        pill.animate().translationX(offsetX).setDuration((260 * Motion.scale).toLong()).start()
         current()?.let { animateSize(compactWidth(it), dp(36), dp(18).toFloat()) }
     }
 

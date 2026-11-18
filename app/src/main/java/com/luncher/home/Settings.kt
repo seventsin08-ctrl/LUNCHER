@@ -97,6 +97,41 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_island", true)
         set(v) = put("s_island", v)
 
+    // ---- Theme (whole launcher)
+    /** wallpaper | system | custom | mono */
+    var themeSource: String
+        get() = p.getString("s_theme_src", "wallpaper") ?: "wallpaper"
+        set(v) = put("s_theme_src", v)
+    var themeColor: Int
+        get() = p.getInt("s_theme_color", 0xFF0A84FF.toInt())
+        set(v) = put("s_theme_color", v)
+    /** Tint glass panels, dock and widgets with the theme colour. */
+    var themeSurfaces: Boolean
+        get() = p.getBoolean("s_theme_surfaces", true)
+        set(v) = put("s_theme_surfaces", v)
+    /** dark | glass — Control Center tiles */
+    var ccStyle: String
+        get() = p.getString("s_cc_style", "dark") ?: "dark"
+        set(v) = put("s_cc_style", v)
+
+    // ---- Island look
+    /** 80..130 % */
+    var islandScale: Int
+        get() = p.getInt("s_isl_scale", 100)
+        set(v) = put("s_isl_scale", v)
+    /** black | glass | outline | color */
+    var islandStyle: String
+        get() = p.getString("s_isl_style", "black") ?: "black"
+        set(v) = put("s_isl_style", v)
+    /** spring | fade | slide | zoom */
+    var islandAnim: String
+        get() = p.getString("s_isl_anim", "spring") ?: "spring"
+        set(v) = put("s_isl_anim", v)
+    /** Sideways offset from the centre, in dp. */
+    var islandX: Int
+        get() = p.getInt("s_isl_x", 0)
+        set(v) = put("s_isl_x", v)
+
     /** statusbar = in the status bar like iPhone · below = under the status bar */
     var islandPlacement: String
         get() = p.getString("s_isl_place", "below") ?: "below"

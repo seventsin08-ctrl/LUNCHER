@@ -119,6 +119,22 @@ class SettingsActivity : Activity() {
             s.iconStyle) { s.iconStyle = it; rebuild() }
         info(look, "Glass gives icons a clear look. Color shows the original app icons.")
         swatches(look, "Accent Color", s.tint) { s.tint = it; rebuild() }
+
+        // ---------------- Theme colours for the whole launcher
+        val theme = section("THEME")
+        segment(theme, "Colors From", listOf("wallpaper" to "Wallpaper", "system" to "Phone Theme",
+            "custom" to "My Color", "mono" to "Mono"), s.themeSource) { s.themeSource = it; rebuild() }
+        info(theme, when (s.themeSource) {
+            "wallpaper" -> "Control Center, the island, sliders and glass take their colour from your wallpaper and change when you change it."
+            "system" -> "Uses your phone's own theme colour (Android 12+), otherwise the wallpaper."
+            "custom" -> "Pick the colour below."
+            else -> "Black, white and grey only, like the classic iPhone look."
+        })
+        if (s.themeSource == "custom") swatches(theme, "Theme Color", s.themeColor) { s.themeColor = it; rebuild() }
+        toggle(theme, "Tint Glass, Dock & Widgets", "Blend the theme colour into see-through panels", s.themeSurfaces) {
+            s.themeSurfaces = it
+        }
+        segment(theme, "Control Center Tiles", listOf("dark" to "Dark", "glass" to "Liquid Glass"), s.ccStyle) { s.ccStyle = it }
         toggle(look, "Glass Effect", "See-through folders, widgets and dock", s.glass) { s.glass = it; rebuild() }
         slider(look, "Liquid Glass", 0, 100, s.glassClarity, {
             when { it < 34 -> "Frosted"; it < 67 -> "Balanced"; else -> "Clear" }
@@ -255,7 +271,17 @@ class SettingsActivity : Activity() {
             "assistant, sideways to switch, long-press for volume", s.island) { s.island = it }
         segment(isl, "Position", listOf("statusbar" to "In Status Bar", "below" to "Below Status Bar"),
             s.islandPlacement) { s.islandPlacement = it }
-        slider(isl, "Move Up / Down", -20, 60, s.islandNudge, { if (it > 0) "+$it" else "$it" }) { s.islandNudge = it }
+        slider(isl, "Move Up / Down", -20, 200, s.islandNudge.coerceIn(-20, 200), { if (it > 0) "+$it" else "$it" }) { s.islandNudge = it }
+        slider(isl, "Move Left / Right", -150, 150, s.islandX.coerceIn(-150, 150), { if (it > 0) "+$it" else "$it" }) { s.islandX = it }
+        button(isl, "Reset Island Position", 0xFF0A84FF.toInt()) {
+            s.islandX = 0; s.islandNudge = 0; s.islandPlacement = "below"; rebuild()
+        }
+        info(isl, "Tip: long-press the island on the Home Screen and drag it wherever you like.")
+        slider(isl, "Island Size", 80, 130, s.islandScale, { "$it%" }) { s.islandScale = it }
+        segment(isl, "Island Style", listOf("black" to "Black", "glass" to "Glass", "outline" to "Outline", "color" to "Color"),
+            s.islandStyle) { s.islandStyle = it }
+        segment(isl, "Pop-up Animation", listOf("spring" to "Pop", "fade" to "Fade", "slide" to "Slide", "zoom" to "Zoom"),
+            s.islandAnim) { s.islandAnim = it }
         // What may appear in the island
         val content = section("ISLAND CONTENT")
         for ((type, label, sub) in listOf(
