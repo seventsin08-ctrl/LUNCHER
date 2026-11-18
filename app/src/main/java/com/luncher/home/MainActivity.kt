@@ -73,6 +73,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.Space
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationManagerCompat
@@ -2507,7 +2508,174 @@ class MainActivity : Activity() {
         rebuild()
     }
 
-    private fun showRestoreWidgetsMenu(anchor: View) {
+    private fun showRestoreWidgetsMenu(anchor: View) = showWidgetGallery()
+
+    /** Cell size (columns x rows) a built-in widget uses when added. */
+    private fun builtInSize(type: WidgetType): Pair<Int, Int> {
+        val width = when (type) {
+            WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
+            WidgetType.CALENDAR, WidgetType.MUSIC, WidgetType.PHOTO_WIDE,
+            WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK -> cols
+            else -> (cols / 2).coerceAtLeast(1)
+        }
+        val height = if (type == WidgetType.CLOCK_ICON || type == WidgetType.CALENDAR_ICON) 1 else 2
+        return width to height
+    }
+
+    /**
+     * iOS-style widget gallery: a sheet slides up with a live preview of every widget,
+     * its name and size, and an Add Widget button. Search filters the list.
+     */
+    private fun showWidgetGallery() {
+        if (menuLayer != null) dismissMenu(immediate = true)
+        val gallery = listOf(
+            Triple(WidgetType.PHOTO, "Photo", "A photo you pick, with an optional 3D depth effect"),
+            Triple(WidgetType.PHOTO_WIDE, "Wide Photo", "A panoramic photo across the screen"),
+            Triple(WidgetType.CLOCK_ICON, "Clock", "Analog clock, small"),
+            Triple(WidgetType.DIGITAL_CLOCK, "Digital Clock", "Big time and date"),
+            Triple(WidgetType.WIDE_CLOCK, "Wide Digital Clock", "Time, date and day across the screen"),
+            Triple(WidgetType.WORLD_CLOCK, "World Clock", "Times in the cities you choose"),
+            Triple(WidgetType.CALENDAR_ICON, "Calendar Icon", "Today's date, small"),
+            Triple(WidgetType.CALENDAR, "Calendar", "The month with today highlighted"),
+            Triple(WidgetType.DATE_CARD, "Date Card", "Day and date at a glance"),
+            Triple(WidgetType.QUOTE, "Quote", "Your own words on the Home Screen"),
+            Triple(WidgetType.BATTERY, "Batteries", "Phone and headphone battery levels"),
+            Triple(WidgetType.MUSIC, "Now Playing", "What's playing, with controls"),
+            Triple(WidgetType.STACK, "Smart Stack", "Swipe up and down between widgets"),
+            Triple(WidgetType.TIMER, "Timer", "Start a timer; it counts down live in the island")
+        )
+        val layer = FrameLayout(this).apply { setBackgroundColor(Color.argb(110, 0, 0, 0)); isClickable = true }
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true
+            background = GradientDrawable().apply {
+                cornerRadii = floatArrayOf(dp(34).toFloat(), dp(34).toFloat(), dp(34).toFloat(), dp(34).toFloat(), 0f, 0f, 0f, 0f)
+                setColor(0xF51C1C1E.toInt())
+            }
+            setPadding(0, dp(10), 0, 0)
+        }
+        var closed = false
+        fun close() {
+            if (closed) return
+            closed = true
+            animateBlur(0f, dur(220))
+            sheet.animate().translationY(sheet.height.toFloat()).setDuration(dur(260)).setInterpolator(EASE).start()
+            layer.animate().alpha(0f).setDuration(dur(260)).withEndAction {
+                root.removeView(layer)
+                // Previews borrowed the live music/battery views; give them back to the Home Screen.
+                rebuild()
+            }.start()
+        }
+        layer.setOnClickListener { close() }
+        // Grab handle + header
+        sheet.addView(View(this).apply { background = Glass.pill(0x55FFFFFF, dp(3).toFloat()) },
+            LinearLayout.LayoutParams(dp(40), dp(5)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        val header = FrameLayout(this).apply { setPadding(dp(20), dp(10), dp(20), 0) }
+        header.addView(TextView(this).apply {
+            text = "Widgets"; setTextColor(Color.WHITE); textSize = 28f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        }, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL))
+        header.addView(TextView(this).apply {
+            text = "Done"; setTextColor(0xFF0A84FF.toInt()); textSize = 17f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(8), dp(8), dp(4), dp(8))
+            setOnClickListener { close() }
+        }, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL))
+        sheet.addView(header)
+        val search = glassField("").apply { hint = "Search Widgets"; setSingleLine() }
+        sheet.addView(search, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { setMargins(dp(16), dp(10), dp(16), dp(6)) })
+
+        val listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(6), dp(16), insetBottom + dp(24)) }
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(listBox) }
+        sheet.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+
+        val avail = resources.displayMetrics.widthPixels - dp(32) - dp(32)
+        fun card(name: String, desc: String, size: String, preview: View?, onAdd: () -> Unit): View {
+            val c = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(16), dp(16), dp(14))
+                background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFF2C2C2E.toInt()) }
+            }
+            if (preview != null) c.addView(preview, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
+                gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(12)
+            })
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            row.addView(TextView(this).apply {
+                text = "$name\n$desc · $size"; setTextColor(Color.WHITE); textSize = 15f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            row.addView(TextView(this).apply {
+                text = "+ Add"; setTextColor(Color.WHITE); textSize = 15f; gravity = Gravity.CENTER
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                background = Glass.pill(0xFF0A84FF.toInt(), dp(18).toFloat())
+                setPadding(dp(16), dp(8), dp(16), dp(8))
+                setOnClickListener { haptic(it, HapticFeedbackConstants.CONFIRM); closed = true; root.removeView(layer); animateBlur(0f, dur(200)); rebuild(); onAdd() }
+            })
+            c.addView(row)
+            c.setOnClickListener { v -> v.animate().scaleX(0.97f).scaleY(0.97f).setDuration(80).withEndAction { Motion.scaleTo(v, 1f, Motion.BOUNCY) }.start() }
+            return c
+        }
+
+        /** The real widget, drawn at its true size and shrunk to fit the card. Taps are blocked. */
+        fun preview(type: WidgetType): View? = runCatching {
+            val (w, h) = builtInSize(type)
+            val realW = w * cellW()
+            val realH = h * dp(CELL_H)
+            val widget = buildWidget(PlacedWidget(type, 0, 0, w, h, "preview_${type.name}", 0), 0)
+            val scale = minOf(1f, avail / realW.toFloat())
+            val holder = FrameLayout(this).apply { clipChildren = false }
+            val inner = FrameLayout(this).apply { pivotX = 0f; pivotY = 0f; scaleX = scale; scaleY = scale }
+            inner.addView(widget, FrameLayout.LayoutParams(realW, realH))
+            holder.addView(inner, FrameLayout.LayoutParams(realW, realH))
+            holder.addView(View(this).apply { isClickable = true }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            holder.layoutParams = LinearLayout.LayoutParams((realW * scale).toInt(), (realH * scale).toInt())
+            FrameLayout(this).apply {
+                addView(holder, FrameLayout.LayoutParams((realW * scale).toInt(), (realH * scale).toInt()))
+            }
+        }.getOrNull()
+
+        fun fill(q: String) {
+            listBox.removeAllViews()
+            val query = q.trim().lowercase()
+            if (query.isEmpty() || "installed apps".contains(query) || "app widgets".contains(query)) {
+                listBox.addView(card("Widgets from Your Apps", "Add a widget made by an installed app", "various", null) {
+                    showInstalledWidgets()
+                }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
+            }
+            for ((type, name, desc) in gallery) {
+                if (query.isNotEmpty() && !name.lowercase().contains(query) && !desc.lowercase().contains(query)) continue
+                val (w, h) = builtInSize(type)
+                listBox.addView(card(name, desc, "${w}×${h}", preview(type)) { addBuiltInWidget(type) },
+                    LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
+            }
+            // Widgets you removed from the Home Screen earlier.
+            for (key in settings.hiddenWidgets.toList().sorted()) {
+                val parts = key.split(':')
+                val nm = when (parts.getOrNull(1)) {
+                    "PHOTO" -> "Photo"; "CALENDAR" -> "Calendar"; "BATTERY" -> "Batteries"; "MUSIC" -> "Now Playing"
+                    "CLOCK_ICON" -> "Clock"; "CALENDAR_ICON" -> "Calendar Icon"; else -> "Widget"
+                }
+                if (query.isNotEmpty() && !nm.lowercase().contains(query)) continue
+                val pg = (parts.getOrNull(0)?.toIntOrNull() ?: 0) + 1
+                listBox.addView(card("Restore $nm", "Put back the one you removed from page $pg", "original", null) {
+                    restoreBuiltInWidget(key)
+                }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
+            }
+        }
+        fill("")
+        search.addTextChangedListener(afterTextChanged = { fill(it?.toString().orEmpty()) })
+
+        layer.addView(sheet, FrameLayout.LayoutParams(MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.9f).toInt(), Gravity.BOTTOM))
+        root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        animateBlur(dp(22).toFloat(), dur(280))
+        layer.alpha = 0f
+        layer.animate().alpha(1f).setDuration(dur(220)).start()
+        Motion.spring(sheet, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_Y, 0f, Motion.FLUID,
+            start = resources.displayMetrics.heightPixels.toFloat())
+    }
+
+    @Suppress("unused")
+    private fun showOldWidgetMenu() {
         val items = mutableListOf<Pair<String, () -> Unit>>()
         items += "Widgets from installed apps" to { showInstalledWidgets() }
         items += "Photo" to { addBuiltInWidget(WidgetType.PHOTO) }
@@ -2579,13 +2747,7 @@ class MainActivity : Activity() {
     }
 
     private fun addBuiltInWidget(type: WidgetType) {
-        val width = when (type) {
-            WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
-            WidgetType.CALENDAR, WidgetType.MUSIC, WidgetType.PHOTO_WIDE,
-            WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK -> cols
-            else -> (cols / 2).coerceAtLeast(1)
-        }
-        val height = if (type == WidgetType.CLOCK_ICON || type == WidgetType.CALENDAR_ICON) 1 else 2
+        val (width, height) = builtInSize(type)
         val typeKey = when (type) {
             WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> "ICONS"
             WidgetType.PHOTO_WIDE -> "PHOTO"
