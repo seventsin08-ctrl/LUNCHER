@@ -396,6 +396,7 @@ class MainActivity : Activity() {
         Tilt.resume()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
+        if (::island.isInitialized) detachOverlayIsland()
         refreshOngoing()
         if (::headsetPopup.isInitialized) headsetPopup.hostResumed = true
         defaultBanner.visibility = if (isDefaultHome()) View.GONE else View.VISIBLE
@@ -416,6 +417,10 @@ class MainActivity : Activity() {
     override fun onPause() {
         Tilt.pause()
         isActive = false
+        // Wait a moment: if you're only opening the launcher's own Settings, stay off.
+        mainHandler.postDelayed({
+            if (!isActive && !SettingsActivity.visible && !isFinishing) runCatching { attachOverlayIsland() }
+        }, 450)
         if (::headsetPopup.isInitialized) headsetPopup.hostResumed = false
         activeFolderDialog?.let { folder ->
             if (folder.draggingMember) {
@@ -521,6 +526,7 @@ class MainActivity : Activity() {
         NotificationService.onChange = null
         NotificationService.onPosted = null
         NotificationService.onOngoing = null
+        if (::island.isInitialized) detachOverlayIsland()
         ThemeEngine.unwatch(this)
         stopPrivacyWatch()
         mainHandler.removeCallbacks(ongoingTicker)
@@ -626,6 +632,85 @@ class MainActivity : Activity() {
         applyPageEffect()
         if (currentBlur > 0f && !settings.blur) animateBlur(0f, 1)
         reloadApps()
+    }
+
+    // ================================================================ Island over other apps
+
+    private var lastIslandTop = 0
+    private var overlayIsland: DynamicIsland? = null
+    private var overlayRoot: FrameLayout? = null
+    private var overlayWm: android.view.WindowManager? = null
+    private var overlayLp: android.view.WindowManager.LayoutParams? = null
+
+    /** When you leave the Home Screen, a copy of the island floats over the app you open. */
+    private fun attachOverlayIsland() {
+        if (overlayIsland != null || !::island.isInitialized) return
+        if (!settings.island || !settings.islandOverApps) return
+        val svc = LuncherAccessibility.instance
+        val type = when {
+            svc != null -> android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            android.provider.Settings.canDrawOverlays(this) -> android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else -> return
+        }
+        val wm = (svc ?: this).getSystemService(android.view.WindowManager::class.java) ?: return
+        val holder = FrameLayout(this).apply {
+            clipChildren = false; clipToPadding = false
+            setPadding(dp(30), dp(4), dp(30), dp(18))
+        }
+        val ov = DynamicIsland(this, holder, { openAssistant() }, {
+            // Long-press over an app: the phone's own volume slider.
+            runCatching {
+                getSystemService(android.media.AudioManager::class.java).adjustStreamVolume(
+                    android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_SAME,
+                    android.media.AudioManager.FLAG_SHOW_UI)
+            }
+        }, { settings.haptics })
+        ov.overlayMode = true
+        ov.allow = island.allow
+        ov.popupMs = island.popupMs
+        ov.sizeScale = island.sizeScale; ov.style = island.style; ov.anim = island.anim
+        ov.offsetX = 0f
+        ov.applyLook()
+        ov.setTopInset(0)
+        val lp = android.view.WindowManager.LayoutParams(
+            WRAP_CONTENT, WRAP_CONTENT, type,
+            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                android.view.WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            x = dp(settings.islandX)
+            y = (lastIslandTop - dp(4)).coerceAtLeast(0)
+            if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        // Only take touches while something is showing; tapping outside folds it back.
+        ov.onShownChanged = { shown ->
+            val l = overlayLp
+            if (l != null && overlayRoot?.isAttachedToWindow == true) {
+                l.flags = if (shown) l.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                    else l.flags or android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                runCatching { overlayWm?.updateViewLayout(overlayRoot, l) }
+            }
+        }
+        holder.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) ov.collapse()
+            false
+        }
+        if (runCatching { wm.addView(holder, lp) }.isFailure) return
+        overlayIsland = ov; overlayRoot = holder; overlayWm = wm; overlayLp = lp
+        island.mirror = ov
+        for (a in island.snapshot()) ov.put(a)
+    }
+
+    private fun detachOverlayIsland() {
+        island.mirror = null
+        val r = overlayRoot
+        if (r != null) runCatching { overlayWm?.removeViewImmediate(r) }
+        overlayIsland = null; overlayRoot = null; overlayWm = null; overlayLp = null
     }
 
     private fun applyIslandLook() {
@@ -752,6 +837,7 @@ class MainActivity : Activity() {
             val islandRoom = if (settings.island && islandTop < bars.top + dp(70))
                 (islandBottom + dp(6) - bars.top).coerceAtLeast(0) else 0
             if (::island.isInitialized) island.setTopInset(islandTop)
+            lastIslandTop = islandTop
             content.setPadding(0, bars.top + islandRoom, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
             insets
@@ -4314,6 +4400,7 @@ class MainActivity : Activity() {
 
     /** "Siri": swipe down on the island opens the chosen assistant (Google, Gemini or ChatGPT). */
     private fun openAssistant() {
+        if (settings.assistant == "off") return
         val pkg = when (settings.assistant) {
             "chatgpt" -> "com.openai.chatgpt"
             "gemini" -> "com.google.android.apps.bard"
@@ -4397,7 +4484,7 @@ class MainActivity : Activity() {
             island.put(IslandActivity("ongoing:${o.type}:${o.key}", app?.icon, R.drawable.ic_bolt, accent,
                 o.title, o.text, o.trailing(), o.type == "recording", accent, acts.take(4)))
         }
-        if (ticking && isActive) mainHandler.postDelayed(ongoingTicker, 1000)
+        if (ticking && (isActive || overlayIsland != null)) mainHandler.postDelayed(ongoingTicker, 1000)
     }
 
     /** Copy & go: when something useful was just copied, offer what to do with it. */
@@ -4843,7 +4930,7 @@ class MainActivity : Activity() {
     /** New notifications appear briefly in the Dynamic Island (not during a silencing Focus). */
     private val lastIslandNote = HashMap<String, Long>()
     private fun showNotificationInIsland(pkg: String, title: String, text: String) {
-        if (!::island.isInitialized || !settings.island || !isActive) return
+        if (!::island.isInitialized || !settings.island || (!isActive && overlayIsland == null)) return
         val f = focusId
         if (f != null && Focus.silences(this, f)) return
         if (mediaController?.packageName == pkg) return

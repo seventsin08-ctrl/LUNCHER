@@ -31,6 +31,11 @@ import kotlin.math.roundToInt
 /** iOS-style grouped settings screen for Luncher. */
 class SettingsActivity : Activity() {
 
+    companion object {
+        /** True while Settings is on screen (the floating island stays away then). */
+        @Volatile var visible = false
+    }
+
     private lateinit var s: Settings
     private lateinit var list: LinearLayout
     private var previewRow: LinearLayout? = null
@@ -83,8 +88,14 @@ class SettingsActivity : Activity() {
         scroll.post { updatePreviewVisibility() }
     }
 
+    override fun onPause() {
+        visible = false
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        visible = true
         if (pendingRingtone != null && SysSettings.System.canWrite(this)) applyRingtone()
         // Permission rows may have changed while the user was in system settings.
         rebuild()
@@ -295,9 +306,16 @@ class SettingsActivity : Activity() {
         islandCard = isl
         islandPreview?.load(s)
         val pv = islandPreview
-        toggle(isl, "Dynamic Island", "Live activities at the top: music, charging. Swipe down on it for your " +
-            "assistant, sideways to switch, long-press for volume", s.island) { s.island = it; updatePreviewVisibility() }
+        toggle(isl, "Dynamic Island", "Live activities at the top: music, timers, charging. Swipe sideways to switch, long-press for volume", s.island) { s.island = it; updatePreviewVisibility() }
         info(isl, "While you edit, a preview island shows at the top of the screen.")
+        toggle(isl, "Show Over Other Apps", "Keep the island on top while you use other apps", s.islandOverApps) { s.islandOverApps = it; rebuild() }
+        if (s.islandOverApps && !HeadsetPopup.canShowOverApps(this)) {
+            button(isl, "Allow Showing Over Other Apps…", 0xFF0A84FF.toInt()) {
+                runCatching {
+                    startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
+                }
+            }
+        }
         segment(isl, "Position", listOf("statusbar" to "In Status Bar", "below" to "Below Status Bar"),
             s.islandPlacement) { s.islandPlacement = it; pv?.placement = it; previewChanged() }
         slider(isl, "Move Up / Down", -20, 200, s.islandNudge.coerceIn(-20, 200), { if (it > 0) "+$it" else "$it" },
@@ -351,8 +369,13 @@ class SettingsActivity : Activity() {
         segment(content, "Pop-up Length", listOf("2500" to "Short", "4500" to "Normal", "8000" to "Long"),
             s.islandPopupMs.toString()) { s.islandPopupMs = it.toInt() }
 
-        segment(isl, "Assistant", listOf("system" to "Google", "gemini" to "Gemini", "chatgpt" to "ChatGPT"),
-            s.assistant) { s.assistant = it }
+        toggle(isl, "Swipe Down for Assistant", "Swipe down on the island to open your AI assistant",
+            s.assistant != "off") { on ->
+            s.assistant = if (on) (getSharedPreferences("luncher", MODE_PRIVATE).getString("last_assistant", "gemini") ?: "gemini") else "off"
+            rebuild()
+        }
+        if (s.assistant != "off") segment(isl, "Assistant", listOf("system" to "Google", "gemini" to "Gemini", "chatgpt" to "ChatGPT"),
+            s.assistant) { s.assistant = it; getSharedPreferences("luncher", MODE_PRIVATE).edit().putString("last_assistant", it).apply() }
 
         // ---------------- Sounds
         val snd = section("SOUNDS")

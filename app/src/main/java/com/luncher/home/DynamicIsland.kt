@@ -175,7 +175,7 @@ class DynamicIsland(
             }
             override fun onLongPress(e: MotionEvent) {
                 buzz()
-                if (expanded) { collapse(); onVolume(); return }
+                if (expanded || overlayMode) { collapse(); onVolume(); return }
                 // Long-press and drag to move the island; let go without moving for volume.
                 dragging = true
                 Motion.scaleTo(pill, sizeScale * 1.12f, Motion.SNAPPY)
@@ -284,12 +284,29 @@ class DynamicIsland(
 
     /** Drops anything that is no longer allowed. */
     fun applyFilter() {
+        mirror?.applyFilter()
         val gone = activities.keys.filter { !allow(it) }
         if (gone.isNotEmpty()) { gone.forEach { activities.remove(it) }; refresh() }
     }
 
+    /** A second island (floating over other apps) that copies everything shown here. */
+    var mirror: DynamicIsland? = null
+    /** True for the floating copy: it lives in its own small window over other apps. */
+    var overlayMode = false
+    /** Called when the island appears (true) or goes away (false). */
+    var onShownChanged: ((Boolean) -> Unit)? = null
+
+    fun snapshot(): List<IslandActivity> = activities.values.toList()
+
+    private fun screenW() = if (overlayMode) act.resources.displayMetrics.widthPixels else root.width
+
     fun put(a: IslandActivity) {
-        if (!allow(a.id)) { remove(a.id); return }
+        mirror?.put(a)
+        putLocal(a)
+    }
+
+    private fun putLocal(a: IslandActivity) {
+        if (!allow(a.id)) { removeLocal(a.id); return }
         val isNew = !activities.containsKey(a.id)
         activities[a.id] = a
         if (isNew) {
@@ -301,15 +318,21 @@ class DynamicIsland(
     }
 
     fun remove(id: String) {
+        mirror?.remove(id)
+        removeLocal(id)
+    }
+
+    private fun removeLocal(id: String) {
         if (activities.remove(id) != null) refresh()
     }
 
     /** Show something briefly (e.g. charging started), then let it go. */
     fun flash(a: IslandActivity, millis: Long) {
+        mirror?.flash(a, millis)
         if (!allow(a.id)) return
-        put(a)
+        putLocal(a)
         val ms = if (popupMs > 0) popupMs else millis
-        pill.postDelayed({ if (activities[a.id] === a) remove(a.id) }, ms)
+        pill.postDelayed({ if (activities[a.id] === a) removeLocal(a.id) }, ms)
     }
 
     private fun visibleList() = activities.values.filter { it.id !in hidden }
@@ -348,13 +371,14 @@ class DynamicIsland(
                     "slide" -> a.translationY(-dp(60).toFloat())
                     else -> a.scaleX(0.6f * sizeScale).scaleY(0.6f * sizeScale)
                 }
-                a.withEndAction { pill.visibility = View.GONE; pill.translationY = 0f }.start()
+                a.withEndAction { pill.visibility = View.GONE; pill.translationY = 0f; onShownChanged?.invoke(false) }.start()
             }
             return
         }
         bind(a)
         if (pill.visibility != View.VISIBLE) {
             pill.visibility = View.VISIBLE
+            onShownChanged?.invoke(true)
             pill.alpha = 0f
             pill.translationX = offsetX
             when (anim) {
@@ -391,7 +415,7 @@ class DynamicIsland(
         val count = visibleList().size
         val dotsW = if (count > 1) dp(10) else 0
         return (dp(8) + dp(22) + dp(8) + textW + barsW + trailW + dp(14) + dotsW)
-            .coerceIn(dp(120), root.width.coerceAtLeast(dp(300)) - dp(60))
+            .coerceIn(dp(120), screenW().coerceAtLeast(dp(300)) - dp(60))
     }
 
     private fun bind(a: IslandActivity) {
@@ -579,15 +603,19 @@ class DynamicIsland(
         expandedView.alpha = 0f
         expandedView.animate().alpha(1f).setStartDelay(80).setDuration(200).start()
         expandedView.measure(
-            View.MeasureSpec.makeMeasureSpec(root.width - dp(16), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(expandedW(), View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
-        animateSize(root.width - dp(16), expandedView.measuredHeight, dp(if (a.media != null) 46 else 38).toFloat())
+        animateSize(expandedW(), expandedView.measuredHeight, dp(if (a.media != null) 46 else 38).toFloat())
         // Tap anywhere else to fold it back.
         val c = View(act).apply { isClickable = true; setOnClickListener { collapse() } }
-        root.addView(c, root.indexOfChild(pill), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        catcher = c
+        if (!overlayMode) {
+            root.addView(c, root.indexOfChild(pill), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            catcher = c
+        }
     }
+
+    private fun expandedW() = screenW() - dp(if (overlayMode) 76 else 16)
 
     fun collapse(animate: Boolean = true) {
         if (!expanded) return

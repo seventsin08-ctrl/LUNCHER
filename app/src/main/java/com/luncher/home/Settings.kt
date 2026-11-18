@@ -127,6 +127,10 @@ class Settings(ctx: Context) {
     var islandAnim: String
         get() = p.getString("s_isl_anim", "spring") ?: "spring"
         set(v) = put("s_isl_anim", v)
+    /** Keep showing the island on top of other apps. */
+    var islandOverApps: Boolean
+        get() = p.getBoolean("s_isl_over_apps", true)
+        set(v) = put("s_isl_over_apps", v)
     /** Sideways offset from the centre, in dp. */
     var islandX: Int
         get() = p.getInt("s_isl_x", 0)
