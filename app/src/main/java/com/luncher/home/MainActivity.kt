@@ -79,6 +79,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnLayout
 import androidx.core.view.drawToBitmap
 import androidx.core.widget.addTextChangedListener
 import androidx.recyclerview.widget.GridLayoutManager
@@ -128,6 +129,9 @@ class MainActivity : Activity() {
     private lateinit var dots: LinearLayout
     private lateinit var searchPill: TextView
     private lateinit var dockRow: LinearLayout
+    private var dockWidthAnimator: ValueAnimator? = null
+    private var dockTargetWidth = 0
+    private var displayedDockKeys: List<String> = emptyList()
     private lateinit var defaultBanner: TextView
     private lateinit var searchOverlay: LinearLayout
     private lateinit var searchField: EditText
@@ -415,6 +419,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         cancelHomeHold()
+        dockWidthAnimator?.cancel()
+        dockWidthAnimator = null
         NotificationService.onChange = null
         runCatching { unregisterReceiver(packageReceiver) }
         runCatching { unregisterReceiver(batteryReceiver) }
@@ -555,8 +561,14 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(13), dp(8), dp(13))
             clipChildren = false
+            clipToPadding = false
         }
-        content.addView(dockRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+        val dockArea = FrameLayout(this).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
+        dockArea.addView(dockRow, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER))
+        content.addView(dockArea, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
             setMargins(dp(10), dp(2), dp(10), dp(8))
         })
 
@@ -1994,7 +2006,52 @@ class MainActivity : Activity() {
         return frame
     }
 
+    /** Resize around the centre while keeping the dock's height and page geometry unchanged. */
+    private fun resizeDock(target: Int) {
+        if (target == dockTargetWidth) return
+        dockTargetWidth = target
+        dockWidthAnimator?.cancel()
+        dockWidthAnimator = null
+        val lp = dockRow.layoutParams as FrameLayout.LayoutParams
+        val current = if (lp.width > 0) lp.width else dockRow.width
+        if (!dockRow.isLaidOut || current <= 0 || anim <= 0f) {
+            lp.width = target
+            dockRow.layoutParams = lp
+            return
+        }
+        dockWidthAnimator = ValueAnimator.ofInt(current, target).apply {
+            duration = dur(320)
+            interpolator = EASE
+            addUpdateListener { value ->
+                val params = dockRow.layoutParams as FrameLayout.LayoutParams
+                params.width = value.animatedValue as Int
+                dockRow.layoutParams = params
+            }
+            start()
+        }
+    }
+
     private fun buildDock(dock: List<AppInfo>) {
+        val keys = dock.map { it.key }
+        val animateItems = dockRow.isLaidOut && anim > 0f && keys != displayedDockKeys
+        val oldCenters = mutableMapOf<String, Int>()
+        if (animateItems) {
+            for (i in 0 until dockRow.childCount) {
+                val child = dockRow.getChildAt(i)
+                val key = child.tag as? String ?: continue
+                val loc = IntArray(2)
+                child.getLocationOnScreen(loc)
+                oldCenters[key] = loc[0] + child.width / 2
+            }
+        }
+        displayedDockKeys = keys
+        val available = ((if (content.width > 0) content.width else resources.displayMetrics.widthPixels) -
+            dp(20)).coerceAtLeast(1)
+        val slot = if (dock.isEmpty()) 0 else minOf(dp(iconDp + 12),
+            ((available - dp(16)) / dock.size).coerceAtLeast(1))
+        val target = if (dock.isEmpty()) minOf(dp(230), available) else minOf(available, dp(16) + slot * dock.size)
+        val dockIcon = if (dock.isEmpty()) dp(iconDp) else minOf(dp(iconDp), (slot - dp(4)).coerceAtLeast(1))
+        dockRow.minimumHeight = dp(iconDp + 26)
         dockRow.removeAllViews()
         if (dock.isEmpty()) {
             dockRow.addView(TextView(this).apply {
@@ -2003,13 +2060,45 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 textSize = 13f
             }, LinearLayout.LayoutParams(MATCH_PARENT, dp(iconDp)))
+            resizeDock(target)
             return
         }
         for (app in dock) {
             val cell = makeAppCell(app, fromDock = true, showLabel = false)
-            (cell as LinearLayout).setPadding(0, 0, 0, 0)
+            (cell as LinearLayout).apply {
+                setPadding(0, 0, 0, 0)
+                tag = app.key
+                contentDescription = app.label
+                val icon = getChildAt(0)
+                val iconParams = icon.layoutParams as LinearLayout.LayoutParams
+                iconParams.width = dockIcon
+                iconParams.height = dockIcon
+                icon.layoutParams = iconParams
+            }
             dockRow.addView(cell, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            if (animateItems) {
+                val oldCenter = oldCenters[app.key]
+                if (oldCenter == null) {
+                    cell.alpha = 0f
+                    cell.scaleX = 0.8f
+                    cell.scaleY = 0.8f
+                    cell.doOnLayout {
+                        if (cell.isAttachedToWindow) cell.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                            .setDuration(dur(260)).setInterpolator(EASE).start()
+                    }
+                } else {
+                    cell.doOnLayout {
+                        if (cell.isAttachedToWindow) {
+                            val loc = IntArray(2)
+                            cell.getLocationOnScreen(loc)
+                            cell.translationX = (oldCenter - loc[0] - cell.width / 2).toFloat()
+                            cell.animate().translationX(0f).setDuration(dur(320)).setInterpolator(EASE).start()
+                        }
+                    }
+                }
+            }
         }
+        resizeDock(target)
     }
 
     // ================================================================ edit mode & drag
@@ -2765,7 +2854,9 @@ class MainActivity : Activity() {
     private fun overDock(rawX: Float, rawY: Float): Boolean {
         val loc = IntArray(2)
         dockRow.getLocationOnScreen(loc)
-        return rawX >= loc[0] && rawX <= loc[0] + dockRow.width &&
+        // The invisible drop area includes one extra slot on each side while there is room.
+        val extra = if (dockApps().size < cols) dp((iconDp + 12) / 2) else 0
+        return rawX >= loc[0] - extra && rawX <= loc[0] + dockRow.width + extra &&
             rawY >= loc[1] - dp(10) && rawY <= loc[1] + dockRow.height + dp(10)
     }
 
