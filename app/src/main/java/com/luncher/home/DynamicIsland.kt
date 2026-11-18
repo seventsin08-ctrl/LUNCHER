@@ -162,7 +162,19 @@ class DynamicIsland(
         pill.requestLayout()
     }
 
+    /** Decides which activities may appear (from Settings › Island Content). */
+    var allow: (String) -> Boolean = { true }
+    /** Length of short pop-ups (0 = use the caller's own length). */
+    var popupMs = 0L
+
+    /** Drops anything that is no longer allowed. */
+    fun applyFilter() {
+        val gone = activities.keys.filter { !allow(it) }
+        if (gone.isNotEmpty()) { gone.forEach { activities.remove(it) }; refresh() }
+    }
+
     fun put(a: IslandActivity) {
+        if (!allow(a.id)) { remove(a.id); return }
         val isNew = !activities.containsKey(a.id)
         activities[a.id] = a
         if (isNew) {
@@ -179,8 +191,10 @@ class DynamicIsland(
 
     /** Show something briefly (e.g. charging started), then let it go. */
     fun flash(a: IslandActivity, millis: Long) {
+        if (!allow(a.id)) return
         put(a)
-        pill.postDelayed({ if (activities[a.id] === a) remove(a.id) }, millis)
+        val ms = if (popupMs > 0) popupMs else millis
+        pill.postDelayed({ if (activities[a.id] === a) remove(a.id) }, ms)
     }
 
     private fun visibleList() = activities.values.filter { it.id !in hidden }

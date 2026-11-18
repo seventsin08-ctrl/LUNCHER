@@ -302,6 +302,8 @@ class MainActivity : Activity() {
         TimerState.add(timerListener)
         focusId = Focus.current(this)?.id
         island.enabled = settings.island
+        island.popupMs = settings.islandPopupMs.toLong()
+        island.allow = { id -> settings.islandAllows(if (id == "timerdone") "timer" else id) }
         loadSpatialWallpaper()
         ViewCompat.requestApplyInsets(root)
 
@@ -569,7 +571,12 @@ class MainActivity : Activity() {
 
     private fun applySettings() {
         Motion.scale = settings.animScale
-        if (::island.isInitialized) { island.enabled = settings.island; ViewCompat.requestApplyInsets(root) }
+        if (::island.isInitialized) {
+            island.enabled = settings.island
+            island.popupMs = settings.islandPopupMs.toLong()
+            island.applyFilter()
+            ViewCompat.requestApplyInsets(root)
+        }
         loadSpatialWallpaper()
         appliedVersion = settings.version
         applyStyleGlobals()
@@ -4533,6 +4540,8 @@ class MainActivity : Activity() {
         if (f != null && Focus.silences(this, f)) return
         if (mediaController?.packageName == pkg) return
         val now = System.currentTimeMillis()
+        if (!settings.islandAllows("note")) return
+        if (settings.islandNoteMode == "chosen" && pkg !in settings.islandNoteApps) return
         if (now - (lastIslandNote[pkg] ?: 0L) < 4000L) return
         lastIslandNote[pkg] = now
         val app = allApps.firstOrNull { it.packageName == pkg }

@@ -97,6 +97,21 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_island", true)
         set(v) = put("s_island", v)
 
+    /** Which kinds of live activity may appear in the island. */
+    fun islandAllows(type: String): Boolean = p.getBoolean("s_isl_$type", true)
+    fun setIslandAllows(type: String, on: Boolean) = put("s_isl_$type", on)
+    /** all | chosen — which apps' notifications may pop up in the island. */
+    var islandNoteMode: String
+        get() = p.getString("s_isl_note_mode", "all") ?: "all"
+        set(v) = put("s_isl_note_mode", v)
+    var islandNoteApps: Set<String>
+        get() = p.getStringSet("s_isl_note_apps", emptySet())?.toSet() ?: emptySet()
+        set(v) = putSet("s_isl_note_apps", v)
+    /** How long pop-ups (notifications, charging, Focus) stay, in ms. */
+    var islandPopupMs: Int
+        get() = p.getInt("s_isl_popup_ms", 4500)
+        set(v) = put("s_isl_popup_ms", v)
+
     /** system | gemini | chatgpt — opened by swiping down on the island. */
     var assistant: String
         get() = p.getString("s_assistant", "system") ?: "system"

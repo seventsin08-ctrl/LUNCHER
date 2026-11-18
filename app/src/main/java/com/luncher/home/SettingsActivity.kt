@@ -253,6 +253,21 @@ class SettingsActivity : Activity() {
         val isl = section("DYNAMIC ISLAND & ASSISTANT")
         toggle(isl, "Dynamic Island", "Live activities at the top: music, charging. Swipe down on it for your " +
             "assistant, sideways to switch, long-press for volume", s.island) { s.island = it }
+        // What may appear in the island
+        val content = section("ISLAND CONTENT")
+        for ((type, label, sub) in listOf(
+            Triple("music", "Now Playing", "Song, artwork and playback controls"),
+            Triple("timer", "Timers", "Live countdown and “Timer done”"),
+            Triple("charging", "Charging", "Battery level when you plug in"),
+            Triple("focus", "Focus", "When a Focus mode turns on or off"),
+            Triple("note", "Notifications", "New notifications pop up briefly")
+        )) toggle(content, label, sub, s.islandAllows(type)) { s.setIslandAllows(type, it) }
+        segment(content, "Notifications from", listOf("all" to "All Apps", "chosen" to "Chosen Apps"),
+            s.islandNoteMode) { s.islandNoteMode = it }
+        button(content, "Choose Apps (${s.islandNoteApps.size})…", 0xFF0A84FF.toInt()) { chooseIslandApps() }
+        segment(content, "Pop-up Length", listOf("2500" to "Short", "4500" to "Normal", "8000" to "Long"),
+            s.islandPopupMs.toString()) { s.islandPopupMs = it.toInt() }
+
         segment(isl, "Assistant", listOf("system" to "Google", "gemini" to "Gemini", "chatgpt" to "ChatGPT"),
             s.assistant) { s.assistant = it }
 
@@ -392,6 +407,30 @@ class SettingsActivity : Activity() {
     }
 
     // ================================================================ building blocks
+
+    /** Pick which apps' notifications may pop up in the Dynamic Island. */
+    private fun chooseIslandApps() {
+        val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = packageManager.queryIntentActivities(main, 0)
+            .map { it.activityInfo.packageName to it.loadLabel(packageManager).toString() }
+            .filter { it.first != packageName }
+            .distinctBy { it.first }
+            .sortedBy { it.second.lowercase() }
+        val chosen = s.islandNoteApps.toMutableSet()
+        val checked = BooleanArray(apps.size) { apps[it].first in chosen }
+        android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
+            .setTitle("Island notifications")
+            .setMultiChoiceItems(apps.map { it.second }.toTypedArray(), checked) { _, i, on ->
+                if (on) chosen += apps[i].first else chosen -= apps[i].first
+            }
+            .setPositiveButton("Done") { _, _ ->
+                s.islandNoteApps = chosen
+                if (chosen.isNotEmpty()) s.islandNoteMode = "chosen"
+                recreate()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 
     private fun section(title: String): LinearLayout {
         list.addView(TextView(this).apply {
