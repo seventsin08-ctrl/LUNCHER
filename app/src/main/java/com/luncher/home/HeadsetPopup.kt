@@ -222,8 +222,33 @@ class HeadsetPopup private constructor(private val app: Context) {
         handler.postDelayed({ show(h) }, if (h.bluetooth) 450 else 150)
     }
 
+    /** Never leave a window behind: if anything goes wrong while building the card, remove it. */
     private fun show(h: Headset) {
+        try {
+            showInner(h)
+        } catch (t: Throwable) {
+            android.util.Log.w("HeadsetPopup", "pop-up failed", t)
+            hide(immediate = true)
+            forceRemoveOverlay()
+        }
+        // Hard safety net: whatever happens, the floating window is gone after 15 seconds.
+        handler.removeCallbacks(watchdog)
+        handler.postDelayed(watchdog, 15_000)
+    }
+
+    private val watchdog = Runnable { hide(immediate = true); forceRemoveOverlay() }
+
+    private fun forceRemoveOverlay() {
+        val win = overlay ?: return
+        val wm = overlayWm
+        overlay = null
+        overlayWm = null
+        runCatching { wm?.removeViewImmediate(win) }
+    }
+
+    private fun showInner(h: Headset) {
         hide(immediate = true)
+        forceRemoveOverlay()
         // In the launcher: draw inside it. Anywhere else: a floating window over the app.
         val a = host
         val useApp = a != null && hostRoot != null && hostResumed && !a.isFinishing && !a.isDestroyed
@@ -243,10 +268,14 @@ class HeadsetPopup private constructor(private val app: Context) {
             act = svc ?: app
             val wm = act.getSystemService(WindowManager::class.java) ?: return
             val win = FrameLayout(act)
+            // Only as tall as the card, and taps outside it go straight to the app underneath
+            // (a tap outside also closes the card), so the screen can never get "stuck".
             val lp = WindowManager.LayoutParams(
-                MATCH_PARENT, MATCH_PARENT, type,
+                MATCH_PARENT, WRAP_CONTENT, type,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT
             ).apply {
@@ -254,6 +283,10 @@ class HeadsetPopup private constructor(private val app: Context) {
                 if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
+            }
+            win.setOnTouchListener { _, e ->
+                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) hide()
+                false
             }
             if (runCatching { wm.addView(win, lp) }.isFailure) return
             overlay = win
@@ -267,10 +300,13 @@ class HeadsetPopup private constructor(private val app: Context) {
         shown = h
 
         val l = FrameLayout(act).apply {
-            setBackgroundColor(Color.argb(60, 0, 0, 0))
+            // Dim the Home Screen behind the card; over other apps there's no dim layer at all.
+            if (useApp) {
+                setBackgroundColor(Color.argb(60, 0, 0, 0))
+                isClickable = true
+                setOnClickListener { hide() }
+            }
             alpha = 0f
-            isClickable = true
-            setOnClickListener { hide() }
         }
 
         val c = LinearLayout(act).apply {
@@ -361,7 +397,7 @@ class HeadsetPopup private constructor(private val app: Context) {
         l.addView(c, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
             setMargins(dp(10), 0, dp(10), navInset + dp(10))
         })
-        root.addView(l, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        root.addView(l, FrameLayout.LayoutParams(MATCH_PARENT, if (useApp) MATCH_PARENT else WRAP_CONTENT))
         layer = l
         if (haptics()) l.performHapticFeedback(HapticFeedbackConstants.CONFIRM,
             HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING)
@@ -424,7 +460,8 @@ class HeadsetPopup private constructor(private val app: Context) {
 
     fun hide(immediate: Boolean = false) {
         handler.removeCallbacks(autoHide)
-        val l = layer ?: return
+        val l = layer
+        if (l == null) { forceRemoveOverlay(); return }
         val c = card
         layer = null
         card = null
@@ -438,7 +475,7 @@ class HeadsetPopup private constructor(private val app: Context) {
         overlayWm = null
         val remove = {
             (l.parent as? ViewGroup)?.removeView(l)
-            if (win != null && win.isAttachedToWindow) runCatching { wm?.removeView(win) }
+            if (win != null) runCatching { wm?.removeViewImmediate(win) }
         }
         if (immediate || Motion.scale <= 0f || c == null) {
             remove()
