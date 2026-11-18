@@ -283,6 +283,14 @@ class SettingsActivity : Activity() {
         toggle(conn, "Headphone Pop-up",
             "Show a card with battery when AirPods-style, Bluetooth or wired headphones connect",
             s.headsetPopup) { s.headsetPopup = it }
+        val overApps = HeadsetPopup.canShowOverApps(this)
+        button(conn, if (overApps) "Pop-up shows over other apps ✓" else "Show Pop-up Over Other Apps…",
+            if (overApps) 0xFF30D158.toInt() else 0xFF0A84FF.toInt()) {
+            runCatching {
+                startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:$packageName")))
+            }
+        }
 
         // ---------------- About
         val about = section("GENERAL")

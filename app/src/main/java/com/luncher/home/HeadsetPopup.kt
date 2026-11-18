@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -25,6 +26,8 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.animation.PathInterpolator
@@ -40,14 +43,23 @@ import kotlin.math.roundToInt
  * The AirPods-style card: when headphones connect (Bluetooth or wired), a glass card
  * springs up from the bottom with the headphones, their name and battery level.
  */
-class HeadsetPopup(
-    private val act: Activity,
-    private val root: FrameLayout,
-    private val enabled: () -> Boolean,
-    private val haptics: () -> Boolean
-) {
+class HeadsetPopup private constructor(private val app: Context) {
     companion object {
         const val REQ_BLUETOOTH = 4300
+        @Volatile private var shared: HeadsetPopup? = null
+
+        /**
+         * One watcher for the whole app. It's started by the launcher and also by the
+         * notification / accessibility services, so it keeps listening while another
+         * app is open.
+         */
+        fun get(ctx: Context): HeadsetPopup = shared ?: synchronized(this) {
+            shared ?: HeadsetPopup(ctx.applicationContext).also { shared = it; it.start() }
+        }
+
+        /** True when the card can appear on top of other apps. */
+        fun canShowOverApps(ctx: Context): Boolean =
+            LuncherAccessibility.instance != null || android.provider.Settings.canDrawOverlays(ctx)
         private const val ACTION_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         private const val EXTRA_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
     }
@@ -61,7 +73,28 @@ class HeadsetPopup(
         var kind: HeadsetKind
     )
 
-    private val audio = act.getSystemService(AudioManager::class.java)
+    private val settings = Settings(app)
+    private fun enabled() = settings.headsetPopup
+    private fun haptics() = settings.haptics
+
+    // The launcher screen, when it's in front.
+    private var host: Activity? = null
+    private var hostRoot: FrameLayout? = null
+    var hostResumed = false
+
+    // The floating window used when another app is in front.
+    private var overlay: FrameLayout? = null
+    private var overlayWm: WindowManager? = null
+    private var inApp = true
+
+    fun attach(act: Activity, root: FrameLayout) { host = act; hostRoot = root }
+    fun detach(act: Activity) {
+        if (host !== act) return
+        if (inApp) hide(immediate = true)
+        host = null; hostRoot = null; hostResumed = false
+    }
+
+    private val audio = app.getSystemService(AudioManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private val ease = PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
     private val known = HashSet<String>()
@@ -74,7 +107,7 @@ class HeadsetPopup(
     private val autoHide = Runnable { hide() }
     var bottomInset = 0
 
-    private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
+    private fun dp(v: Int) = (v * app.resources.displayMetrics.density).roundToInt()
 
     private val callback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
@@ -105,16 +138,16 @@ class HeadsetPopup(
         }
     }
 
-    fun start() {
+    private fun start() {
         // Headsets already plugged in when the launcher starts don't trigger a pop-up.
         for (d in audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) headsetOf(d)?.let { known += it.key }
         audio.registerAudioDeviceCallback(callback, handler)
-        ContextCompat.registerReceiver(act, batteryReceiver, IntentFilter(ACTION_BATTERY), ContextCompat.RECEIVER_EXPORTED)
+        ContextCompat.registerReceiver(app, batteryReceiver, IntentFilter(ACTION_BATTERY), ContextCompat.RECEIVER_EXPORTED)
     }
 
-    fun stop() {
+    private fun stop() {
         runCatching { audio.unregisterAudioDeviceCallback(callback) }
-        runCatching { act.unregisterReceiver(batteryReceiver) }
+        runCatching { app.unregisterReceiver(batteryReceiver) }
         handler.removeCallbacksAndMessages(null)
     }
 
@@ -177,7 +210,7 @@ class HeadsetPopup(
         if (!h.bluetooth || !hasBluetoothPermission()) return
         val addr = h.address ?: return
         val cls = runCatching {
-            val adapter = act.getSystemService(BluetoothManager::class.java)?.adapter ?: return
+            val adapter = app.getSystemService(BluetoothManager::class.java)?.adapter ?: return
             adapter.getRemoteDevice(addr).bluetoothClass?.deviceClass
         }.getOrNull() ?: return
         h.kind = guessKind(h.name, cls)
@@ -190,11 +223,48 @@ class HeadsetPopup(
     }
 
     private fun show(h: Headset) {
-        if (!act.hasWindowFocus() && !isResumed()) return
         hide(immediate = true)
+        // In the launcher: draw inside it. Anywhere else: a floating window over the app.
+        val a = host
+        val useApp = a != null && hostRoot != null && hostResumed && !a.isFinishing && !a.isDestroyed
+        val act: Context
+        val root: ViewGroup
+        var navInset = bottomInset
+        if (useApp) {
+            act = a!!
+            root = hostRoot!!
+        } else {
+            val svc = LuncherAccessibility.instance
+            val type = when {
+                svc != null -> WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                android.provider.Settings.canDrawOverlays(app) -> WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else -> return
+            }
+            act = svc ?: app
+            val wm = act.getSystemService(WindowManager::class.java) ?: return
+            val win = FrameLayout(act)
+            val lp = WindowManager.LayoutParams(
+                MATCH_PARENT, MATCH_PARENT, type,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM
+                if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
+            }
+            if (runCatching { wm.addView(win, lp) }.isFailure) return
+            overlay = win
+            overlayWm = wm
+            root = win
+            val id = app.resources.getIdentifier("navigation_bar_height", "dimen", "android")
+            navInset = if (id > 0) app.resources.getDimensionPixelSize(id) else dp(24)
+        }
+        inApp = useApp
         refineKind(h)
         shown = h
-        if (haptics()) root.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
 
         val l = FrameLayout(act).apply {
             setBackgroundColor(Color.argb(60, 0, 0, 0))
@@ -289,15 +359,17 @@ class HeadsetPopup(
 
 
         l.addView(c, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
-            setMargins(dp(10), 0, dp(10), bottomInset + dp(10))
+            setMargins(dp(10), 0, dp(10), navInset + dp(10))
         })
         root.addView(l, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         layer = l
+        if (haptics()) l.performHapticFeedback(HapticFeedbackConstants.CONFIRM,
+            HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING)
         card = c
         enableSwipeDown(c)
 
         // Spring up from below the screen, like the iOS card.
-        val h0 = root.height.toFloat().coerceAtLeast(dp(600).toFloat())
+        val h0 = maxOf(root.height, app.resources.displayMetrics.heightPixels).toFloat().coerceAtLeast(dp(600).toFloat())
         l.animate().alpha(1f).setDuration((220 * Motion.scale).toLong()).setInterpolator(ease).start()
         Motion.spring(c, DynamicAnimation.TRANSLATION_Y, 0f, Motion.FLUID, start = h0)
         art.scaleX = 0.5f; art.scaleY = 0.5f
@@ -313,8 +385,6 @@ class HeadsetPopup(
         handler.removeCallbacks(autoHide)
         handler.postDelayed(autoHide, 7000)
     }
-
-    private fun isResumed(): Boolean = !act.isFinishing && !act.isDestroyed && act.window?.decorView?.isShown == true
 
     private fun startFloating(v: View) {
         if (Motion.scale <= 0f) return
@@ -362,15 +432,23 @@ class HeadsetPopup(
         batteryView = null
         batteryLabel = null
         permissionHint = null
+        val win = overlay
+        val wm = overlayWm
+        overlay = null
+        overlayWm = null
+        val remove = {
+            (l.parent as? ViewGroup)?.removeView(l)
+            if (win != null && win.isAttachedToWindow) runCatching { wm?.removeView(win) }
+        }
         if (immediate || Motion.scale <= 0f || c == null) {
-            root.removeView(l)
+            remove()
             return
         }
-        val dist = (c.height + bottomInset + dp(40)).toFloat()
+        val dist = (c.height + bottomInset + dp(80)).toFloat()
         l.animate().alpha(0f).setDuration((260 * Motion.scale).toLong()).setInterpolator(ease).start()
-        Motion.spring(c, DynamicAnimation.TRANSLATION_Y, dist, Motion.SNAPPY) { root.removeView(l) }
+        Motion.spring(c, DynamicAnimation.TRANSLATION_Y, dist, Motion.SNAPPY) { remove() }
         // Safety net in case the spring is interrupted.
-        handler.postDelayed({ if (l.parent != null) root.removeView(l) }, 900)
+        handler.postDelayed({ remove() }, 900)
     }
 
     private fun showBattery(level: Int) {
@@ -393,17 +471,30 @@ class HeadsetPopup(
 
     private fun hasBluetoothPermission(): Boolean =
         Build.VERSION.SDK_INT < 31 ||
-            act.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
     private fun requestBluetooth(force: Boolean) {
         if (Build.VERSION.SDK_INT < 31 || hasBluetoothPermission()) return
-        val prefs = act.getSharedPreferences("luncher", Context.MODE_PRIVATE)
+        val prefs = app.getSharedPreferences("luncher", Context.MODE_PRIVATE)
         if (!force && prefs.getBoolean("asked_bt_permission", false)) {
             permissionHint?.visibility = View.VISIBLE
             return
         }
         prefs.edit().putBoolean("asked_bt_permission", true).apply()
-        act.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_BLUETOOTH)
+        val a = host
+        if (inApp && a != null && !a.isFinishing) {
+            a.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_BLUETOOTH)
+        } else if (force) {
+            // Over another app there's no screen to ask from: open the app's permission page.
+            hide(immediate = true)
+            runCatching {
+                app.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", app.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        } else {
+            prefs.edit().putBoolean("asked_bt_permission", false).apply()
+            permissionHint?.visibility = View.VISIBLE
+        }
     }
 
     private fun fetchBattery(h: Headset) {
@@ -413,7 +504,7 @@ class HeadsetPopup(
         }
         val addr = h.address ?: return
         val level = runCatching {
-            val adapter = act.getSystemService(BluetoothManager::class.java)?.adapter ?: return
+            val adapter = app.getSystemService(BluetoothManager::class.java)?.adapter ?: return
             val dev = adapter.getRemoteDevice(addr)
             dev.javaClass.getMethod("getBatteryLevel").invoke(dev) as Int
         }.getOrNull() ?: return

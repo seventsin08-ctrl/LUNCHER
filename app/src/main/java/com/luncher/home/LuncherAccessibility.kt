@@ -20,6 +20,8 @@ class LuncherAccessibility : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // Lets the headphone pop-up appear on top of any app.
+        runCatching { HeadsetPopup.get(applicationContext) }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {

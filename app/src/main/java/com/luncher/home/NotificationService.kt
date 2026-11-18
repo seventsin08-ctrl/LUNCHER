@@ -21,7 +21,11 @@ class NotificationService : NotificationListenerService() {
         private val main = Handler(Looper.getMainLooper())
     }
 
-    override fun onListenerConnected() = recount()
+    override fun onListenerConnected() {
+        // Keeps the headphone pop-up listening while other apps are open.
+        main.post { runCatching { HeadsetPopup.get(applicationContext) } }
+        recount()
+    }
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         recount()
         val n = sbn.notification

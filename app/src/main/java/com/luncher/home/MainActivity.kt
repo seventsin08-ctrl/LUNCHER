@@ -283,8 +283,8 @@ class MainActivity : Activity() {
         ContextCompat.registerReceiver(
             this, unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_EXPORTED
         )
-        headsetPopup = HeadsetPopup(this, root, { settings.headsetPopup }, { settings.haptics })
-        runCatching { headsetPopup.start() }
+        headsetPopup = HeadsetPopup.get(this)
+        headsetPopup.attach(this, root)
         island = DynamicIsland(this, root, { openAssistant() }, { openControlCenter() }, { settings.haptics })
         controlCenter = ControlCenter(this, root,
             music = { currentMusic() },
@@ -366,6 +366,7 @@ class MainActivity : Activity() {
         Tilt.resume()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
+        if (::headsetPopup.isInitialized) headsetPopup.hostResumed = true
         defaultBanner.visibility = if (isDefaultHome()) View.GONE else View.VISIBLE
         if (settings.version != appliedVersion) applySettings()
         if (prefs.getBoolean("s_apply_wallpaper", false)) {
@@ -384,6 +385,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         Tilt.pause()
         isActive = false
+        if (::headsetPopup.isInitialized) headsetPopup.hostResumed = false
         activeFolderDialog?.let { folder ->
             if (folder.draggingMember) {
                 folder.draggingMember = false
@@ -484,7 +486,7 @@ class MainActivity : Activity() {
         dockWidthSpring?.cancel()
         dockWidthSpring = null
         runCatching { unregisterReceiver(unlockReceiver) }
-        if (::headsetPopup.isInitialized) headsetPopup.stop()
+        if (::headsetPopup.isInitialized) headsetPopup.detach(this)
         NotificationService.onChange = null
         NotificationService.onPosted = null
         TimerState.remove(timerListener)
