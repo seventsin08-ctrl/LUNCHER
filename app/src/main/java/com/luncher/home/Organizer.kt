@@ -198,14 +198,6 @@ object SpotlightExtras {
         if (q.length < 2) return emptyList()
         val out = ArrayList<Result>()
         val num = Regex("(\\d{1,3})").find(q)?.value?.toIntOrNull()
-        if ("timer".startsWith(q) || q.contains("timer") || (num != null && q.contains("min"))) {
-            val m = (num ?: 5).coerceIn(1, 600)
-            out += Result("Start a $m-minute timer", "Shortcut", "⏱") { timer(m) }
-        }
-        if ("flashlight".startsWith(q) || "torch".startsWith(q) || "control center".startsWith(q) ||
-            q.contains("brightness") || q.contains("volume")) {
-            out += Result("Open Control Center", "Shortcut", "🎛") { controlCenter() }
-        }
         for (m in Focus.modes) {
             if (q.contains("focus") || m.name.lowercase().startsWith(q) || q.contains(m.id)) {
                 if (q.contains("focus") || q == m.id || m.name.lowercase().startsWith(q) && q.length >= 3)

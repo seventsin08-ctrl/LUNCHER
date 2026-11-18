@@ -286,7 +286,7 @@ class MainActivity : Activity() {
         )
         headsetPopup = HeadsetPopup.get(this)
         headsetPopup.attach(this, root)
-        island = DynamicIsland(this, root, { openAssistant() }, { openControlCenter() }, { settings.haptics })
+        island = DynamicIsland(this, root, { openAssistant() }, { showVolumePanel() }, { settings.haptics })
         controlCenter = ControlCenter(this, root,
             music = { currentMusic() },
             musicPlaying = { mediaController?.playbackState?.state == PlaybackState.STATE_PLAYING },
@@ -354,10 +354,6 @@ class MainActivity : Activity() {
                 val dx = e2.x - e1.x
                 if (abs(dy) < abs(dx) * 1.5f) return false
                 if (dy > dp(70) && velocityY > 700) {
-                    // Like iPhone: swipe down from the top-right corner for Control Center.
-                    if (e1.rawX > root.width * 0.62f && e1.rawY < insetTop + dp(110)) {
-                        openControlCenter(); return true
-                    }
                     onSwipeDown(); return true
                 }
                 if (dy < -dp(80) && velocityY < -700) {
@@ -950,6 +946,12 @@ class MainActivity : Activity() {
 
         searchField.addTextChangedListener(afterTextChanged = { filterSearch(it?.toString().orEmpty()) })
         searchField.setOnEditorActionListener { _, _, _ ->
+            val q = searchField.text.toString().trim().lowercase()
+            if (q.contains("timer") || q == "tim") {
+                closeSearch(false)
+                showTimerPopup()
+                return@setOnEditorActionListener true
+            }
             val first = searchResults.firstOrNull()
             if (first != null) launch(first, searchField) else searchWeb(searchField.text.toString())
             true
@@ -4579,6 +4581,62 @@ class MainActivity : Activity() {
 
     // ================================================================ Control Center, Focus, Timer, Library
 
+    /** Start Timer card that pops up after you type "timer" and press Enter. */
+    private fun showTimerPopup() {
+        if (menuLayer != null) dismissMenu(immediate = true)
+        val layer = FrameLayout(this).apply { setBackgroundColor(Color.argb(120, 0, 0, 0)); isClickable = true }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(18), dp(16), dp(16))
+            background = Glass.menu(this@MainActivity, 32f)
+            isClickable = true
+        }
+        var closed = false
+        lateinit var onTimer: () -> Unit
+        fun close() {
+            if (closed) return
+            closed = true
+            TimerState.remove(onTimer)
+            animateBlur(0f, dur(220))
+            layer.animate().alpha(0f).setDuration(dur(200)).withEndAction { root.removeView(layer) }.start()
+        }
+        // Close by itself once a timer starts (the countdown carries on in the island).
+        val wasRunning = TimerState.running
+        onTimer = { if (!wasRunning && TimerState.running) layer.postDelayed({ close() }, 450) }
+        TimerState.add(onTimer)
+        layer.setOnClickListener { close() }
+        card.addView(TextView(this).apply {
+            text = "Start Timer"; setTextColor(Color.WHITE); textSize = 22f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(6), 0, 0, dp(4))
+        })
+        card.addView(TextView(this).apply {
+            text = "Swipe the ruler to pick a time, then tap it to start."
+            setTextColor(0x99FFFFFF.toInt()); textSize = 13f; setPadding(dp(6), 0, 0, dp(12))
+        })
+        card.addView(controlCenter.timerDial(), LinearLayout.LayoutParams(MATCH_PARENT, dp(96)))
+        // Quick picks
+        val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (m in listOf(1, 5, 10, 15, 30)) {
+            chips.addView(TextView(this).apply {
+                text = "${m}m"; gravity = Gravity.CENTER; setTextColor(Color.WHITE); textSize = 14f
+                background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(0x26FFFFFF) }
+                setOnClickListener { haptic(it, HapticFeedbackConstants.CONTEXT_CLICK); TimerState.start(this@MainActivity, m) }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(4), dp(12), dp(4), 0) })
+        }
+        card.addView(chips)
+        layer.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.CENTER).apply {
+            setMargins(dp(14), 0, dp(14), 0)
+        })
+        root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        animateBlur(dp(22).toFloat(), dur(260))
+        haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+        layer.alpha = 0f
+        layer.animate().alpha(1f).setDuration(dur(200)).start()
+        card.alpha = 0f
+        Motion.scaleTo(card, 1f, Motion.BOUNCY, start = 0.8f)
+        Motion.alphaTo(card, 1f, Motion.SNAPPY)
+    }
+
     private fun openControlCenter() {
         if (!::controlCenter.isInitialized) return
         if (menuLayer != null) dismissMenu(immediate = true)
@@ -4904,12 +4962,6 @@ class MainActivity : Activity() {
             searchExtras.addView(r, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) })
         }
 
-        // Searching "timer" shows the Start Timer dial: swipe to pick a time, tap to start.
-        val ql = query.trim().lowercase()
-        if (ql.length >= 3 && ("timer".startsWith(ql) || ql.startsWith("timer") || ql.contains("timer"))) {
-            section("Start Timer")
-            searchExtras.addView(controlCenter.timerDial(), LinearLayout.LayoutParams(MATCH_PARENT, dp(92)).apply { bottomMargin = dp(6) })
-        }
         val shortcuts = SpotlightExtras.shortcuts(query, { m -> TimerState.start(this, m) }, { openControlCenter() },
             { id -> setFocus(id) })
         if (shortcuts.isNotEmpty()) { section("Shortcuts"); shortcuts.forEach { r -> row(r.icon, r.title, r.subtitle, r.action) } }

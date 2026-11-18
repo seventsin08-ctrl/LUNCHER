@@ -125,7 +125,7 @@ class SettingsActivity : Activity() {
         segment(theme, "Colors From", listOf("wallpaper" to "Wallpaper", "system" to "Phone Theme",
             "custom" to "My Color", "mono" to "Mono"), s.themeSource) { s.themeSource = it; rebuild() }
         info(theme, when (s.themeSource) {
-            "wallpaper" -> "Control Center, the island, sliders and glass take their colour from your wallpaper and change when you change it."
+            "wallpaper" -> "The island, sliders and glass take their colour from your wallpaper and change when you change it."
             "system" -> "Uses your phone's own theme colour (Android 12+), otherwise the wallpaper."
             "custom" -> "Pick the colour below."
             else -> "Black, white and grey only, like the classic iPhone look."
@@ -134,7 +134,6 @@ class SettingsActivity : Activity() {
         toggle(theme, "Tint Glass, Dock & Widgets", "Blend the theme colour into see-through panels", s.themeSurfaces) {
             s.themeSurfaces = it
         }
-        segment(theme, "Control Center Tiles", listOf("dark" to "Dark", "glass" to "Liquid Glass"), s.ccStyle) { s.ccStyle = it }
         toggle(look, "Glass Effect", "See-through folders, widgets and dock", s.glass) { s.glass = it; rebuild() }
         slider(look, "Liquid Glass", 0, 100, s.glassClarity, {
             when { it < 34 -> "Frosted"; it < 67 -> "Balanced"; else -> "Clear" }
