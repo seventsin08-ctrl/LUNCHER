@@ -91,6 +91,9 @@ class ControlCenter(
             isClickable = true
         }
 
+        // Row 0: iOS 27 "Start Timer" dial — swipe the ruler to pick a time, tap to start.
+        panel.addView(TimerDial(), LinearLayout.LayoutParams(MATCH_PARENT, dp(92)).apply { bottomMargin = dp(14) })
+
         // Row 1: connectivity cluster + music.
         val row1 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         val conn = GridLayout(act).apply {
@@ -213,7 +216,12 @@ class ControlCenter(
         }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(7) })
         panel.addView(row3, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
 
-        l.addView(panel, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
+        // Scrolls on shorter screens so nothing gets cut off.
+        val scroll = android.widget.ScrollView(act).apply {
+            isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER
+            addView(panel, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+        l.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
         root.addView(l, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         layer = l
         onBlur(true)
@@ -280,6 +288,171 @@ class ControlCenter(
     }
 
     /** Tall glass slider like iOS: drag up/down; the white fill shows the level. */
+    /**
+     * Swipeable minute ruler with a big time readout. Each minute "clicks" with a haptic tick;
+     * flings glide and snap. Tap to start (or stop a running timer).
+     */
+    private inner class TimerDial : View(act) {
+        private val prefs = act.getSharedPreferences("luncher", android.content.Context.MODE_PRIVATE)
+        private val step = dp(10).toFloat()
+        private val maxMin = 180
+        private var offset = prefs.getInt("cc_timer_min", 10).coerceIn(1, maxMin) * step
+        private var lastMin = (offset / step).roundToInt()
+        private val scroller = android.widget.OverScroller(act, android.view.animation.DecelerateInterpolator(1.4f))
+        private var tracker: android.view.VelocityTracker? = null
+        private var downX = 0f
+        private var lastX = 0f
+        private var moved = false
+        private var touching = false
+        private val slop = android.view.ViewConfiguration.get(act).scaledTouchSlop
+        private val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; strokeCap = Paint.Cap.ROUND }
+        private val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; textSize = dp(10).toFloat(); textAlign = Paint.Align.CENTER
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }
+        private val orange = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF9F0A.toInt(); strokeCap = Paint.Cap.ROUND }
+        private val big = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; textSize = dp(30).toFloat(); textAlign = Paint.Align.RIGHT
+            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL); fontFeatureSettings = "tnum"
+        }
+        private val small = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xCCFFFFFF.toInt(); textSize = dp(13).toFloat()
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        private val tri = android.graphics.Path()
+        private val listener: () -> Unit = { invalidate() }
+
+        init {
+            background = glass(26)
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(26).toFloat())
+            }
+            clipToOutline = true
+        }
+
+        override fun onAttachedToWindow() { super.onAttachedToWindow(); TimerState.add(listener) }
+        override fun onDetachedFromWindow() { TimerState.remove(listener); super.onDetachedFromWindow() }
+
+        private fun fmt(totalSec: Long): String {
+            val h = totalSec / 3600; val m = (totalSec / 60) % 60; val s = totalSec % 60
+            return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s)
+        }
+
+        override fun onDraw(c: Canvas) {
+            super.onDraw(c)
+            val w = width.toFloat()
+            val cx = w / 2f
+            val running = TimerState.running && !touching && scroller.isFinished
+            // Ruler position: the picked minute, or the time left while a timer runs.
+            val cur = if (running) TimerState.remaining / 60_000f else offset / step
+            val numY = dp(16).toFloat()
+            val tickTop = dp(22).toFloat()
+            val first = (cur - cx / step).toInt() - 1
+            val last = (cur + cx / step).toInt() + 1
+            for (m in first..last) {
+                if (m < 0 || m > maxMin) continue
+                val x = cx + (m - cur) * step
+                val fade = (1f - kotlin.math.abs(x - cx) / cx).coerceIn(0f, 1f)
+                val major = m % 5 == 0
+                tickPaint.alpha = ((if (major) 230 else 110) * fade).toInt()
+                tickPaint.strokeWidth = dp(if (major) 2 else 1).toFloat().coerceAtLeast(1.5f)
+                c.drawLine(x, tickTop, x, tickTop + dp(if (major) 14 else 8), tickPaint)
+                if (major) {
+                    numPaint.alpha = (200 * fade).toInt()
+                    c.drawText("$m", x, numY, numPaint)
+                }
+            }
+            // Orange pointer in the middle.
+            orange.strokeWidth = dp(2).toFloat()
+            c.drawLine(cx, tickTop - dp(2), cx, tickTop + dp(16), orange)
+            tri.reset()
+            tri.moveTo(cx - dp(5), tickTop + dp(22)); tri.lineTo(cx + dp(5), tickTop + dp(22)); tri.lineTo(cx, tickTop + dp(16)); tri.close()
+            c.drawPath(tri, orange)
+
+            val baseY = height - dp(16).toFloat()
+            small.color = 0xCCFFFFFF.toInt()
+            if (running) {
+                c.drawText("Timer · tap to stop", dp(18).toFloat(), baseY, small)
+                big.color = 0xFFFF9F0A.toInt()
+                c.drawText(fmt(TimerState.remaining / 1000), w - dp(18), baseY + dp(4), big)
+            } else {
+                c.drawText("Start Timer", dp(18).toFloat(), baseY, small)
+                big.color = Color.WHITE
+                c.drawText(fmt((offset / step).roundToInt() * 60L), w - dp(18), baseY + dp(4), big)
+            }
+        }
+
+        private fun minuteChanged() {
+            val m = (offset / step).roundToInt()
+            if (m != lastMin) {
+                lastMin = m
+                if (haptics()) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            }
+        }
+
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            if (tracker == null) tracker = android.view.VelocityTracker.obtain()
+            tracker?.addMovement(e)
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    scroller.forceFinished(true)
+                    downX = e.x; lastX = e.x; moved = false; touching = true
+                    if (TimerState.running) offset = (TimerState.remaining / 60_000f).roundToInt().coerceIn(1, maxMin) * step
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!moved && kotlin.math.abs(e.x - downX) > slop) moved = true
+                    if (moved) {
+                        offset = (offset - (e.x - lastX)).coerceIn(step, maxMin * step)
+                        minuteChanged(); invalidate()
+                    }
+                    lastX = e.x
+                }
+                MotionEvent.ACTION_UP -> {
+                    touching = false
+                    if (!moved) {
+                        tick(this)
+                        if (TimerState.running) TimerState.cancel(act)
+                        else {
+                            val m = (offset / step).roundToInt().coerceIn(1, maxMin)
+                            prefs.edit().putInt("cc_timer_min", m).apply()
+                            TimerState.start(act, m)
+                        }
+                        invalidate()
+                    } else {
+                        tracker?.computeCurrentVelocity(1000)
+                        val vx = tracker?.xVelocity ?: 0f
+                        scroller.fling(offset.toInt(), 0, -vx.toInt(), 0, step.toInt(), (maxMin * step).toInt(), 0, 0)
+                        postInvalidateOnAnimation()
+                    }
+                    tracker?.recycle(); tracker = null
+                }
+                MotionEvent.ACTION_CANCEL -> { touching = false; tracker?.recycle(); tracker = null; snap() }
+            }
+            return true
+        }
+
+        override fun computeScroll() {
+            if (!scroller.isFinished && scroller.computeScrollOffset()) {
+                offset = scroller.currX.toFloat()
+                minuteChanged()
+                postInvalidateOnAnimation()
+                if (scroller.isFinished) snap()
+            }
+        }
+
+        private fun snap() {
+            val target = (offset / step).roundToInt().coerceIn(1, maxMin) * step
+            android.animation.ValueAnimator.ofFloat(offset, target).apply {
+                duration = (160 * Motion.scale).toLong().coerceAtLeast(1)
+                addUpdateListener { offset = it.animatedValue as Float; invalidate() }
+                start()
+            }
+            prefs.edit().putInt("cc_timer_min", (target / step).roundToInt()).apply()
+        }
+    }
+
     private inner class GlassSlider(
         private val icon: String,
         private var value: Float,
