@@ -6,7 +6,8 @@ trap 'adb logcat -d -s AndroidRuntime:E > dock-smoke/android-runtime.log 2>/dev/
 adb shell input keyevent KEYCODE_WAKEUP || true
 adb shell input keyevent 82 || true
 adb install -r app/build/outputs/apk/preview/app-preview.apk
-adb shell cmd package set-home-activity "$package/com.luncher.home.MainActivity"
+# Keep the emulator's normal home app selected so force-stopping this test
+# launcher cannot cause Android to relaunch it while preferences are seeded.
 adb shell am start -W -n "$package/com.luncher.home.MainActivity"
 sleep 5
 adb shell am force-stop "$package"
@@ -114,7 +115,8 @@ read_prefs
 check_dock camera chrome
 python3 scripts/dock-ui.py measure Camera reduced
 read -r sx sy <<< "$(python3 scripts/dock-ui.py dock-app Chrome)"
-adb shell input swipe "$sx" "$sy" 250 62 10000
+read -r hx hy <<< "$(python3 scripts/dock-ui.py home-empty)"
+adb shell input swipe "$sx" "$sy" "$hx" "$hy" 10000
 sleep 3
 dump
 read_prefs

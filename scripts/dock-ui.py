@@ -28,6 +28,10 @@ elif cmd == 'home-app':
     cell = parents[n]
     x1,y1,x2,y2 = bounds(cell)
     print((x1+x2)//2, y1+25)
+elif cmd == 'home-empty':
+    pager = next(n for n in root.iter() if n.get('class','').endswith('ViewPager'))
+    x1,y1,x2,y2 = bounds(pager)
+    print(x1 + (x2-x1)*4//5, y1+38)
 elif cmd == 'minus':
     cell = dock_cell(label)
     for n in cell.iter():
