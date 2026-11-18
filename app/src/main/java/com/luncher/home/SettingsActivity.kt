@@ -31,11 +31,6 @@ import kotlin.math.roundToInt
 /** iOS-style grouped settings screen for Luncher. */
 class SettingsActivity : Activity() {
 
-    companion object {
-        /** True while Settings is on screen (the floating island stays away then). */
-        @Volatile var visible = false
-    }
-
     private lateinit var s: Settings
     private lateinit var list: LinearLayout
     private var previewRow: LinearLayout? = null
@@ -776,6 +771,8 @@ class SettingsActivity : Activity() {
     private fun dp(v: Float): Int = (v * resources.displayMetrics.density).roundToInt()
 
     companion object {
+        /** True while Settings is on screen (the floating island stays away then). */
+        @Volatile var visible = false
         const val REQ_WALLPAPER = 5100
         const val REQ_RINGTONE = 5101
 
