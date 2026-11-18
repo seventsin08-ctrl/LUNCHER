@@ -408,6 +408,23 @@ class SettingsActivity : Activity() {
             }
         }
 
+        // ---------------- Backup & transfer (like moving to a new iPhone)
+        val backup = section("BACKUP & TRANSFER")
+        info(backup, "Save your whole setup to one file — Home Screen pages, folders, docks, widgets, photos, " +
+            "3D wallpaper, icons, theme, island, Focus and every setting — then load it on a new phone or after reinstalling.")
+        button(backup, "Export Launcher Setup…", 0xFF0A84FF.toInt()) {
+            val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+            val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/zip").putExtra(Intent.EXTRA_TITLE, "AppleLauncher-setup-$day.zip")
+            runCatching { startActivityForResult(i, REQ_EXPORT) }
+        }
+        button(backup, "Import Launcher Setup…", 0xFF0A84FF.toInt()) {
+            val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/octet-stream"))
+            runCatching { startActivityForResult(i, REQ_IMPORT) }
+        }
+        info(backup, "Widgets that come from other apps need to be added again after importing; everything else comes back as it was.")
+
         // ---------------- About
         val about = section("GENERAL")
         button(about, "Default Home App…", 0xFF0A84FF.toInt()) {
@@ -443,6 +460,30 @@ class SettingsActivity : Activity() {
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
         when (requestCode) {
+            REQ_EXPORT -> {
+                val toast = android.widget.Toast.makeText(this, "Exporting…", android.widget.Toast.LENGTH_SHORT)
+                toast.show()
+                Thread {
+                    val r = Backup.export(this, uri)
+                    runOnUiThread { android.widget.Toast.makeText(this, r.message, android.widget.Toast.LENGTH_LONG).show() }
+                }.start()
+            }
+            REQ_IMPORT -> {
+                android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
+                    .setTitle("Import this setup?")
+                    .setMessage("Your current Home Screen, folders, widgets and settings will be replaced. The launcher restarts afterwards.")
+                    .setPositiveButton("Import") { _, _ ->
+                        Thread {
+                            val r = Backup.import(this, uri)
+                            runOnUiThread {
+                                android.widget.Toast.makeText(this, r.message, android.widget.Toast.LENGTH_LONG).show()
+                                if (r.ok) restartLauncher()
+                            }
+                        }.start()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
             REQ_WALLPAPER -> {
                 runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                 s.spatialWallpaperUri = uri.toString()
@@ -508,6 +549,18 @@ class SettingsActivity : Activity() {
     }
 
     // ================================================================ building blocks
+
+    /** Start the Home Screen fresh so everything loads from the imported setup. */
+    private fun restartLauncher() {
+        val home = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        list.postDelayed({
+            startActivity(home)
+            finishAffinity()
+            // A clean process makes sure nothing from the old layout lingers in memory.
+            android.os.Handler(mainLooper).postDelayed({ Runtime.getRuntime().exit(0) }, 600)
+        }, 900)
+    }
 
     private fun launchableApps(): List<Pair<String, String>> {
         val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -775,6 +828,8 @@ class SettingsActivity : Activity() {
         @Volatile var visible = false
         const val REQ_WALLPAPER = 5100
         const val REQ_RINGTONE = 5101
+        const val REQ_EXPORT = 5102
+        const val REQ_IMPORT = 5103
 
         fun usageAccessGranted(act: Activity): Boolean = runCatching {
             val ops = act.getSystemService(AppOpsManager::class.java)
