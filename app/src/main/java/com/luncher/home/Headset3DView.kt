@@ -48,7 +48,7 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
         fun t(a: Int, b: Int, c: Int, m: Int) { tris += intArrayOf(a, b, c, m) }
 
         /** Ellipsoid. */
-        fun sphere(cx: Float, cy: Float, cz: Float, rx: Float, ry: Float, rz: Float, m: Int, su: Int = 14, sv: Int = 10) {
+        fun sphere(cx: Float, cy: Float, cz: Float, rx: Float, ry: Float, rz: Float, m: Int, su: Int = 22, sv: Int = 16) {
             val start = verts.size
             for (i in 0..sv) {
                 val th = PI * i / sv
