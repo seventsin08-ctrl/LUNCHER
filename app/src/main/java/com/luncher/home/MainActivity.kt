@@ -3424,7 +3424,15 @@ class MainActivity : Activity() {
         val targetSlot = cell?.let { slotIndexFor(pager.currentItem, it) }
         if (targetSlot == null) {
             previewOrder = null
-            toast("Choose a free app space")
+            if (d.fromDock && folderId(d.app) == null) {
+                // Pulled out of the dock onto open space: it leaves the dock (which shrinks to
+                // fit) and lands in the first free spot on the Home Screen, like iOS.
+                saveDock(dockKeys().filter { it != d.app.key })
+                settings.hiddenApps = settings.hiddenApps - d.app.key
+                settings.order = currentOrder().filter { it != d.app.key } + d.app.key
+            } else {
+                toast("Choose a free app space")
+            }
             rebuild(); return
         }
         // Dropping back on the source folder leaves it unchanged.
