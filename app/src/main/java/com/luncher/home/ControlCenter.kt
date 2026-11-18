@@ -77,6 +77,9 @@ class ControlCenter(
 
     private fun circle(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
 
+    /** The iOS-style Start Timer dial, shown in Search when you type "timer". */
+    fun timerDial(): View = TimerDial()
+
     /** Set by the launcher: the current song for the big music tile. */
     var media: (() -> IslandMedia?)? = null
     var mediaTitle: (() -> Pair<String, String>?)? = null
@@ -278,9 +281,6 @@ class ControlCenter(
             hide(); onVolumePanel?.invoke()
         }, lp(two, ph, two + gap))
         panel.addView(r4, LinearLayout.LayoutParams(W, ph).apply { topMargin = gap })
-
-        // ---- Start Timer dial.
-        panel.addView(TimerDial(), LinearLayout.LayoutParams(W, dp(92)).apply { topMargin = gap })
 
         // ---- Row 5: lock, camera, calculator, voice recorder.
         val r5 = FrameLayout(act)

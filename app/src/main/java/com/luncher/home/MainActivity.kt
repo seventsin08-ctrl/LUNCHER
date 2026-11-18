@@ -4904,6 +4904,12 @@ class MainActivity : Activity() {
             searchExtras.addView(r, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) })
         }
 
+        // Searching "timer" shows the Start Timer dial: swipe to pick a time, tap to start.
+        val ql = query.trim().lowercase()
+        if (ql.length >= 3 && ("timer".startsWith(ql) || ql.startsWith("timer") || ql.contains("timer"))) {
+            section("Start Timer")
+            searchExtras.addView(controlCenter.timerDial(), LinearLayout.LayoutParams(MATCH_PARENT, dp(92)).apply { bottomMargin = dp(6) })
+        }
         val shortcuts = SpotlightExtras.shortcuts(query, { m -> TimerState.start(this, m) }, { openControlCenter() },
             { id -> setFocus(id) })
         if (shortcuts.isNotEmpty()) { section("Shortcuts"); shortcuts.forEach { r -> row(r.icon, r.title, r.subtitle, r.action) } }
