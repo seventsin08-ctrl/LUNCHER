@@ -2,7 +2,7 @@
 set -euxo pipefail
 package=com.luncher.home.preview3
 mkdir -p dock-smoke
-trap 'adb logcat -d -s AndroidRuntime:E > dock-smoke/android-runtime.log 2>/dev/null || true' EXIT
+trap 'adb logcat -d -s AndroidRuntime:E > dock-smoke/android-runtime.log 2>/dev/null || true; adb logcat -d -s ActivityTaskManager:I ActivityManager:I > dock-smoke/activity.log 2>/dev/null || true' EXIT
 adb shell input keyevent KEYCODE_WAKEUP || true
 adb shell input keyevent 82 || true
 adb install -r app/build/outputs/apk/preview/app-preview.apk
@@ -130,6 +130,9 @@ dump
 read_prefs
 check_dock
 grep -q 'Drag apps here' dock-smoke/current.xml
+grep -q 'Manage home pages' dock-smoke/current.xml
+cp dock-smoke/current.xml dock-smoke/empty-before.xml
+adb exec-out screencap -p > dock-smoke/empty-before.png
 # An empty dock remains an obvious, usable drop target.
 read -r sx sy <<< "$(python3 scripts/dock-ui.py home-app Settings)"
 adb shell input swipe "$sx" "$sy" 160 565 10000
