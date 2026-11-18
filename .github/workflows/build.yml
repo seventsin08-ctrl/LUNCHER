@@ -47,3 +47,20 @@ jobs:
           body: |
             Latest Luncher build from commit ${{ github.sha }}.
             Download **Luncher.apk** below on your Android phone and open it to install.
+
+      - name: Publish numbered release from the Claude branch
+        if: github.ref == 'refs/heads/claude/adoring-goldberg-lhyb46'
+        run: |
+          N=$(grep -oP 'launcherNumber = "\K[0-9]+' app/build.gradle.kts)
+          cp Luncher.apk "AppleLauncher$N.apk"
+          echo "N=$N" >> "$GITHUB_ENV"
+
+      - name: Upload numbered release
+        if: github.ref == 'refs/heads/claude/adoring-goldberg-lhyb46'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apple-launcher-${{ env.N }}
+          name: Apple Launcher ${{ env.N }}
+          target_commitish: ${{ github.sha }}
+          make_latest: false
+          files: AppleLauncher${{ env.N }}.apk
