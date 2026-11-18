@@ -668,7 +668,9 @@ class MainActivity : Activity() {
                 val token = root.windowToken ?: return
                 if (n < 2) return
                 if (spatialWall.visibility == View.VISIBLE) {
-                    spatialWall.shiftX = -(position + positionOffset) * dp(18)
+                    // Gentle parallax across all pages, centred, never past the zoomed edge.
+                    val f = (position + positionOffset) / (n - 1).coerceAtLeast(1)
+                    spatialWall.shiftX = -(f - 0.5f) * 2f * spatialWall.shiftRange
                 }
                 runCatching {
                     val wm = WallpaperManager.getInstance(this@MainActivity)
@@ -4219,6 +4221,8 @@ class MainActivity : Activity() {
         spatialWall.extend = settings.extendWallpaper
         spatialWall.spatial = settings.wallpaperDepth && anim > 0f
         spatialWall.depth = 0.7f
+        spatialWall.rotate3d = false
+        spatialWall.shiftRange = dp(16).toFloat()
         spatialWall.visibility = View.VISIBLE
         if (uri == spatialWallUri && spatialWall.bitmap != null) return
         spatialWallUri = uri
