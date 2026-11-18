@@ -244,7 +244,7 @@ class HeadsetPopup(
 
         // Spinning 3D model of what's connected (earbuds, headphones, wired earphones, speaker).
         val art = Headset3DView(act, h.kind)
-        c.addView(art, LinearLayout.LayoutParams(MATCH_PARENT, dp(190)).apply { topMargin = dp(4) })
+        c.addView(art, LinearLayout.LayoutParams(MATCH_PARENT, dp(220)).apply { topMargin = dp(4) })
         c.addView(TextView(act).apply {
             text = h.kind.label
             setTextColor(0x99FFFFFF.toInt())
