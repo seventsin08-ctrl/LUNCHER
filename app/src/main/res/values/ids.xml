@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="spring_scale_x" type="id" />
+    <item name="spring_scale_y" type="id" />
+    <item name="spring_alpha" type="id" />
+    <item name="spring_translation_x" type="id" />
+    <item name="spring_translation_y" type="id" />
+</resources>

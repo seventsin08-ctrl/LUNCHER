@@ -130,6 +130,7 @@ class MainActivity : Activity() {
     private lateinit var searchPill: TextView
     private lateinit var dockRow: LinearLayout
     private var dockWidthAnimator: ValueAnimator? = null
+    private var dockWidthSpring: androidx.dynamicanimation.animation.SpringAnimation? = null
     private var dockTargetWidth = 0
     private var displayedDockKeys: List<String> = emptyList()
     private lateinit var defaultBanner: TextView
@@ -211,6 +212,13 @@ class MainActivity : Activity() {
     private val packageReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) = reloadApps()
     }
+    /** Zoom the home screen in when the phone is unlocked. */
+    private val unlockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (isActive || hasWindowFocus()) playUnlockZoom()
+        }
+    }
+
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) = updateBattery(i)
     }
@@ -258,8 +266,13 @@ class MainActivity : Activity() {
         appWidgetManager = AppWidgetManager.getInstance(this)
         appWidgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         applyStyleGlobals()
+        Motion.scale = settings.animScale
+        useHighestRefreshRate()
         buildUi()
         setContentView(root)
+        ContextCompat.registerReceiver(
+            this, unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_EXPORTED
+        )
 
         switcher = AppSwitcher(
             this, root,
@@ -421,6 +434,9 @@ class MainActivity : Activity() {
         cancelHomeHold()
         dockWidthAnimator?.cancel()
         dockWidthAnimator = null
+        dockWidthSpring?.cancel()
+        dockWidthSpring = null
+        runCatching { unregisterReceiver(unlockReceiver) }
         NotificationService.onChange = null
         runCatching { unregisterReceiver(packageReceiver) }
         runCatching { unregisterReceiver(batteryReceiver) }
@@ -474,7 +490,24 @@ class MainActivity : Activity() {
     }
 
     /** Called when something changed in Settings: restyle everything and re-render icons. */
+    /** Run at the screen's fastest refresh rate (90/120 Hz) so motion stays buttery. */
+    private fun useHighestRefreshRate() {
+        runCatching {
+            @Suppress("DEPRECATION")
+            val disp: android.view.Display = (if (Build.VERSION.SDK_INT >= 30) this@MainActivity.display
+                else windowManager.defaultDisplay) ?: return
+            val current = disp.mode
+            val best = disp.supportedModes
+                .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
+                .maxByOrNull { it.refreshRate } ?: return
+            val attrs = window.attributes
+            attrs.preferredDisplayModeId = best.modeId
+            window.attributes = attrs
+        }
+    }
+
     private fun applySettings() {
+        Motion.scale = settings.animScale
         appliedVersion = settings.version
         applyStyleGlobals()
         restylePersistent()
@@ -815,25 +848,48 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Stop springs on the home content before handing it to a ViewPropertyAnimator. */
+    private fun contentAnimate(): android.view.ViewPropertyAnimator {
+        Motion.cancel(content)
+        return content.animate()
+    }
+
+    /** The home screen settles back with a calm spring, like returning home on iPhone. */
     private fun restoreHome(animated: Boolean) {
         content.animate().cancel()
         if (!animated || anim == 0f) {
+            Motion.cancel(content)
             content.scaleX = 1f; content.scaleY = 1f; content.alpha = 1f
             return
         }
-        content.animate().scaleX(1f).scaleY(1f).alpha(1f)
-            .setDuration(dur(420)).setInterpolator(EASE).start()
+        Motion.scaleTo(content, 1f, Motion.CALM)
+        Motion.alphaTo(content, 1f, Motion.CALM)
+        if (currentBlur > 0f && menuLayer == null && searchOverlay.visibility != View.VISIBLE) {
+            animateBlur(0f, dur(380))
+        }
+    }
+
+    /** iPhone-style "unlock" zoom: the whole home screen flies in from slightly larger. */
+    private fun playUnlockZoom() {
+        if (anim == 0f || overlayOpen() || editMode) return
+        content.animate().cancel()
+        Motion.scaleTo(content, 1f, Motion.CALM, start = 1.16f)
+        Motion.alphaTo(content, 1f, Motion.CALM, start = 0f)
     }
 
     private fun pressEffect(target: View, scale: Float = 0.88f) = View.OnTouchListener { _, e ->
         if (anim > 0f) {
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN ->
-                    target.animate().scaleX(scale).scaleY(scale).alpha(0.82f)
-                        .setDuration(dur(120)).setInterpolator(EASE).start()
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                    target.animate().scaleX(1f).scaleY(1f).alpha(1f)
-                        .setDuration(dur(380)).setInterpolator(SPRING).start()
+                MotionEvent.ACTION_DOWN -> {
+                    // Sink quickly under the finger and dim slightly.
+                    Motion.scaleTo(target, scale, Motion.SNAPPY)
+                    Motion.alphaTo(target, 0.78f, Motion.SNAPPY)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    // Pop back with a soft bounce.
+                    Motion.scaleTo(target, 1f, Motion.BOUNCY)
+                    Motion.alphaTo(target, 1f, Motion.CALM)
+                }
             }
         }
         false
@@ -842,11 +898,13 @@ class MainActivity : Activity() {
     private fun entrance(v: View, col: Int, row: Int) {
         if (!entrancePending || anim == 0f) return
         v.alpha = 0f
-        v.scaleX = 0.82f
-        v.scaleY = 0.82f
-        v.animate().alpha(1f).scaleX(1f).scaleY(1f)
-            .setStartDelay(dur(row * 45L + col * 22L))
-            .setDuration(dur(420)).setInterpolator(SPRING).start()
+        v.scaleX = 0.8f
+        v.scaleY = 0.8f
+        // Ripple out from the top-left like the iOS home screen appearing.
+        v.postDelayed({
+            Motion.scaleTo(v, 1f, Motion.BOUNCY)
+            Motion.alphaTo(v, 1f, Motion.CALM)
+        }, dur(row * 40L + col * 25L))
     }
 
     private fun startJiggle(v: View) {
@@ -1242,10 +1300,8 @@ class MainActivity : Activity() {
             val dx = (old.x - loc[0]).toFloat()
             val dy = (old.y - loc[1]).toFloat()
             if (abs(dx) < 1f && abs(dy) < 1f) return@post
-            view.translationX = dx
-            view.translationY = dy
-            view.animate().translationX(0f).translationY(0f)
-                .setDuration(dur(260)).setInterpolator(EASE).start()
+            // Slide from the old spot to the new one with a fluid spring (iOS-style reflow).
+            Motion.translateTo(view, 0f, 0f, Motion.FLUID, startX = dx, startY = dy)
         }
     }
 
@@ -2015,16 +2071,23 @@ class MainActivity : Activity() {
         val lp = dockRow.layoutParams as FrameLayout.LayoutParams
         val current = if (lp.width > 0) lp.width else dockRow.width
         if (!dockRow.isLaidOut || current <= 0 || anim <= 0f) {
+            dockWidthSpring?.cancel()
             lp.width = target
             dockRow.layoutParams = lp
             return
         }
-        dockWidthAnimator = ValueAnimator.ofInt(current, target).apply {
-            duration = dur(320)
-            interpolator = EASE
-            addUpdateListener { value ->
+        // Spring the width so the glass pill stretches and settles like iOS.
+        dockWidthSpring?.cancel()
+        val holder = androidx.dynamicanimation.animation.FloatValueHolder(current.toFloat())
+        dockWidthSpring = androidx.dynamicanimation.animation.SpringAnimation(holder).apply {
+            spring = androidx.dynamicanimation.animation.SpringForce(target.toFloat()).apply {
+                stiffness = (Motion.FLUID.stiffness / (anim * anim)).coerceIn(30f, 10000f)
+                dampingRatio = 0.78f
+            }
+            setMinimumVisibleChange(1f)
+            addUpdateListener { _, value, _ ->
                 val params = dockRow.layoutParams as FrameLayout.LayoutParams
-                params.width = value.animatedValue as Int
+                params.width = value.toInt()
                 dockRow.layoutParams = params
             }
             start()
@@ -2083,16 +2146,19 @@ class MainActivity : Activity() {
                     cell.scaleX = 0.8f
                     cell.scaleY = 0.8f
                     cell.doOnLayout {
-                        if (cell.isAttachedToWindow) cell.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                            .setDuration(dur(260)).setInterpolator(EASE).start()
+                        if (cell.isAttachedToWindow) {
+                            Motion.scaleTo(cell, 1f, Motion.BOUNCY)
+                            Motion.alphaTo(cell, 1f, Motion.CALM)
+                        }
                     }
                 } else {
                     cell.doOnLayout {
                         if (cell.isAttachedToWindow) {
                             val loc = IntArray(2)
                             cell.getLocationOnScreen(loc)
-                            cell.translationX = (oldCenter - loc[0] - cell.width / 2).toFloat()
-                            cell.animate().translationX(0f).setDuration(dur(320)).setInterpolator(EASE).start()
+                            val dx = (oldCenter - loc[0] - cell.width / 2).toFloat()
+                            Motion.spring(cell, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X,
+                                0f, Motion.FLUID, start = dx)
                         }
                     }
                 }
@@ -2579,7 +2645,7 @@ class MainActivity : Activity() {
         val off = rootOffset()
         floating.x = rawX - off[0] - size / 2f
         floating.y = rawY - off[1] - size / 2f
-        floating.animate().scaleX(1.18f).scaleY(1.18f).setDuration(dur(160)).setInterpolator(EASE).start()
+        Motion.scaleTo(floating, 1.18f, Motion.BOUNCY)
         source.animate().alpha(0.2f).setDuration(dur(120)).start()
         pager.isUserInputEnabled = false
         haptic(source)
@@ -3025,7 +3091,7 @@ class MainActivity : Activity() {
             }
         }
         pendingReorder = task
-        mainHandler.postDelayed(task, 220)
+        mainHandler.postDelayed(task, 150)
     }
 
     private fun putIntoFolder(d: DragState, target: AppInfo): Boolean {
@@ -3513,7 +3579,7 @@ class MainActivity : Activity() {
         haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
         animateBlur(dp(24).toFloat(), dur(300))
         if (anim > 0f) {
-            content.animate().scaleX(0.92f).scaleY(0.92f).alpha(0.6f).setDuration(dur(300)).setInterpolator(EASE).start()
+            contentAnimate().scaleX(0.92f).scaleY(0.92f).alpha(0.6f).setDuration(dur(300)).setInterpolator(EASE).start()
         }
         switcher.show(entries, if (anim == 0f) 0.01f else anim, insetTop, insetBottom)
     }
@@ -3802,11 +3868,11 @@ class MainActivity : Activity() {
         if (anim > 0f) {
             panel.pivotX = (anchorX + anchorW / 2f - left).coerceIn(0f, menuW.toFloat())
             panel.pivotY = if (below || !hasAnchor) 0f else menuH.toFloat()
-            panel.scaleX = 0.5f; panel.scaleY = 0.5f; panel.alpha = 0f
-            panel.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(dur(340))
-                .setInterpolator(OvershootInterpolator(1.1f)).start()
+            panel.alpha = 0f
+            Motion.scaleTo(panel, 1f, Motion.BOUNCY, start = 0.4f)
+            Motion.alphaTo(panel, 1f, Motion.SNAPPY)
             layer.animate().alpha(1f).setDuration(dur(200)).setInterpolator(EASE).start()
-            content.animate().scaleX(0.97f).scaleY(0.97f).setDuration(dur(260)).setInterpolator(EASE).start()
+            contentAnimate().scaleX(0.97f).scaleY(0.97f).setDuration(dur(260)).setInterpolator(EASE).start()
         } else {
             layer.alpha = 1f
         }
@@ -3818,7 +3884,7 @@ class MainActivity : Activity() {
         menuLayer = null
         val fast = immediate || anim == 0f
         animateBlur(0f, if (fast) 1 else dur(220))
-        content.animate().scaleX(1f).scaleY(1f).setDuration(if (fast) 1 else dur(260)).setInterpolator(EASE).start()
+        contentAnimate().scaleX(1f).scaleY(1f).setDuration(if (fast) 1 else dur(260)).setInterpolator(EASE).start()
         if (fast) {
             root.removeView(layer)
             return
@@ -3837,7 +3903,7 @@ class MainActivity : Activity() {
             searchOverlay.alpha = 0f
             searchOverlay.translationY = -dp(30).toFloat()
             searchOverlay.animate().alpha(1f).translationY(0f).setDuration(dur(320)).setInterpolator(EASE).start()
-            content.animate().scaleX(0.94f).scaleY(0.94f).setDuration(dur(320)).setInterpolator(EASE).start()
+            contentAnimate().scaleX(0.94f).scaleY(0.94f).setDuration(dur(320)).setInterpolator(EASE).start()
         } else {
             searchOverlay.alpha = 1f
             searchOverlay.translationY = 0f
@@ -3859,7 +3925,7 @@ class MainActivity : Activity() {
             content.scaleX = 1f; content.scaleY = 1f
             return
         }
-        content.animate().scaleX(1f).scaleY(1f).setDuration(dur(300)).setInterpolator(EASE).start()
+        contentAnimate().scaleX(1f).scaleY(1f).setDuration(dur(300)).setInterpolator(EASE).start()
         searchOverlay.animate().alpha(0f).translationY(-dp(30).toFloat()).setDuration(dur(220))
             .setInterpolator(EASE).withEndAction { searchOverlay.visibility = View.GONE }.start()
     }
@@ -3942,8 +4008,9 @@ class MainActivity : Activity() {
             .onSuccess {
                 onStarted()
                 if (anim > 0f && settings.launchAnim == "zoom") {
-                    content.animate().scaleX(1.1f).scaleY(1.1f).alpha(0f)
-                        .setDuration(dur(300)).setInterpolator(EASE).start()
+                    contentAnimate().scaleX(1.12f).scaleY(1.12f).alpha(0f)
+                        .setDuration(dur(320)).setInterpolator(EASE).withLayer().start()
+                    animateBlur(dp(18).toFloat(), dur(300))
                     mainHandler.postDelayed({ if (isActive) restoreHome(animated = true) }, 900)
                 }
             }
