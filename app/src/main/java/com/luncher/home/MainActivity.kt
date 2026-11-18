@@ -569,7 +569,7 @@ class MainActivity : Activity() {
 
     private fun applySettings() {
         Motion.scale = settings.animScale
-        if (::island.isInitialized) island.enabled = settings.island
+        if (::island.isInitialized) { island.enabled = settings.island; ViewCompat.requestApplyInsets(root) }
         loadSpatialWallpaper()
         appliedVersion = settings.version
         applyStyleGlobals()
@@ -681,12 +681,11 @@ class MainActivity : Activity() {
             insetTop = bars.top
             insetBottom = bars.bottom
             if (::headsetPopup.isInitialized) headsetPopup.bottomInset = bars.bottom
-            if (::island.isInitialized) {
-                val cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top
-                val band = if (cut > 0) cut else bars.top
-                island.setTopInset(((band - dp(36)) / 2).coerceAtLeast(dp(3)))
-            }
-            content.setPadding(0, bars.top, 0, bars.bottom)
+            // The island sits just below the status bar so it never covers the clock or icons,
+            // and the Home Screen moves down to make room for it.
+            val islandRoom = if (settings.island) dp(36) + dp(10) else 0
+            if (::island.isInitialized) island.setTopInset(bars.top + dp(4))
+            content.setPadding(0, bars.top + islandRoom, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
             insets
         }
