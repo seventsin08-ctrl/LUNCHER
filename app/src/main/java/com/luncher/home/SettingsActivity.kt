@@ -35,6 +35,23 @@ class SettingsActivity : Activity() {
     private lateinit var list: LinearLayout
     private var previewRow: LinearLayout? = null
     private var scrollY = 0
+    private var islandPreview: IslandPreview? = null
+    private var islandCard: View? = null
+
+    /** Show the island preview while the Dynamic Island settings are on screen. */
+    private fun updatePreviewVisibility() {
+        val p = islandPreview ?: return
+        val card = islandCard
+        if (card == null || !s.island || !card.isAttachedToWindow) { p.hide(); return }
+        val r = android.graphics.Rect()
+        val visible = card.getGlobalVisibleRect(r) && r.height() > dp(120)
+        if (visible) p.show(s) else p.hide()
+    }
+
+    private fun previewChanged(replay: Boolean = false) {
+        val p = islandPreview ?: return
+        if (replay) p.replay(s) else { p.show(s); p.refresh(s) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,14 +64,23 @@ class SettingsActivity : Activity() {
         }
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(list, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        setContentView(scroll)
+        // The live island preview floats above the settings list.
+        val frame = FrameLayout(this)
+        frame.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        val preview = IslandPreview(this).apply { load(s) }
+        frame.addView(preview, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        islandPreview = preview
+        setContentView(frame)
         ViewCompat.setOnApplyWindowInsetsListener(scroll) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             list.setPadding(dp(16), bars.top + dp(8), dp(16), bars.bottom + dp(32))
+            preview.statusTop = bars.top
+            preview.cutTop = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top
             insets
         }
-        scroll.viewTreeObserver.addOnScrollChangedListener { scrollY = scroll.scrollY }
+        scroll.viewTreeObserver.addOnScrollChangedListener { scrollY = scroll.scrollY; updatePreviewVisibility() }
         build()
+        scroll.post { updatePreviewVisibility() }
     }
 
     override fun onResume() {
@@ -266,21 +292,28 @@ class SettingsActivity : Activity() {
 
         // ---------------- Island & Assistant
         val isl = section("DYNAMIC ISLAND & ASSISTANT")
+        islandCard = isl
+        islandPreview?.load(s)
+        val pv = islandPreview
         toggle(isl, "Dynamic Island", "Live activities at the top: music, charging. Swipe down on it for your " +
-            "assistant, sideways to switch, long-press for volume", s.island) { s.island = it }
+            "assistant, sideways to switch, long-press for volume", s.island) { s.island = it; updatePreviewVisibility() }
+        info(isl, "While you edit, a preview island shows at the top of the screen.")
         segment(isl, "Position", listOf("statusbar" to "In Status Bar", "below" to "Below Status Bar"),
-            s.islandPlacement) { s.islandPlacement = it }
-        slider(isl, "Move Up / Down", -20, 200, s.islandNudge.coerceIn(-20, 200), { if (it > 0) "+$it" else "$it" }) { s.islandNudge = it }
-        slider(isl, "Move Left / Right", -150, 150, s.islandX.coerceIn(-150, 150), { if (it > 0) "+$it" else "$it" }) { s.islandX = it }
+            s.islandPlacement) { s.islandPlacement = it; pv?.placement = it; previewChanged() }
+        slider(isl, "Move Up / Down", -20, 200, s.islandNudge.coerceIn(-20, 200), { if (it > 0) "+$it" else "$it" },
+            live = { pv?.nudge = it; previewChanged() }) { s.islandNudge = it; pv?.nudge = it; previewChanged() }
+        slider(isl, "Move Left / Right", -150, 150, s.islandX.coerceIn(-150, 150), { if (it > 0) "+$it" else "$it" },
+            live = { pv?.x = it; previewChanged() }) { s.islandX = it; pv?.x = it; previewChanged() }
         button(isl, "Reset Island Position", 0xFF0A84FF.toInt()) {
-            s.islandX = 0; s.islandNudge = 0; s.islandPlacement = "below"; rebuild()
+            s.islandX = 0; s.islandNudge = 0; s.islandPlacement = "below"; rebuild(); previewChanged()
         }
         info(isl, "Tip: long-press the island on the Home Screen and drag it wherever you like.")
-        slider(isl, "Island Size", 80, 130, s.islandScale, { "$it%" }) { s.islandScale = it }
+        slider(isl, "Island Size", 80, 130, s.islandScale, { "$it%" },
+            live = { pv?.scale = it; previewChanged() }) { s.islandScale = it; pv?.scale = it; previewChanged() }
         segment(isl, "Island Style", listOf("black" to "Black", "glass" to "Glass", "outline" to "Outline", "color" to "Color"),
-            s.islandStyle) { s.islandStyle = it }
+            s.islandStyle) { s.islandStyle = it; pv?.style = it; previewChanged(replay = true) }
         segment(isl, "Pop-up Animation", listOf("spring" to "Pop", "fade" to "Fade", "slide" to "Slide", "zoom" to "Zoom"),
-            s.islandAnim) { s.islandAnim = it }
+            s.islandAnim) { s.islandAnim = it; pv?.anim = it; previewChanged(replay = true) }
         // What may appear in the island
         val content = section("ISLAND CONTENT")
         for ((type, label, sub) in listOf(
@@ -621,6 +654,7 @@ class SettingsActivity : Activity() {
         max: Int,
         value: Int,
         fmt: (Int) -> String,
+        live: ((Int) -> Unit)? = null,
         onChange: (Int) -> Unit
     ) {
         val col = LinearLayout(this).apply {
@@ -641,6 +675,7 @@ class SettingsActivity : Activity() {
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
                     valueText.text = fmt(p + min)
+                    if (fromUser) live?.invoke(p + min)
                 }
                 override fun onStartTrackingTouch(sb: SeekBar) {}
                 override fun onStopTrackingTouch(sb: SeekBar) = onChange(sb.progress + min)
