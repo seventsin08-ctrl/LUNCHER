@@ -4962,6 +4962,15 @@ class MainActivity : Activity() {
             searchExtras.addView(r, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) })
         }
 
+        // Typing "timer" shows a Start Timer entry: tap it (or press Enter) to pop up the dial.
+        val tq = query.trim().lowercase()
+        if (tq.length >= 3 && ("timer".startsWith(tq) || tq.contains("timer"))) {
+            section("Timer")
+            row("⏱", "Start Timer", "Tap or press Enter to adjust the time") { showTimerPopup() }
+            searchExtras.getChildAt(searchExtras.childCount - 1)?.let { r ->
+                ((r as? LinearLayout)?.getChildAt(0))?.background = Glass.circle(0xFFFF9F0A.toInt())
+            }
+        }
         val shortcuts = SpotlightExtras.shortcuts(query, { m -> TimerState.start(this, m) }, { openControlCenter() },
             { id -> setFocus(id) })
         if (shortcuts.isNotEmpty()) { section("Shortcuts"); shortcuts.forEach { r -> row(r.icon, r.title, r.subtitle, r.action) } }
