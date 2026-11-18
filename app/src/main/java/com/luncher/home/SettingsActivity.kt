@@ -271,7 +271,7 @@ class SettingsActivity : Activity() {
             toggle(services, name, desc, s.islandAllows(id)) { s.setIslandAllows(id, it) }
         button(services, "Pinned Services (${s.islandPinned.size})…", 0xFF0A84FF.toInt()) {
             val targets = IslandServices.shareTargets(this)
-            chooseApps("Pinned services", targets, s.islandPinned.toSet()) { chosen ->
+            chooseApps("Pinned Services", targets, s.islandPinned.toSet()) { chosen ->
                 // Keep the order you already had, add new ones at the end.
                 s.islandPinned = s.islandPinned.filter { it in chosen } + chosen.filter { it !in s.islandPinned }
             }
@@ -280,7 +280,8 @@ class SettingsActivity : Activity() {
         segment(services, "Music Player Sources", listOf("all" to "All Apps", "chosen" to "Chosen Apps"),
             s.islandAudioMode) { s.islandAudioMode = it }
         button(services, "Manage Audio Sources (${s.islandAudioApps.size})…", 0xFF0A84FF.toInt()) {
-            chooseApps("Audio sources", launchableApps(), s.islandAudioApps) { chosen ->
+            chooseApps("Audio Sources", launchableApps(), s.islandAudioApps,
+                "Music & audio apps", AppPicker.musicPackages(this)) { chosen ->
                 s.islandAudioApps = chosen
                 if (chosen.isNotEmpty()) s.islandAudioMode = "chosen"
             }
@@ -442,22 +443,22 @@ class SettingsActivity : Activity() {
     }
 
     /** Tick-list of apps; [onDone] gets the chosen package names, then the page refreshes. */
-    private fun chooseApps(title: String, apps: List<Pair<String, String>>, current: Set<String>, onDone: (Set<String>) -> Unit) {
-        val chosen = current.toMutableSet()
-        val checked = BooleanArray(apps.size) { apps[it].first in chosen }
-        android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
-            .setTitle(title)
-            .setMultiChoiceItems(apps.map { it.second }.toTypedArray(), checked) { _, i, on ->
-                if (on) chosen += apps[i].first else chosen -= apps[i].first
-            }
-            .setPositiveButton("Done") { _, _ -> onDone(chosen); recreate() }
-            .setNegativeButton("Cancel", null)
-            .show()
+    private fun chooseApps(
+        title: String,
+        apps: List<Pair<String, String>>,
+        current: Set<String>,
+        featuredTitle: String? = null,
+        featured: Set<String> = emptySet(),
+        onDone: (Set<String>) -> Unit
+    ) {
+        AppPicker.show(this, title, apps.map { AppPicker.App(it.first, it.second) }, current, featuredTitle, featured) {
+            onDone(it); recreate()
+        }
     }
 
     /** Pick which apps' notifications may pop up in the Dynamic Island. */
     private fun chooseIslandApps() {
-        chooseApps("Island notifications", launchableApps(), s.islandNoteApps) { chosen ->
+        chooseApps("Notifications", launchableApps(), s.islandNoteApps) { chosen ->
             s.islandNoteApps = chosen
             if (chosen.isNotEmpty()) s.islandNoteMode = "chosen"
         }

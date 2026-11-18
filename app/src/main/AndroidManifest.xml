@@ -15,6 +15,13 @@
     <uses-permission android:name="android.permission.BIND_APPWIDGET" tools:ignore="ProtectedPermissions" />
     <queries>
         <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
             <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
         </intent>
         <intent>
