@@ -29,7 +29,6 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -53,7 +52,14 @@ class HeadsetPopup(
         private const val EXTRA_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
     }
 
-    private class Headset(val key: String, val name: String, val address: String?, val bluetooth: Boolean)
+    private class Headset(
+        val key: String,
+        val name: String,
+        val address: String?,
+        val bluetooth: Boolean,
+        val audioType: Int,
+        var kind: HeadsetKind
+    )
 
     private val audio = act.getSystemService(AudioManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
@@ -136,7 +142,45 @@ class HeadsetPopup(
             else -> "Headphones"
         }
         val key = if (bt) "bt:" + (address ?: name) else "wired"
-        return Headset(key, name, address, bt)
+        val kind = if (bt) guessKind(name, null) else HeadsetKind.WIRED
+        return Headset(key, name, address, bt, d.type, kind)
+    }
+
+    /**
+     * Work out what the user is wearing. The device name is the strongest hint
+     * ("Galaxy Buds", "WH-1000XM5", "JBL Flip"…), then the Bluetooth device class.
+     */
+    private fun guessKind(name: String, btClass: Int?): HeadsetKind {
+        val n = name.lowercase()
+        fun has(vararg words: String) = words.any { n.contains(it) }
+        return when {
+            has("airpods max", "pixel buds pro max") -> HeadsetKind.OVER_EAR
+            has("speaker", "soundlink", "flip", "charge", "boombox", "boom", "pulse", "xtreme",
+                "soundcore motion", "wonderboom", "srs-", "go 3", "clip", "echo", "home") -> HeadsetKind.SPEAKER
+            has("buds", "pods", "earbud", "ear bud", "tws", "wf-", "elite", "freebuds", "liberty", "nothing ear",
+                "ear (", "earfun", "airdots", "redmi", "oneplus buds", "life p", "life a", "jlab", "skullcandy",
+                "beats fit", "powerbeats", "studio buds", "in-ear", "in ear", "true wireless") -> HeadsetKind.EARBUDS
+            has("wh-", "headphone", "headset", "qc", "quietcomfort", "bose 700", "momentum", "max", "studio",
+                "solo", "hd ", "hd4", "hd5", "ath-", "over-ear", "over ear", "q20", "q30", "q35", "q45",
+                "life q", "tune 7", "live 6", "live 7", "arctis", "kraken", "hyperx", "steelseries", "razer",
+                "logitech", "corsair") -> HeadsetKind.OVER_EAR
+            btClass == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES -> HeadsetKind.OVER_EAR
+            btClass == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER ||
+                btClass == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO ||
+                btClass == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO -> HeadsetKind.SPEAKER
+            else -> HeadsetKind.EARBUDS
+        }
+    }
+
+    /** Refine the guess with the Bluetooth device class once we're allowed to read it. */
+    private fun refineKind(h: Headset) {
+        if (!h.bluetooth || !hasBluetoothPermission()) return
+        val addr = h.address ?: return
+        val cls = runCatching {
+            val adapter = act.getSystemService(BluetoothManager::class.java)?.adapter ?: return
+            adapter.getRemoteDevice(addr).bluetoothClass?.deviceClass
+        }.getOrNull() ?: return
+        h.kind = guessKind(h.name, cls)
     }
 
     private fun onConnected(h: Headset) {
@@ -148,6 +192,7 @@ class HeadsetPopup(
     private fun show(h: Headset) {
         if (!act.hasWindowFocus() && !isResumed()) return
         hide(immediate = true)
+        refineKind(h)
         shown = h
         if (haptics()) root.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
 
@@ -197,12 +242,15 @@ class HeadsetPopup(
         }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.END or Gravity.CENTER_VERTICAL))
         c.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        // Big floating headphones.
-        val art = ImageView(act).apply {
-            setImageResource(R.drawable.ic_headphones)
-            setColorFilter(Color.WHITE)
-        }
-        c.addView(art, LinearLayout.LayoutParams(dp(120), dp(120)).apply { topMargin = dp(14) })
+        // Spinning 3D model of what's connected (earbuds, headphones, wired earphones, speaker).
+        val art = Headset3DView(act, h.kind)
+        c.addView(art, LinearLayout.LayoutParams(MATCH_PARENT, dp(190)).apply { topMargin = dp(4) })
+        c.addView(TextView(act).apply {
+            text = h.kind.label
+            setTextColor(0x99FFFFFF.toInt())
+            textSize = 13f
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         // Battery ring + label (Bluetooth only, once the level is known).
         val batteryRow = LinearLayout(act).apply {
@@ -215,7 +263,7 @@ class HeadsetPopup(
             setTextColor(Color.WHITE)
             textSize = 15f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            text = if (h.bluetooth) "Connected" else "Wired headphones connected"
+            text = if (h.bluetooth) "Connected" else "Connected"
             setPadding(dp(10), 0, 0, 0)
         }
         batteryRow.addView(label)
@@ -261,8 +309,9 @@ class HeadsetPopup(
         val h0 = root.height.toFloat().coerceAtLeast(dp(600).toFloat())
         l.animate().alpha(1f).setDuration((220 * Motion.scale).toLong()).setInterpolator(ease).start()
         Motion.spring(c, DynamicAnimation.TRANSLATION_Y, 0f, Motion.FLUID, start = h0)
-        art.scaleX = 0.6f; art.scaleY = 0.6f
+        art.scaleX = 0.5f; art.scaleY = 0.5f
         art.postDelayed({ Motion.scaleTo(art, 1f, Motion.BOUNCY) }, 120)
+        art.playEntrance()
         startFloating(art)
 
         if (h.bluetooth) {
