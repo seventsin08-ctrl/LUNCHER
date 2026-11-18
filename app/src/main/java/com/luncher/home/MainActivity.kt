@@ -851,6 +851,13 @@ class MainActivity : Activity() {
             }
 
             override fun onPageScrollStateChanged(state: Int) {
+                // While swiping, draw each page from a cached GPU layer so it stays at full frame rate.
+                val rv = pager.getChildAt(0) as? RecyclerView
+                val layer = if (state == ViewPager2.SCROLL_STATE_IDLE) View.LAYER_TYPE_NONE else View.LAYER_TYPE_HARDWARE
+                if (rv != null) for (i in 0 until rv.childCount) {
+                    val c = rv.getChildAt(i)
+                    if (c.layerType != layer) c.setLayerType(layer, null)
+                }
                 mainHandler.removeCallbacks(showSearchPill)
                 if (state == ViewPager2.SCROLL_STATE_IDLE) mainHandler.postDelayed(showSearchPill, 1000)
                 else setPillMode(search = false)
@@ -1077,12 +1084,17 @@ class MainActivity : Activity() {
         blurAnimator = ValueAnimator.ofFloat(currentBlur, target).apply {
             this.duration = duration
             interpolator = EASE
+            var lastStep = -1
             addUpdateListener {
                 val v = it.animatedValue as Float
                 currentBlur = v
-                content.setRenderEffect(
-                    if (v < 0.5f) null else RenderEffect.createBlurEffect(v, v, Shader.TileMode.CLAMP)
-                )
+                val step = (v * 2).toInt() // half-pixel steps look identical but cost far less
+                if (step != lastStep) {
+                    lastStep = step
+                    content.setRenderEffect(
+                        if (v < 0.5f) null else RenderEffect.createBlurEffect(v, v, Shader.TileMode.CLAMP)
+                    )
+                }
             }
             start()
         }
@@ -4400,7 +4412,10 @@ class MainActivity : Activity() {
         } else {
             calcRow.visibility = View.GONE
         }
-        renderSearchExtras(query)
+        // Shortcuts/settings/contacts wait until typing pauses for a moment (keeps typing smooth).
+        pendingExtras = query
+        mainHandler.removeCallbacks(extrasTask)
+        mainHandler.postDelayed(extrasTask, 90)
         if (query.isNotEmpty() && math == null) {
             webRow.text = "Search the web for “$query”"
             webRow.visibility = View.VISIBLE
@@ -5186,6 +5201,9 @@ class MainActivity : Activity() {
     }
 
     /** Spotlight: quick actions, settings and contacts above the app results. */
+    private var pendingExtras = ""
+    private val extrasTask = Runnable { renderSearchExtras(pendingExtras) }
+
     private fun renderSearchExtras(query: String) {
         if (!::searchExtras.isInitialized) return
         searchExtras.removeAllViews()
@@ -5228,7 +5246,26 @@ class MainActivity : Activity() {
         }
         if (sets.isNotEmpty()) { section("Settings"); sets.forEach { r -> row(r.icon, r.title, r.subtitle, r.action) } }
         if (SpotlightExtras.hasContactsPermission(this)) {
-            val people = SpotlightExtras.contacts(this, query)
+            // Look contacts up in the background, then add them if the query hasn't changed.
+            io.execute {
+                val people = runCatching { SpotlightExtras.contacts(this, query) }.getOrDefault(emptyList())
+                mainHandler.post { if (pendingExtras == query && !isDestroyed) addContactRows(people, ::section, ::row) }
+            }
+        } else if (!prefs.getBoolean("asked_contacts", false)) {
+            section("Contacts")
+            row("👤", "Show contacts in Search", "Tap to allow") {
+                prefs.edit().putBoolean("asked_contacts", true).apply()
+                requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 4400)
+            }
+        }
+    }
+
+    private fun addContactRows(
+        people: List<SpotlightExtras.Contact>,
+        section: (String) -> Unit,
+        row: (String, String, String, () -> Unit) -> Unit
+    ) {
+        run {
             if (people.isNotEmpty()) {
                 section("Contacts")
                 for (c in people) row("👤", c.name, c.number ?: "") {
@@ -5238,12 +5275,6 @@ class MainActivity : Activity() {
                             else Intent(Intent.ACTION_VIEW, c.uri))
                     }
                 }
-            }
-        } else if (!prefs.getBoolean("asked_contacts", false)) {
-            section("Contacts")
-            row("👤", "Show contacts in Search", "Tap to allow") {
-                prefs.edit().putBoolean("asked_contacts", true).apply()
-                requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 4400)
             }
         }
     }

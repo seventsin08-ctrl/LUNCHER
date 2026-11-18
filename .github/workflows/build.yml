@@ -23,7 +23,7 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug assemblePreview --stacktrace
+          ./gradlew testDebugUnitTest assembleDebug assemblePreview assembleRelease --stacktrace
           cp app/build/outputs/apk/debug/app-debug.apk Luncher.apk
           cp app/build/outputs/apk/preview/app-preview.apk Luncher-preview.apk
 
@@ -52,7 +52,8 @@ jobs:
         if: github.ref == 'refs/heads/claude/adoring-goldberg-lhyb46'
         run: |
           N=$(grep -oP 'launcherNumber = "\K[0-9]+' app/build.gradle.kts)
-          cp Luncher.apk "AppleLauncher$N.apk"
+          # Ship the optimised (release) build, signed with the same key as before.
+          cp app/build/outputs/apk/release/app-release.apk "AppleLauncher$N.apk"
           echo "N=$N" >> "$GITHUB_ENV"
 
       - name: Upload numbered release

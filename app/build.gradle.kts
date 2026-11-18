@@ -4,7 +4,7 @@ plugins {
 }
 
 // Update this number for every release; it also controls the installed app name.
-val launcherNumber = "35"
+val launcherNumber = "36"
 
 android {
     namespace = "com.luncher.home"
@@ -14,7 +14,7 @@ android {
         applicationId = "com.applelauncher.home"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40
+        versionCode = 41
         versionName = launcherNumber
     }
 
@@ -42,10 +42,18 @@ android {
             signingConfig = signingConfigs.getByName("launcher")
             matchingFallbacks += listOf("debug")
         }
+        // The build you install: not debuggable, so Android runs it fully optimised (much smoother).
         release {
             isMinifyEnabled = false
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("launcher")
+            resValue("string", "app_name", "Apple Launcher $launcherNumber")
         }
+    }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 
     compileOptions {

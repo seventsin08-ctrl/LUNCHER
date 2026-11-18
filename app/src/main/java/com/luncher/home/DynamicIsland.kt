@@ -305,8 +305,28 @@ class DynamicIsland(
         putLocal(a)
     }
 
+    /** Same layout as before (only text/time changed)? Then we can update in place. */
+    private fun sameShape(o: IslandActivity, a: IslandActivity) =
+        o.icon === a.icon && o.iconRes == a.iconRes && o.title == a.title && o.showBars == a.showBars &&
+            (o.media == null) == (a.media == null) && o.actions.map { it.first } == a.actions.map { it.first }
+
     private fun putLocal(a: IslandActivity) {
         if (!allow(a.id)) { removeLocal(a.id); return }
+        // Fast path: a ticking timer/clock just changes its numbers — no relayout, no rebuild.
+        val old = activities[a.id]
+        if (old != null && sameShape(old, a) && pill.visibility == View.VISIBLE && enabled) {
+            activities[a.id] = a
+            if (current() === a) {
+                if (!expanded) {
+                    bind(a)
+                    val w = compactWidth(a)
+                    if (abs(w - pill.width) > dp(6)) animateSize(w, dp(36), dp(18).toFloat())
+                } else if (a.media == null) {
+                    expSubtitle?.text = a.subtitle
+                }
+            }
+            return
+        }
         val isNew = !activities.containsKey(a.id)
         activities[a.id] = a
         if (isNew) {
@@ -430,6 +450,7 @@ class DynamicIsland(
     }
 
     private var ticker: Runnable? = null
+    private var expSubtitle: TextView? = null
 
     private fun fmtTime(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)
@@ -561,7 +582,7 @@ class DynamicIsland(
         texts.addView(TextView(act).apply {
             text = a.subtitle; setTextColor(0xB3FFFFFF.toInt()); textSize = 14f; maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-        })
+        }.also { expSubtitle = it })
         head.addView(texts, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(14) })
         if (a.showBars) {
             val b = BarsView(act).apply { color = a.accent }
