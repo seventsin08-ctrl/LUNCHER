@@ -41,8 +41,54 @@ class IslandActivity(
     val trailing: String?,
     val showBars: Boolean,
     val accent: Int,
-    val actions: List<Pair<String, () -> Unit>> = emptyList()
+    val actions: List<Pair<String, () -> Unit>> = emptyList(),
+    /** When set, the expanded island shows the full iPhone-style music player. */
+    val media: IslandMedia? = null
 )
+
+/** Live music controls for the expanded island. */
+class IslandMedia(
+    val appIcon: Bitmap?,
+    val duration: Long,
+    val position: () -> Long,
+    val playing: () -> Boolean,
+    val outputIconRes: Int,
+    val onPlayPause: () -> Unit,
+    val onPrev: () -> Unit,
+    val onNext: () -> Unit,
+    val onSeek: (Long) -> Unit,
+    val onAdd: () -> Unit,
+    val onOutput: () -> Unit
+)
+
+/** Thin rounded progress line; tap or drag on it to seek. */
+class IslandProgressView(ctx: android.content.Context) : View(ctx) {
+    var fraction = 0f
+        set(v) { field = v.coerceIn(0f, 1f); invalidate() }
+    var onSeek: ((Float) -> Unit)? = null
+    private var dragging = false
+    private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x4DFFFFFF }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+
+    override fun onDraw(canvas: Canvas) {
+        val h = if (dragging) height * 0.62f else height * 0.42f
+        val top = (height - h) / 2f
+        val r = h / 2f
+        canvas.drawRoundRect(0f, top, width.toFloat(), top + h, r, r, track)
+        canvas.drawRoundRect(0f, top, (width * fraction).coerceAtLeast(h), top + h, r, r, fill)
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        val f = (e.x / width.coerceAtLeast(1)).coerceIn(0f, 1f)
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { dragging = true; parent?.requestDisallowInterceptTouchEvent(true); fraction = f }
+            MotionEvent.ACTION_MOVE -> fraction = f
+            MotionEvent.ACTION_UP -> { dragging = false; fraction = f; onSeek?.invoke(f) }
+            MotionEvent.ACTION_CANCEL -> { dragging = false; invalidate() }
+        }
+        return true
+    }
+}
 
 /**
  * A Dynamic Island–style black pill at the top of the Home Screen.
@@ -265,8 +311,118 @@ class DynamicIsland(
         bars.visibility = if (a.showBars) View.VISIBLE else View.GONE
     }
 
+    private var ticker: Runnable? = null
+
+    private fun fmtTime(ms: Long): String {
+        val s = (ms / 1000).coerceAtLeast(0)
+        return if (s >= 3600) String.format("%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
+        else String.format("%02d:%02d", s / 60, s % 60)
+    }
+
+    /** iPhone-style expanded Now Playing: artwork, title, progress and controls. */
+    private fun bindMusic(a: IslandActivity, m: IslandMedia) {
+        expandedView.setPadding(dp(22), dp(20), dp(22), dp(14))
+        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val artFrame = FrameLayout(act)
+        artFrame.addView(ImageView(act).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            if (a.icon != null) setImageBitmap(a.icon) else { setImageResource(a.iconRes); setColorFilter(a.iconTint)
+                background = GradientDrawable().apply { setColor(0xFF2C2C2E.toInt()) } }
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height, dp(14).toFloat())
+            }
+            clipToOutline = true
+        }, FrameLayout.LayoutParams(dp(66), dp(66)))
+        if (m.appIcon != null) {
+            artFrame.addView(ImageView(act).apply {
+                setImageBitmap(m.appIcon)
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) = outline.setOval(0, 0, view.width, view.height)
+                }
+                clipToOutline = true
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
+                setPadding(dp(2), dp(2), dp(2), dp(2))
+            }, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.BOTTOM or Gravity.END))
+        }
+        head.addView(artFrame, LinearLayout.LayoutParams(dp(72), dp(72)))
+        val texts = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(TextView(act).apply {
+            text = a.title; setTextColor(Color.WHITE); textSize = 21f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        texts.addView(TextView(act).apply {
+            text = a.subtitle; setTextColor(0x99FFFFFF.toInt()); textSize = 16f; maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        head.addView(texts, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(14) })
+        head.addView(ImageView(act).apply {
+            setImageResource(m.outputIconRes)
+            setOnClickListener { buzz(); m.onOutput() }
+        }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP; topMargin = dp(2) })
+        expandedView.addView(head)
+
+        val prog = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        fun timeLabel() = TextView(act).apply {
+            setTextColor(0x99FFFFFF.toInt()); textSize = 13f
+            fontFeatureSettings = "tnum"
+        }
+        val elapsed = timeLabel()
+        val total = timeLabel().apply { text = fmtTime(m.duration); gravity = Gravity.END }
+        val bar = IslandProgressView(act)
+        prog.addView(elapsed, LinearLayout.LayoutParams(dp(50), WRAP_CONTENT))
+        prog.addView(bar, LinearLayout.LayoutParams(0, dp(16), 1f).apply { setMargins(dp(8), 0, dp(8), 0) })
+        prog.addView(total, LinearLayout.LayoutParams(dp(50), WRAP_CONTENT))
+        if (m.duration <= 0) { bar.visibility = View.INVISIBLE; total.text = "" }
+        bar.onSeek = { f -> buzz(); m.onSeek((f * m.duration).toLong()) }
+        expandedView.addView(prog, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(16) })
+
+        val controls = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        fun ctl(res: Int, size: Int, fn: () -> Unit) = ImageView(act).apply {
+            setImageResource(res)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding((dp(52) - dp(size)) / 2, 0, (dp(52) - dp(size)) / 2, 0)
+            setOnClickListener { v ->
+                buzz()
+                v.animate().scaleX(0.8f).scaleY(0.8f).setDuration(80).withEndAction {
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
+                }.start()
+                fn()
+            }
+        }.also { controls.addView(it, LinearLayout.LayoutParams(0, dp(size), 1f)) }
+        ctl(R.drawable.ic_add_circle, 30) { m.onAdd() }
+        ctl(R.drawable.ic_island_prev, 32) { m.onPrev() }
+        val play = ctl(if (m.playing()) R.drawable.ic_island_pause else R.drawable.ic_island_play, 40) { m.onPlayPause() }
+        ctl(R.drawable.ic_island_next, 32) { m.onNext() }
+        ctl(R.drawable.ic_broadcast, 30) { m.onOutput() }
+        expandedView.addView(controls, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)).apply { topMargin = dp(12) })
+
+        // Keep the time and play/pause icon live while open.
+        ticker?.let { pill.removeCallbacks(it) }
+        var wasPlaying: Boolean? = null
+        val t = object : Runnable {
+            override fun run() {
+                if (!expanded || current()?.media !== m) return
+                val pos = m.position().coerceIn(0, if (m.duration > 0) m.duration else Long.MAX_VALUE)
+                elapsed.text = fmtTime(pos)
+                if (m.duration > 0) bar.fraction = pos.toFloat() / m.duration
+                val p = m.playing()
+                if (p != wasPlaying) {
+                    wasPlaying = p
+                    play.setImageResource(if (p) R.drawable.ic_island_pause else R.drawable.ic_island_play)
+                }
+                pill.postDelayed(this, 500)
+            }
+        }
+        ticker = t
+        t.run()
+    }
+
     private fun bindExpanded(a: IslandActivity) {
         expandedView.removeAllViews()
+        a.media?.let { bindMusic(a, it); return }
+        expandedView.setPadding(dp(20), dp(18), dp(20), dp(16))
         val head = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -327,10 +483,10 @@ class DynamicIsland(
         expandedView.alpha = 0f
         expandedView.animate().alpha(1f).setStartDelay(80).setDuration(200).start()
         expandedView.measure(
-            View.MeasureSpec.makeMeasureSpec(root.width - dp(24), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(root.width - dp(16), View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
-        animateSize(root.width - dp(24), expandedView.measuredHeight, dp(38).toFloat())
+        animateSize(root.width - dp(16), expandedView.measuredHeight, dp(if (a.media != null) 46 else 38).toFloat())
         // Tap anywhere else to fold it back.
         val c = View(act).apply { isClickable = true; setOnClickListener { collapse() } }
         root.addView(c, root.indexOfChild(pill), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))

@@ -43,6 +43,7 @@ import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.os.SystemClock
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -4278,22 +4279,80 @@ class MainActivity : Activity() {
         if (!::island.isInitialized) return
         val c = mediaController
         val meta = c?.metadata
-        val playing = c?.playbackState?.state == PlaybackState.STATE_PLAYING
-        if (c == null || meta == null || !playing) { island.remove("music"); return }
+        val state = c?.playbackState?.state
+        val playing = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
+        // Like iOS, keep the player in the island while paused so you can resume from it.
+        if (c == null || meta == null || !(playing || state == PlaybackState.STATE_PAUSED)) { island.remove("music"); return }
         val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
             ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "Now Playing"
         val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
         val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        val pkg = c.packageName
+        val appIcon = allApps.firstOrNull { it.packageName == pkg }?.icon
+        val duration = meta.getLong(MediaMetadata.METADATA_KEY_DURATION)
+        val media = IslandMedia(
+            appIcon = appIcon,
+            duration = duration,
+            position = {
+                val ps = c.playbackState
+                if (ps == null) 0L else if (ps.state == PlaybackState.STATE_PLAYING)
+                    ps.position + ((SystemClock.elapsedRealtime() - ps.lastPositionUpdateTime) * ps.playbackSpeed).toLong()
+                else ps.position
+            },
+            playing = { c.playbackState?.state == PlaybackState.STATE_PLAYING },
+            outputIconRes = if (headphonesConnected()) R.drawable.ic_headphones else R.drawable.ic_speaker,
+            onPlayPause = { togglePlay() },
+            onPrev = { c.transportControls.skipToPrevious() },
+            onNext = { c.transportControls.skipToNext() },
+            onSeek = { pos -> c.transportControls.seekTo(pos) },
+            onAdd = { addCurrentSong(c) },
+            onOutput = { openMediaOutput(pkg) }
+        )
         island.put(IslandActivity(
-            "music", art, R.drawable.ic_music, Color.WHITE, title, artist, null, true, 0xFFFF9F0A.toInt(),
-            listOf(
-                "⏮" to { c.transportControls.skipToPrevious() },
-                "⏸" to { togglePlay() },
-                "⏭" to { c.transportControls.skipToNext() },
-                "Volume" to { showVolumePanel() }
-            )
+            "music", art, R.drawable.ic_music, Color.WHITE, title, artist, null, playing, 0xFFFF9F0A.toInt(),
+            media = media
         ))
+    }
+
+    private fun headphonesConnected(): Boolean = runCatching {
+        getSystemService(android.media.AudioManager::class.java).getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                it.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+                (Build.VERSION.SDK_INT >= 31 && it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET)
+        }
+    }.getOrDefault(false)
+
+    /** ⊕: use the player's own "like / save" action when it has one, otherwise open the app. */
+    private fun addCurrentSong(c: android.media.session.MediaController) {
+        val words = listOf("like", "heart", "save", "add", "favo", "library", "collection", "thumbs_up", "thumb_up")
+        val action = c.playbackState?.customActions?.firstOrNull { a ->
+            val n = (a.action + " " + a.name).lowercase()
+            words.any { n.contains(it) } && !n.contains("unlike") && !n.contains("remove")
+        }
+        if (action != null) {
+            c.transportControls.sendCustomAction(action, null)
+            toast("Added: ${action.name}")
+        } else {
+            packageManager.getLaunchIntentForPackage(c.packageName)?.let {
+                runCatching { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+        }
+    }
+
+    /** Opens Android's "play on" picker (speaker, headphones, cast) for the playing app. */
+    private fun openMediaOutput(pkg: String) {
+        val tries = listOf(
+            Intent("com.android.settings.panel.action.MEDIA_OUTPUT")
+                .putExtra("com.android.settings.panel.extra.PACKAGE_NAME", pkg),
+            Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
+        )
+        for (i in tries) {
+            val ok = runCatching { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+            if (ok) return
+        }
     }
 
     /** Spatial / extended wallpaper drawn by the launcher itself. */
