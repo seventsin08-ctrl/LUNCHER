@@ -67,7 +67,7 @@ dump
 python3 scripts/dock-ui.py measure Camera one
 adb exec-out screencap -p > dock-smoke/one.png
 # Enter the launcher edit mode first, then exercise its direct drag gestures.
-adb shell input swipe 8 245 8 245 1200
+adb shell input swipe 200 245 200 245 1200
 sleep 2
 dump
 read -r ex ey <<< "$(python3 scripts/dock-ui.py button 'Edit Home Screen')"
