@@ -143,6 +143,10 @@ class MainActivity : Activity() {
     private lateinit var gestures: GestureDetector
     private lateinit var switcher: AppSwitcher
     private lateinit var headsetPopup: HeadsetPopup
+    private lateinit var island: DynamicIsland
+    private lateinit var spatialWall: SpatialImageView
+    private var spatialWallUri: String? = null
+    private var wasCharging: Boolean? = null
 
     private val searchAdapter by lazy {
         AppListAdapter(false, { a, v -> launch(a, v) }, { a, v -> showAppMenu(a, v) })
@@ -276,6 +280,10 @@ class MainActivity : Activity() {
         )
         headsetPopup = HeadsetPopup(this, root, { settings.headsetPopup }, { settings.haptics })
         runCatching { headsetPopup.start() }
+        island = DynamicIsland(this, root, { openAssistant() }, { showVolumePanel() }, { settings.haptics })
+        island.enabled = settings.island
+        loadSpatialWallpaper()
+        ViewCompat.requestApplyInsets(root)
 
         switcher = AppSwitcher(
             this, root,
@@ -287,6 +295,7 @@ class MainActivity : Activity() {
         gestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null || overlayOpen() || editMode || drag != null) return false
+                if (::island.isInitialized && island.hit(e1.rawX, e1.rawY)) return false
                 if (pages.getOrNull(pager.currentItem) is Page.Library) return false
                 val dy = e2.y - e1.y
                 val dx = e2.x - e1.x
@@ -328,6 +337,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Tilt.resume()
         isActive = true
         defaultBanner.visibility = if (isDefaultHome()) View.GONE else View.VISIBLE
         if (settings.version != appliedVersion) applySettings()
@@ -345,6 +355,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        Tilt.pause()
         isActive = false
         activeFolderDialog?.let { folder ->
             if (folder.draggingMember) {
@@ -496,6 +507,8 @@ class MainActivity : Activity() {
         Glass.glass = settings.glass
         Glass.tint = settings.tint
         Glass.tintPanels = settings.tintPanels
+        // Liquid Glass slider: 0 = frosted (more opaque), 100 = crystal clear.
+        Glass.opacity = 1.6f - settings.glassClarity / 100f * 1.2f
         IconFactory.style = settings.iconStyle
         IconFactory.tint = settings.tint
     }
@@ -519,6 +532,8 @@ class MainActivity : Activity() {
 
     private fun applySettings() {
         Motion.scale = settings.animScale
+        if (::island.isInitialized) island.enabled = settings.island
+        loadSpatialWallpaper()
         appliedVersion = settings.version
         applyStyleGlobals()
         restylePersistent()
@@ -544,6 +559,8 @@ class MainActivity : Activity() {
 
     private fun buildUi() {
         root = FrameLayout(this)
+        spatialWall = SpatialImageView(this).apply { visibility = View.GONE }
+        root.addView(spatialWall, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         scrim = View(this).apply {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
@@ -627,6 +644,11 @@ class MainActivity : Activity() {
             insetTop = bars.top
             insetBottom = bars.bottom
             if (::headsetPopup.isInitialized) headsetPopup.bottomInset = bars.bottom
+            if (::island.isInitialized) {
+                val cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top
+                val band = if (cut > 0) cut else bars.top
+                island.setTopInset(((band - dp(36)) / 2).coerceAtLeast(dp(3)))
+            }
             content.setPadding(0, bars.top, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
             insets
@@ -645,6 +667,9 @@ class MainActivity : Activity() {
                 val n = pages.size
                 val token = root.windowToken ?: return
                 if (n < 2) return
+                if (spatialWall.visibility == View.VISIBLE) {
+                    spatialWall.shiftX = -(position + positionOffset) * dp(18)
+                }
                 runCatching {
                     val wm = WallpaperManager.getInstance(this@MainActivity)
                     wm.setWallpaperOffsetSteps(1f / (n - 1), 0f)
@@ -1836,8 +1861,12 @@ class MainActivity : Activity() {
 
     private fun photoWidget(id: String): View {
         val frame = FrameLayout(this)
-        val img = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
-        if (prefs.getBoolean("photo_bw_$id", true)) img.colorFilter = IconFactory.grayscale()
+        // Spatial Scene: the photo tilts in 3D with the phone (like iOS spatial photos).
+        val img = SpatialImageView(this).apply {
+            spatial = prefs.getBoolean("photo_spatial_$id", true) && anim > 0f
+            depth = 0.9f
+        }
+        if (prefs.getBoolean("photo_bw_$id", true)) img.filter = IconFactory.grayscale()
         val hint = TextView(this).apply {
             text = "+\nAdd Photo"
             setTextColor(0xCCFFFFFF.toInt())
@@ -1851,7 +1880,7 @@ class MainActivity : Activity() {
         val cached = photoCache[id]
         val uri = prefs.getString("photo_$id", null)
         if (cached != null) {
-            img.setImageBitmap(cached); hint.visibility = View.GONE
+            img.bitmap = cached; hint.visibility = View.GONE
         } else if (uri != null) {
             hint.visibility = View.GONE
             io.execute {
@@ -1860,7 +1889,7 @@ class MainActivity : Activity() {
                     if (bmp != null) {
                         photoCache[id] = bmp
                         img.alpha = 0f
-                        img.setImageBitmap(bmp)
+                        img.bitmap = bmp
                         img.animate().alpha(1f).setDuration(dur(300)).setInterpolator(EASE).start()
                     } else {
                         hint.visibility = View.VISIBLE
@@ -3676,6 +3705,7 @@ class MainActivity : Activity() {
     }
 
     private fun updateMusic() {
+        refreshIslandMusic()
         val v = musicViews ?: return
         val c = mediaController
         val meta = c?.metadata
@@ -3763,6 +3793,10 @@ class MainActivity : Activity() {
             MenuItem("Choose Photo") { pickPhoto(id) },
             MenuItem(if (bw) "Show in Color" else "Black & White") {
                 prefs.edit().putBoolean("photo_bw_$id", !bw).apply(); refreshPages()
+            },
+            MenuItem(if (prefs.getBoolean("photo_spatial_$id", true)) "Turn Off Spatial Scene" else "Turn On Spatial Scene") {
+                prefs.edit().putBoolean("photo_spatial_$id", !prefs.getBoolean("photo_spatial_$id", true)).apply()
+                refreshPages()
             }
         )
         if (prefs.getString("photo_$id", null) != null) {
@@ -4098,6 +4132,8 @@ class MainActivity : Activity() {
             MenuItem("Add Widgets…") { showRestoreWidgetsMenu(anchor) },
             MenuItem("Manage Pages…") { showPageMenu() },
             MenuItem("Apple Launcher Settings…") { openSettings() },
+            MenuItem("Volume…") { showVolumePanel() },
+            MenuItem("Visual Look Up") { visualLookUp() },
             MenuItem("Use Dark Glass Wallpaper") { applyGlassWallpaper() },
             MenuItem("Change Wallpaper…") {
                 runCatching {
@@ -4111,6 +4147,92 @@ class MainActivity : Activity() {
             }
         }
         showContextMenu(null, items)
+    }
+
+    // ================================================================ iOS 26-style extras
+
+    private fun showVolumePanel() {
+        if (menuLayer != null) dismissMenu(immediate = true)
+        VolumePanel.show(this, root, insetBottom)
+    }
+
+    /** "Siri": swipe down on the island opens the chosen assistant (Google, Gemini or ChatGPT). */
+    private fun openAssistant() {
+        val pkg = when (settings.assistant) {
+            "chatgpt" -> "com.openai.chatgpt"
+            "gemini" -> "com.google.android.apps.bard"
+            else -> null
+        }
+        if (pkg != null) {
+            val launch = packageManager.getLaunchIntentForPackage(pkg)
+            if (launch != null) { openIntent(launch, null); return }
+            toast("Install ${if (pkg.contains("openai")) "ChatGPT" else "Gemini"} to use it here")
+        }
+        val tried = runCatching { startActivity(Intent(Intent.ACTION_VOICE_COMMAND).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        if (tried.isFailure) runCatching { startActivity(Intent(Intent.ACTION_ASSIST).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { toast("No assistant installed") }
+    }
+
+    /** Point the camera at something to search it (Google Lens), like Visual Intelligence. */
+    private fun visualLookUp() {
+        val lens = packageManager.getLaunchIntentForPackage("com.google.ar.lens")
+        if (lens != null) { openIntent(lens, null); return }
+        val ok = runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("googleapp://lens")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
+        if (!ok) openIntent(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA), null)
+    }
+
+    /** Keep the island's music activity in sync with what's playing. */
+    private fun refreshIslandMusic() {
+        if (!::island.isInitialized) return
+        val c = mediaController
+        val meta = c?.metadata
+        val playing = c?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (c == null || meta == null || !playing) { island.remove("music"); return }
+        val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
+            ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "Now Playing"
+        val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
+        val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        island.put(IslandActivity(
+            "music", art, R.drawable.ic_music, Color.WHITE, title, artist, null, true, 0xFFFF9F0A.toInt(),
+            listOf(
+                "⏮" to { c.transportControls.skipToPrevious() },
+                "⏸" to { togglePlay() },
+                "⏭" to { c.transportControls.skipToNext() },
+                "Volume" to { showVolumePanel() }
+            )
+        ))
+    }
+
+    /** Spatial / extended wallpaper drawn by the launcher itself. */
+    private fun loadSpatialWallpaper() {
+        if (!::spatialWall.isInitialized) return
+        val uri = settings.spatialWallpaperUri
+        if (!settings.spatialWallpaper || uri == null) {
+            spatialWall.visibility = View.GONE
+            spatialWall.bitmap = null
+            spatialWallUri = null
+            return
+        }
+        spatialWall.extend = settings.extendWallpaper
+        spatialWall.spatial = settings.wallpaperDepth && anim > 0f
+        spatialWall.depth = 0.7f
+        spatialWall.visibility = View.VISIBLE
+        if (uri == spatialWallUri && spatialWall.bitmap != null) return
+        spatialWallUri = uri
+        val maxPx = maxOf(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+        io.execute {
+            val bmp = decodeSampled(Uri.parse(uri), maxPx / 2)
+            mainHandler.post {
+                if (bmp != null) {
+                    spatialWall.alpha = 0f
+                    spatialWall.bitmap = bmp
+                    spatialWall.animate().alpha(1f).setDuration(dur(400)).start()
+                } else toast("Couldn't open that wallpaper photo")
+            }
+        }
     }
 
     private fun applyGlassWallpaper() {
@@ -4181,6 +4303,13 @@ class MainActivity : Activity() {
             it.charging = batteryCharging
         }
         batteryText?.text = "$batteryLevel%"
+        if (::island.isInitialized && wasCharging == false && batteryCharging) {
+            island.flash(IslandActivity(
+                "charging", null, R.drawable.ic_bolt, 0xFF30D158.toInt(), "Charging", "Battery $batteryLevel%",
+                "$batteryLevel%", false, 0xFF30D158.toInt()
+            ), 4500)
+        }
+        wasCharging = batteryCharging
     }
 
     // ================================================================ utils

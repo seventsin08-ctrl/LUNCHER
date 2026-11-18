@@ -50,6 +50,9 @@ object IconFactory {
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(0f, 0f, w * 0.35f, h, colors, floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
         }
+        if (style == "clear" && Glass.opacity != 1f) {
+            fill.alpha = (255 * Glass.opacity).toInt().coerceIn(40, 255)
+        }
         c.drawRoundRect(rect, r, r, fill)
     }
 

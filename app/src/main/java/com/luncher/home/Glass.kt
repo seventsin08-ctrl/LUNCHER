@@ -9,6 +9,11 @@ object Glass {
     var glass = true
     var tint = Color.WHITE
     var tintPanels = false
+    /** Liquid Glass slider: < 1 clearer, > 1 hazier. */
+    var opacity = 1f
+
+    private fun scaleAlpha(c: Int): Int =
+        Color.argb((Color.alpha(c) * opacity).toInt().coerceIn(12, 250), Color.red(c), Color.green(c), Color.blue(c))
 
     /** Clear-glass (or solid) panel used for widgets, dock and pills. */
     fun panel(ctx: Context, radiusDp: Float): GradientDrawable {
@@ -22,7 +27,7 @@ object Glass {
             colors.map { IconFactory.blend(it, Color.argb(Color.alpha(it), Color.red(tint), Color.green(tint), Color.blue(tint)), 0.28f) }
                 .toIntArray()
         } else colors
-        return GradientDrawable(GradientDrawable.Orientation.TL_BR, tinted).apply {
+        return GradientDrawable(GradientDrawable.Orientation.TL_BR, (if (glass) tinted.map { scaleAlpha(it) }.toIntArray() else tinted)).apply {
             cornerRadius = radiusDp * d
             setStroke(maxOf(1, (0.9f * d).toInt()), Color.argb(if (glass) 85 else 40, 255, 255, 255))
         }
@@ -49,7 +54,7 @@ object Glass {
             colors.map { IconFactory.blend(it, Color.argb(Color.alpha(it), Color.red(tint), Color.green(tint), Color.blue(tint)), 0.18f) }
                 .toIntArray()
         } else colors
-        return GradientDrawable(GradientDrawable.Orientation.TL_BR, tinted).apply {
+        return GradientDrawable(GradientDrawable.Orientation.TL_BR, tinted.map { scaleAlpha(it) }.toIntArray()).apply {
             cornerRadius = radiusDp * d
             setStroke(maxOf(1, (0.8f * d).toInt()), Color.argb(75, 255, 255, 255))
         }

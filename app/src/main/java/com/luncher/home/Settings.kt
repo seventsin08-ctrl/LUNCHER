@@ -87,6 +87,35 @@ class Settings(ctx: Context) {
             else -> "none"
         }
         set(v) = put("s_swipe_up", v)
+    /** Liquid Glass: 0 = hazy/frosted, 100 = crystal clear. */
+    var glassClarity: Int
+        get() = p.getInt("s_glass_clarity", 50)
+        set(v) = put("s_glass_clarity", v)
+
+    /** Dynamic Island pill at the top of the Home Screen. */
+    var island: Boolean
+        get() = p.getBoolean("s_island", true)
+        set(v) = put("s_island", v)
+
+    /** system | gemini | chatgpt — opened by swiping down on the island. */
+    var assistant: String
+        get() = p.getString("s_assistant", "system") ?: "system"
+        set(v) = put("s_assistant", v)
+
+    /** Launcher-drawn wallpaper with the 3D spatial effect. */
+    var spatialWallpaper: Boolean
+        get() = p.getBoolean("s_spatial_wall", false)
+        set(v) = put("s_spatial_wall", v)
+    var spatialWallpaperUri: String?
+        get() = p.getString("s_spatial_wall_uri", null)
+        set(v) { p.edit().putString("s_spatial_wall_uri", v).putInt("s_version", version + 1).apply() }
+    var extendWallpaper: Boolean
+        get() = p.getBoolean("s_extend_wall", true)
+        set(v) = put("s_extend_wall", v)
+    var wallpaperDepth: Boolean
+        get() = p.getBoolean("s_wall_depth", true)
+        set(v) = put("s_wall_depth", v)
+
     /** AirPods-style card when headphones connect. */
     var headsetPopup: Boolean
         get() = p.getBoolean("s_headset_popup", true)

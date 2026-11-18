@@ -59,6 +59,7 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (pendingRingtone != null && SysSettings.System.canWrite(this)) applyRingtone()
         // Permission rows may have changed while the user was in system settings.
         rebuild()
     }
@@ -119,6 +120,9 @@ class SettingsActivity : Activity() {
         info(look, "Glass gives icons a clear look. Color shows the original app icons.")
         swatches(look, "Accent Color", s.tint) { s.tint = it; rebuild() }
         toggle(look, "Glass Effect", "See-through folders, widgets and dock", s.glass) { s.glass = it; rebuild() }
+        slider(look, "Liquid Glass", 0, 100, s.glassClarity, {
+            when { it < 34 -> "Frosted"; it < 67 -> "Balanced"; else -> "Clear" }
+        }) { s.glassClarity = it }
         toggle(look, "Tint Widgets & Dock", "Use the accent color on glass panels", s.tintPanels) { s.tintPanels = it; rebuild() }
         slider(look, "Wallpaper Dimming", 0, 80, s.dim, { "$it%" }) { s.dim = it }
         button(look, "Restore Glass Look", 0xFF0A84FF.toInt()) {
@@ -229,6 +233,51 @@ class SettingsActivity : Activity() {
                 }
             }
         }
+        // ---------------- Wallpaper
+        val wall = section("WALLPAPER")
+        toggle(wall, "Spatial Wallpaper", "Your photo with a 3D depth effect that moves as you tilt the phone",
+            s.spatialWallpaper) {
+            s.spatialWallpaper = it
+            if (it && s.spatialWallpaperUri == null) pickWallpaper()
+            rebuild()
+        }
+        button(wall, if (s.spatialWallpaperUri == null) "Choose Photo…" else "Change Photo…", 0xFF0A84FF.toInt()) {
+            pickWallpaper()
+        }
+        toggle(wall, "Extend", "Fill empty space around the photo instead of cropping it", s.extendWallpaper) {
+            s.extendWallpaper = it
+        }
+        toggle(wall, "3D Depth Effect", null, s.wallpaperDepth) { s.wallpaperDepth = it }
+
+        // ---------------- Island & Assistant
+        val isl = section("DYNAMIC ISLAND & ASSISTANT")
+        toggle(isl, "Dynamic Island", "Live activities at the top: music, charging. Swipe down on it for your " +
+            "assistant, sideways to switch, long-press for volume", s.island) { s.island = it }
+        segment(isl, "Assistant", listOf("system" to "Google", "gemini" to "Gemini", "chatgpt" to "ChatGPT"),
+            s.assistant) { s.assistant = it }
+
+        // ---------------- Sounds
+        val snd = section("SOUNDS")
+        button(snd, "Use a Song as Ringtone…", 0xFF0A84FF.toInt()) { pickRingtone() }
+        button(snd, "Sound & Vibration Settings…", 0xFF0A84FF.toInt()) {
+            runCatching { startActivity(Intent(SysSettings.ACTION_SOUND_SETTINGS)) }
+        }
+        info(snd, "Long-press the Dynamic Island (or the Home Screen menu) for separate Ringtone, Notification, " +
+            "Alarm and Media volume.")
+
+        // ---------------- Phone & Connectivity shortcuts
+        val phone = section("PHONE & CONNECTIVITY")
+        button(phone, "Call Screening & Spam…", 0xFF0A84FF.toInt()) {
+            runCatching { startActivity(Intent(android.telecom.TelecomManager.ACTION_SHOW_CALL_SETTINGS)) }
+                .onFailure { runCatching { startActivity(Intent(SysSettings.ACTION_SETTINGS)) } }
+        }
+        button(phone, "Wi-Fi (switch to mobile data when weak)…", 0xFF0A84FF.toInt()) {
+            runCatching { startActivity(Intent(SysSettings.ACTION_WIFI_SETTINGS)) }
+        }
+        button(phone, "Face & Fingerprint Unlock…", 0xFF0A84FF.toInt()) {
+            runCatching { startActivity(Intent(SysSettings.ACTION_SECURITY_SETTINGS)) }
+        }
+
         // ---------------- Connections
         val conn = section("CONNECTIONS")
         toggle(conn, "Headphone Pop-up",
@@ -242,6 +291,81 @@ class SettingsActivity : Activity() {
         }
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
         info(about, "Apple Launcher $version")
+    }
+
+    // ================================================================ wallpaper & ringtone pickers
+
+    @Suppress("DEPRECATION")
+    private fun pickWallpaper() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "image/*"
+        }
+        runCatching { startActivityForResult(i, REQ_WALLPAPER) }
+    }
+
+    private var pendingRingtone: android.net.Uri? = null
+
+    @Suppress("DEPRECATION")
+    private fun pickRingtone() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "audio/*"
+        }
+        runCatching { startActivityForResult(i, REQ_RINGTONE) }
+    }
+
+    @Deprecated("Classic result API is fine here")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) return
+        when (requestCode) {
+            REQ_WALLPAPER -> {
+                runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                s.spatialWallpaperUri = uri.toString()
+                s.spatialWallpaper = true
+                rebuild()
+            }
+            REQ_RINGTONE -> {
+                pendingRingtone = uri
+                runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                if (!SysSettings.System.canWrite(this)) {
+                    android.widget.Toast.makeText(this, "Allow “Modify system settings”, then come back",
+                        android.widget.Toast.LENGTH_LONG).show()
+                    runCatching {
+                        startActivity(Intent(SysSettings.ACTION_MANAGE_WRITE_SETTINGS,
+                            android.net.Uri.parse("package:$packageName")))
+                    }
+                } else applyRingtone()
+            }
+        }
+    }
+
+    private fun applyRingtone() {
+        val src = pendingRingtone ?: return
+        pendingRingtone = null
+        val ok = runCatching {
+            val name = runCatching {
+                contentResolver.query(src, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            }.getOrNull() ?: "Ringtone.mp3"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Audio.Media.MIME_TYPE, contentResolver.getType(src) ?: "audio/mpeg")
+                put(android.provider.MediaStore.Audio.Media.IS_RINGTONE, true)
+                if (Build.VERSION.SDK_INT >= 29) {
+                    put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_RINGTONES)
+                }
+            }
+            val dest = contentResolver.insert(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("no destination")
+            contentResolver.openOutputStream(dest)?.use { out ->
+                contentResolver.openInputStream(src)?.use { it.copyTo(out) }
+            }
+            android.media.RingtoneManager.setActualDefaultRingtoneUri(
+                this, android.media.RingtoneManager.TYPE_RINGTONE, dest)
+        }.isSuccess
+        android.widget.Toast.makeText(this, if (ok) "Ringtone set" else "Couldn't set that song as ringtone",
+            android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun refreshPreview() {
@@ -490,6 +614,9 @@ class SettingsActivity : Activity() {
     private fun dp(v: Float): Int = (v * resources.displayMetrics.density).roundToInt()
 
     companion object {
+        const val REQ_WALLPAPER = 5100
+        const val REQ_RINGTONE = 5101
+
         fun usageAccessGranted(act: Activity): Boolean = runCatching {
             val ops = act.getSystemService(AppOpsManager::class.java)
             val mode = if (Build.VERSION.SDK_INT >= 29) {
