@@ -1,7 +1,7 @@
 name: Launcher dock resizing smoke test
 on:
   push:
-    branches: [codex/dock-fit-9]
+    branches: [codex/dock-fit-9, claude/adoring-goldberg-lhyb46]
 jobs:
   ui:
     runs-on: ubuntu-latest
