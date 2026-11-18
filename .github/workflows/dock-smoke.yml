@@ -26,7 +26,7 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
-          disable-animations: false
+          disable-animations: true
           script: bash scripts/dock-smoke.sh
       - name: Save UI logs
         if: always()

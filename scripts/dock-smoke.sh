@@ -31,7 +31,7 @@ json.dump(keys,open('dock-smoke/keys.json','w'))
 root=ET.Element('map')
 for key in ['PHOTO','ICONS','CALENDAR','BATTERY','MUSIC']:
     ET.SubElement(root,'boolean',name='s_w_'+key,value='false')
-ET.SubElement(root,'boolean',name='s_anim',value='true')
+ET.SubElement(root,'boolean',name='s_anim',value='false')
 ET.SubElement(root,'string',name='dock').text=camera
 ET.SubElement(root,'string',name='s_order').text='|'.join([chrome,settings,'__luncher_empty_cell__'])
 hidden=ET.SubElement(root,'set',name='s_hidden_apps')
@@ -46,10 +46,6 @@ adb logcat -c
 adb shell am start -W -n "$package/com.luncher.home.MainActivity"
 sleep 8
 dump() {
-  # Pause system animators before taking an accessibility snapshot. Editing
-  # icons jiggle forever, which otherwise prevents uiautomator reaching idle.
-  adb shell settings put global animator_duration_scale 0
-  sleep 1
   adb shell rm -f /sdcard/dock-ui.xml
   adb shell uiautomator dump /sdcard/dock-ui.xml >/dev/null
   adb exec-out cat /sdcard/dock-ui.xml > dock-smoke/current.xml
@@ -79,10 +75,10 @@ read -r ex ey <<< "$(python3 scripts/dock-ui.py button 'Edit Home Screen')"
 adb shell input tap "$ex" "$ey"
 sleep 2
 dump
+grep -q 'Manage home pages' dock-smoke/current.xml
 read -r sx sy <<< "$(python3 scripts/dock-ui.py home-app Chrome)"
 read -r x1 y1 x2 y2 <<< "$(python3 scripts/dock-ui.py dock Camera)"
 # Drop just outside the existing dock: the generous drop area should accept it.
-adb shell settings put global animator_duration_scale 1
 adb shell input swipe "$sx" "$sy" "$((x2+20))" "$(((y1+y2)/2))" 6000
 sleep 3
 dump
@@ -92,7 +88,6 @@ python3 scripts/dock-ui.py measure Camera two
 adb exec-out screencap -p > dock-smoke/two.png
 read -r sx sy <<< "$(python3 scripts/dock-ui.py home-app Settings)"
 read -r x1 y1 x2 y2 <<< "$(python3 scripts/dock-ui.py dock Camera)"
-adb shell settings put global animator_duration_scale 1
 adb shell input swipe "$sx" "$sy" "$((x2+20))" "$(((y1+y2)/2))" 6000
 sleep 3
 dump
@@ -112,7 +107,6 @@ print('Dock grew smoothly around its center:',widths,centers)
 PY
 # Remove one icon with its edit badge, then drag another back to the home screen.
 read -r mx my <<< "$(python3 scripts/dock-ui.py minus Settings)"
-adb shell settings put global animator_duration_scale 1
 adb shell input tap "$mx" "$my"
 sleep 3
 dump
@@ -120,7 +114,6 @@ read_prefs
 check_dock camera chrome
 python3 scripts/dock-ui.py measure Camera reduced
 read -r sx sy <<< "$(python3 scripts/dock-ui.py dock-app Chrome)"
-adb shell settings put global animator_duration_scale 1
 adb shell input swipe "$sx" "$sy" 250 62 10000
 sleep 3
 dump
@@ -129,7 +122,6 @@ check_dock camera
 python3 scripts/dock-ui.py measure Camera single_again
 ! grep -q 'Moving Chrome' dock-smoke/current.xml
 read -r mx my <<< "$(python3 scripts/dock-ui.py minus Camera)"
-adb shell settings put global animator_duration_scale 1
 adb shell input tap "$mx" "$my"
 sleep 3
 dump
@@ -138,7 +130,6 @@ check_dock
 grep -q 'Drag apps here' dock-smoke/current.xml
 # An empty dock remains an obvious, usable drop target.
 read -r sx sy <<< "$(python3 scripts/dock-ui.py home-app Settings)"
-adb shell settings put global animator_duration_scale 1
 adb shell input swipe "$sx" "$sy" 160 565 10000
 sleep 3
 dump
