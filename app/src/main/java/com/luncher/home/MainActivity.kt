@@ -2399,7 +2399,9 @@ class MainActivity : Activity() {
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     v.parent?.requestDisallowInterceptTouchEvent(false)
-                    if (dragging) cancelDrag()
+                    // RecyclerView can detach the source while rendering a drag preview and
+                    // send a synthetic cancel. The activity owns the live drag and handles
+                    // real cancellation; rebuilding here would re-enter its layout/draw pass.
                     dragging = false
                 }
             }
