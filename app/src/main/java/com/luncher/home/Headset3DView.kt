@@ -164,9 +164,43 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
             }
         }
 
+        /** Rounded box (super-ellipsoid): e≈0.3 gives the soft-cornered shape of an AirPods case. */
+        fun roundedBox(cx: Float, cy: Float, cz: Float, ax: Float, ay: Float, az: Float, e: Float, m: Int,
+                       su: Int = 48, sv: Int = 32, inner: Int = -1, innerTop: Boolean = true) {
+            mat = m
+            spines += listOf(floatArrayOf(cx, cy, cz))
+            fun sp(b: Double, ex: Float): Float = (Math.signum(b) * Math.pow(abs(b), ex.toDouble())).toFloat()
+            val start = xs.size
+            for (i in 0..sv) {
+                val la = -PI / 2 + PI * i / sv
+                for (j in 0 until su) {
+                    val lo = -PI + 2 * PI * j / su
+                    val px = ax * sp(cos(la), e) * sp(cos(lo), e)
+                    val py = ay * sp(sin(la), e)
+                    val pz = az * sp(cos(la), e) * sp(sin(lo), e)
+                    // Paint the opening (dark interior) straight onto the face: no overlapping
+                    // plates, so nothing flickers between layers.
+                    mat = if (inner >= 0 && (if (innerTop) py > ay * 0.9f else py < -ay * 0.9f) &&
+                        abs(px) < ax * 0.82f && abs(pz) < az * 0.72f) inner else m
+                    v(cx + px, cy + py, cz + pz)
+                }
+            }
+            for (i in 0 until sv) for (j in 0 until su) {
+                val a = start + i * su + j; val b = start + i * su + (j + 1) % su
+                val c = start + (i + 1) * su + j; val d = start + (i + 1) * su + (j + 1) % su
+                t(a, b, c); t(b, d, c)
+            }
+        }
+
         fun cylinder(a: FloatArray, b: FloatArray, r: Float, m: Int, seg: Int = 40) =
             tube(listOf(a, b), { r }, m, seg, caps = true, flatCaps = true)
     }
+
+    /** Lid vertex range and hinge, for the opening animation (AirPods case only). */
+    private var lidStart = 0
+    private var lidEnd = 0
+    private val hingeY = 0.18f
+    private val hingeZ = -0.27f
 
     private val mats: List<Mat>
     private val vx: FloatArray; private val vy: FloatArray; private val vz: FloatArray
@@ -179,9 +213,10 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
         mats = when (kind) {
             HeadsetKind.EARBUDS -> {
                 buildEarbuds(mb); listOf(
-                    Mat(244f, 244f, 247f, 60f, 0.65f, 0.25f),   // glossy white
-                    Mat(34f, 34f, 38f, 18f, 0.15f, 0.05f),      // mesh grille
-                    Mat(196f, 200f, 206f, 90f, 1.0f, 0.3f)      // metal tip
+                    Mat(246f, 246f, 248f, 70f, 0.7f, 0.22f),    // glossy white case & buds
+                    Mat(58f, 58f, 62f, 18f, 0.12f, 0.06f),      // grilles / case interior
+                    Mat(200f, 204f, 210f, 90f, 1.0f, 0.3f),     // metal hinge & stem tips
+                    Mat(226f, 226f, 230f, 12f, 0.12f, 0.15f)    // soft silicone ear tips
                 )
             }
             HeadsetKind.OVER_EAR -> {
@@ -246,18 +281,40 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
         return best
     }
 
+    /**
+     * AirPods Pro–style open charging case with both buds inside, as in the iPhone card.
+     * Case ≈ 1.24 wide × 0.88 tall × 0.54 deep; buds stand stems-down with the ear tips
+     * angled forward and inward (AirPods Pro 3: ~31 × 19 × 27 mm per bud).
+     */
     private fun buildEarbuds(mb: MeshBuilder) {
+        // Case body (bottom ~3/4) and its dark opening.
+        mb.roundedBox(0f, -0.18f, 0f, 0.62f, 0.36f, 0.27f, 0.32f, 0, 64, 40, inner = 1, innerTop = true)
+        // Hinge.
+        mb.cylinder(floatArrayOf(-0.16f, hingeY + 0.01f, hingeZ - 0.01f),
+            floatArrayOf(0.16f, hingeY + 0.01f, hingeZ - 0.01f), 0.035f, 2, 16)
+        // Buds (inside the case, tops sticking out).
         for (s in intArrayOf(-1, 1)) {
-            val x = 0.4f * s
-            mb.sphere(x, 0.36f, 0f, 0.25f, 0.23f, 0.22f, 0)
-            mb.sphere(x - 0.18f * s, 0.41f, 0.07f, 0.075f, 0.062f, 0.05f, 1, 18, 12)
-            val stem = (0..10).map { k ->
-                val f = k / 10f
-                floatArrayOf(x + 0.05f * s * f, 0.18f - 0.8f * f, 0.05f - 0.02f * f)
+            val x = 0.24f * s
+            // Rounded body, a little deeper than wide.
+            mb.sphere(x, 0.33f, 0.02f, 0.165f, 0.15f, 0.18f, 0, 30, 22)
+            // Black mesh vent on the outer side.
+            mb.sphere(x + 0.13f * s, 0.37f, -0.02f, 0.04f, 0.035f, 0.05f, 1, 14, 10)
+            // Silicone ear tip on a short nozzle, angled forward + inward.
+            val tipBase = floatArrayOf(x - 0.06f * s, 0.36f, 0.14f)
+            val tipEnd = floatArrayOf(x - 0.1f * s, 0.38f, 0.25f)
+            mb.tube(listOf(tipBase, tipEnd), { 0.055f }, 3, 18)
+            mb.sphere(tipEnd[0], tipEnd[1], tipEnd[2] + 0.02f, 0.105f, 0.095f, 0.07f, 3, 24, 16)
+            // Short stem going down into the case.
+            val stem = (0..6).map { k ->
+                val f = k / 6f
+                floatArrayOf(x + 0.015f * s * f, 0.22f - 0.42f * f, 0.05f + 0.03f * f)
             }
-            mb.tube(stem, { k -> 0.09f - 0.016f * k / 10f }, 0, 26)
-            mb.sphere(x + 0.05f * s, -0.62f, 0.03f, 0.074f, 0.045f, 0.074f, 2, 24, 12)
+            mb.tube(stem, { k -> 0.06f - 0.008f * k / 6f }, 0, 20, caps = true)
         }
+        // Lid, modelled closed; it swings open around the hinge at the back.
+        lidStart = mb.xs.size
+        mb.roundedBox(0f, 0.27f, 0f, 0.62f, 0.09f, 0.27f, 0.32f, 0, 64, 28, inner = 1, innerTop = false)
+        lidEnd = mb.xs.size
     }
 
     private fun buildOverEar(mb: MeshBuilder) {
@@ -352,6 +409,10 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
     private val spinAnim = SpringAnimation(spin).apply {
         spring = SpringForce(0f).apply { stiffness = 32f; dampingRatio = 0.88f }
     }
+    private val lid = FloatValueHolder(0f)
+    private val lidAnim = SpringAnimation(lid).apply {
+        spring = SpringForce(110f).apply { stiffness = 70f; dampingRatio = 0.62f }
+    }
     private val liftAnim = SpringAnimation(lift).apply {
         spring = SpringForce(0f).apply { stiffness = 120f; dampingRatio = 0.62f }
     }
@@ -359,19 +420,26 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
     init {
         // Hardware drawVertices needs Android 10+; older phones draw it in software.
         if (Build.VERSION.SDK_INT < 29) setLayerType(LAYER_TYPE_SOFTWARE, null)
+        lid.value = if (lidEnd > lidStart) 110f else 0f
     }
 
     /** iOS-style entrance: the model rises in, whirls round and settles into a slow turn. */
     fun playEntrance() {
         if (Motion.scale <= 0f) return
-        spinAnim.cancel(); liftAnim.cancel()
-        spin.value = 600f; lift.value = 0.45f
-        spinAnim.setStartValue(600f); spinAnim.animateToFinalPosition(0f)
+        spinAnim.cancel(); liftAnim.cancel(); lidAnim.cancel()
+        // The case turns in gently and its lid springs open, like the iPhone card.
+        val whirl = if (lidEnd > lidStart) 160f else 600f
+        spin.value = whirl; lift.value = 0.45f
+        spinAnim.setStartValue(whirl); spinAnim.animateToFinalPosition(0f)
         liftAnim.setStartValue(0.45f); liftAnim.animateToFinalPosition(0f)
+        if (lidEnd > lidStart) {
+            lid.value = 0f
+            postDelayed({ lidAnim.setStartValue(0f); lidAnim.animateToFinalPosition(110f) }, 320)
+        }
     }
 
     override fun onDetachedFromWindow() {
-        spinAnim.cancel(); liftAnim.cancel()
+        spinAnim.cancel(); liftAnim.cancel(); lidAnim.cancel()
         super.onDetachedFromWindow()
     }
 
@@ -445,12 +513,25 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
         val cr = cos(rr).toFloat(); val sr = sin(rr).toFloat()
         val cam = 4.4f
 
+        val la = Math.toRadians(lid.value.toDouble())
+        val cl = cos(la).toFloat(); val sl = sin(la).toFloat()
         for (i in 0 until vcount) {
+            var px = vx[i]; var py = vy[i]; var pz = vz[i]
+            var mnx = nx[i]; var mny = ny[i]; var mnz = nz[i]
+            if (i in lidStart until lidEnd) {
+                // Swing the lid up and back around the hinge (rotation about the X axis).
+                val dy = py - hingeY; val dz = pz - hingeZ
+                py = hingeY + dy * cl + dz * sl
+                pz = hingeZ - dy * sl + dz * cl
+                val ry2 = mny * cl + mnz * sl
+                val rz2 = -mny * sl + mnz * cl
+                mny = ry2; mnz = rz2
+            }
             // Rotate position: yaw (Y), pitch (X), roll (Z).
-            val x1 = vx[i] * cyw + vz[i] * syw
-            val z1 = -vx[i] * syw + vz[i] * cyw
-            val y2 = vy[i] * cp - z1 * sp
-            val z2 = vy[i] * sp + z1 * cp
+            val x1 = px * cyw + pz * syw
+            val z1 = -px * syw + pz * cyw
+            val y2 = py * cp - z1 * sp
+            val z2 = py * sp + z1 * cp
             val x3 = x1 * cr - y2 * sr
             val y3 = x1 * sr + y2 * cr
             tz[i] = z2
@@ -459,10 +540,10 @@ class Headset3DView(ctx: Context, kind: HeadsetKind) : View(ctx) {
             screen[i * 2 + 1] = cy - y3 * scale * f
 
             // Same rotation for the normal.
-            val n1x = nx[i] * cyw + nz[i] * syw
-            val n1z = -nx[i] * syw + nz[i] * cyw
-            val n2y = ny[i] * cp - n1z * sp
-            val n2z = ny[i] * sp + n1z * cp
+            val n1x = mnx * cyw + mnz * syw
+            val n1z = -mnx * syw + mnz * cyw
+            val n2y = mny * cp - n1z * sp
+            val n2z = mny * sp + n1z * cp
             val qx = n1x * cr - n2y * sr
             val qy = n1x * sr + n2y * cr
             val qz = n2z

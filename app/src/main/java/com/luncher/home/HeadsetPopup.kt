@@ -209,7 +209,7 @@ class HeadsetPopup(
             setPadding(dp(22), dp(18), dp(22), dp(18))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(Color.argb(238, 52, 52, 56), Color.argb(245, 28, 28, 31))
+                intArrayOf(Color.argb(250, 30, 30, 32), Color.argb(252, 22, 22, 24))
             ).apply {
                 cornerRadius = dp(38).toFloat()
                 setStroke(maxOf(1, dp(1)), Color.argb(60, 255, 255, 255))
@@ -245,29 +245,33 @@ class HeadsetPopup(
         // Spinning 3D model of what's connected (earbuds, headphones, wired earphones, speaker).
         val art = Headset3DView(act, h.kind)
         c.addView(art, LinearLayout.LayoutParams(MATCH_PARENT, dp(220)).apply { topMargin = dp(4) })
-        c.addView(TextView(act).apply {
-            text = h.kind.label
-            setTextColor(0x99FFFFFF.toInt())
-            textSize = 13f
-            gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         // Battery ring + label (Bluetooth only, once the level is known).
+        // iPhone-style battery: a ring, the percentage under it, then what it is.
         val batteryRow = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
         }
-        val ring = HeadsetBatteryView(act).apply { visibility = View.GONE }
-        batteryRow.addView(ring, LinearLayout.LayoutParams(dp(30), dp(30)))
+        val ring = HeadsetBatteryView(act).apply { visibility = if (h.bluetooth) View.INVISIBLE else View.GONE }
+        batteryRow.addView(ring, LinearLayout.LayoutParams(dp(38), dp(38)))
         val label = TextView(act).apply {
             setTextColor(Color.WHITE)
             textSize = 15f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            text = if (h.bluetooth) "Connected" else "Connected"
-            setPadding(dp(10), 0, 0, 0)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            text = "Connected"
+            setPadding(0, dp(6), 0, 0)
         }
         batteryRow.addView(label)
-        c.addView(batteryRow, LinearLayout.LayoutParams(WRAP_CONTENT, dp(36)).apply { topMargin = dp(10) })
+        batteryRow.addView(TextView(act).apply {
+            text = h.kind.label
+            setTextColor(0x8CFFFFFF.toInt())
+            textSize = 13f
+            gravity = Gravity.CENTER
+        })
+        c.addView(batteryRow, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
+            topMargin = dp(4); bottomMargin = dp(8)
+        })
         batteryView = ring
         batteryLabel = label
 
@@ -283,19 +287,6 @@ class HeadsetPopup(
         c.addView(hint, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         permissionHint = hint
 
-        val done = TextView(act).apply {
-            text = "Done"
-            setTextColor(Color.WHITE)
-            textSize = 17f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                cornerRadius = dp(16).toFloat()
-                setColor(Color.argb(255, 72, 72, 78))
-            }
-            setOnClickListener { hide() }
-        }
-        c.addView(done, LinearLayout.LayoutParams(MATCH_PARENT, dp(52)).apply { topMargin = dp(16) })
 
         l.addView(c, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
             setMargins(dp(10), 0, dp(10), bottomInset + dp(10))
@@ -384,12 +375,18 @@ class HeadsetPopup(
 
     private fun showBattery(level: Int) {
         val ring = batteryView ?: return
-        ring.level = level
         if (ring.visibility != View.VISIBLE) {
             ring.visibility = View.VISIBLE
             ring.alpha = 0f
             Motion.alphaTo(ring, 1f, Motion.CALM)
-        }
+            // The ring fills up to the level, like the iPhone card.
+            android.animation.ValueAnimator.ofInt(0, level).apply {
+                duration = (700 * Motion.scale).toLong().coerceAtLeast(1)
+                interpolator = ease
+                addUpdateListener { ring.level = it.animatedValue as Int }
+                start()
+            }
+        } else ring.level = level
         batteryLabel?.text = "$level%"
         permissionHint?.visibility = View.GONE
     }
