@@ -691,8 +691,14 @@ class MainActivity : Activity() {
             if (::headsetPopup.isInitialized) headsetPopup.bottomInset = bars.bottom
             // The island sits just below the status bar so it never covers the clock or icons,
             // and the Home Screen moves down to make room for it.
-            val islandRoom = if (settings.island) dp(36) + dp(10) else 0
-            if (::island.isInitialized) island.setTopInset(bars.top + dp(4))
+            // Position comes from Settings › Dynamic Island (in or below the status bar, plus a nudge).
+            val cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top
+            val band = if (cut > 0) cut else bars.top
+            val base = if (settings.islandPlacement == "statusbar") ((band - dp(36)) / 2).coerceAtLeast(dp(3))
+                else bars.top + dp(4)
+            val islandTop = (base + dp(settings.islandNudge)).coerceAtLeast(dp(2))
+            val islandRoom = if (settings.island) (islandTop + dp(36) + dp(6) - bars.top).coerceAtLeast(0) else 0
+            if (::island.isInitialized) island.setTopInset(islandTop)
             content.setPadding(0, bars.top + islandRoom, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
             insets

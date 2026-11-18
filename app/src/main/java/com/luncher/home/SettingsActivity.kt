@@ -253,6 +253,9 @@ class SettingsActivity : Activity() {
         val isl = section("DYNAMIC ISLAND & ASSISTANT")
         toggle(isl, "Dynamic Island", "Live activities at the top: music, charging. Swipe down on it for your " +
             "assistant, sideways to switch, long-press for volume", s.island) { s.island = it }
+        segment(isl, "Position", listOf("statusbar" to "In Status Bar", "below" to "Below Status Bar"),
+            s.islandPlacement) { s.islandPlacement = it }
+        slider(isl, "Move Up / Down", -20, 60, s.islandNudge, { if (it > 0) "+$it" else "$it" }) { s.islandNudge = it }
         // What may appear in the island
         val content = section("ISLAND CONTENT")
         for ((type, label, sub) in listOf(

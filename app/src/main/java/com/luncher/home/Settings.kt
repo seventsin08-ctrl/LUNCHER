@@ -97,6 +97,15 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_island", true)
         set(v) = put("s_island", v)
 
+    /** statusbar = in the status bar like iPhone · below = under the status bar */
+    var islandPlacement: String
+        get() = p.getString("s_isl_place", "below") ?: "below"
+        set(v) = put("s_isl_place", v)
+    /** Extra nudge up (-) or down (+) in dp. */
+    var islandNudge: Int
+        get() = p.getInt("s_isl_nudge", 0)
+        set(v) = put("s_isl_nudge", v)
+
     /** Which kinds of live activity may appear in the island. */
     fun islandAllows(type: String): Boolean = p.getBoolean("s_isl_$type", true)
     fun setIslandAllows(type: String, on: Boolean) = put("s_isl_$type", on)
