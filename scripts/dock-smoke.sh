@@ -66,10 +66,18 @@ PY
 dump
 python3 scripts/dock-ui.py measure Camera one
 adb exec-out screencap -p > dock-smoke/one.png
+# Enter the launcher edit mode first, then exercise its direct drag gestures.
+adb shell input swipe 8 245 8 245 1200
+sleep 2
+dump
+read -r ex ey <<< "$(python3 scripts/dock-ui.py button 'Edit Home Screen')"
+adb shell input tap "$ex" "$ey"
+sleep 2
+dump
 read -r sx sy <<< "$(python3 scripts/dock-ui.py home-app Chrome)"
 read -r x1 y1 x2 y2 <<< "$(python3 scripts/dock-ui.py dock Camera)"
 # Drop just outside the existing dock: the generous drop area should accept it.
-adb shell input swipe "$sx" "$sy" "$((x2+20))" "$(((y1+y2)/2))" 45000
+adb shell input swipe "$sx" "$sy" "$((x2+20))" "$(((y1+y2)/2))" 6000
 sleep 3
 dump
 read_prefs
@@ -78,7 +86,7 @@ python3 scripts/dock-ui.py measure Camera two
 adb exec-out screencap -p > dock-smoke/two.png
 read -r sx sy <<< "$(python3 scripts/dock-ui.py home-app Settings)"
 read -r x1 y1 x2 y2 <<< "$(python3 scripts/dock-ui.py dock Camera)"
-adb shell input swipe "$sx" "$sy" "$((x2+20))" "$(((y1+y2)/2))" 45000
+adb shell input swipe "$sx" "$sy" "$((x2+20))" "$(((y1+y2)/2))" 6000
 sleep 3
 dump
 read_prefs

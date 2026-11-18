@@ -2855,7 +2855,7 @@ class MainActivity : Activity() {
         val loc = IntArray(2)
         dockRow.getLocationOnScreen(loc)
         // The invisible drop area includes one extra slot on each side while there is room.
-        val extra = if (dockApps().size < cols) dp((iconDp + 12) / 2) else 0
+        val extra = if (displayedDockKeys.size < cols) dp((iconDp + 12) / 2) else 0
         return rawX >= loc[0] - extra && rawX <= loc[0] + dockRow.width + extra &&
             rawY >= loc[1] - dp(10) && rawY <= loc[1] + dockRow.height + dp(10)
     }
