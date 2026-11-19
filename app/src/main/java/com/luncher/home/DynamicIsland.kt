@@ -547,6 +547,9 @@ class DynamicIsland(
     }
 
     /** The front camera hole on screen (from the display cutout), so the closed tools hide around it. */
+    /** Fine-tune where the tap area sits (px). */
+    var hotDx = 0f
+    var hotDy = 0f
     var camera: android.graphics.Rect? = null
         set(v) { field = v; if (toolsOn && !toolsOpen && !expanded && current() == null) pill.post { refresh() } }
 
@@ -557,7 +560,7 @@ class DynamicIsland(
         hotspot.visibility = if (on) View.VISIBLE else View.GONE
         (hotspot.layoutParams as FrameLayout.LayoutParams).topMargin = topMargin
         if (!on || cam == null) {
-            hotspot.translationX = offsetX; hotspot.translationY = -dp(14).toFloat()
+            hotspot.translationX = offsetX + hotDx; hotspot.translationY = -dp(14).toFloat() + hotDy
             if (pill.translationY != 0f && !dragging) pill.animate().translationY(0f).translationX(offsetX)
                 .setDuration((280 * Motion.scale).toLong()).start()
             return
@@ -565,8 +568,8 @@ class DynamicIsland(
         val loc = IntArray(2); root.getLocationOnScreen(loc)
         val cx = loc[0] + root.width / 2f
         val cy = loc[1] + topMargin + idleH() * sizeScale / 2f
-        hotspot.translationX = cam.exactCenterX() - cx
-        hotspot.translationY = (cam.top - dp(10)) - (loc[1] + topMargin).toFloat()
+        hotspot.translationX = cam.exactCenterX() - cx + hotDx
+        hotspot.translationY = (cam.top - dp(10)) - (loc[1] + topMargin).toFloat() + hotDy
         pill.animate().translationX(cam.exactCenterX() - cx).translationY(cam.exactCenterY() - cy)
             .setDuration((280 * Motion.scale).toLong()).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
     }

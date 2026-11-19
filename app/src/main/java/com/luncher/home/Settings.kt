@@ -333,6 +333,13 @@ class Settings(ctx: Context) {
     var gameSmallWindow: Boolean
         get() = p.getBoolean("s_game_small_window", true)
         set(v) = put("s_game_small_window", v)
+    /** Nudge of the tools' tap area around the camera, in dp (left -, right +; up -, down +). */
+    var hotspotDx: Int
+        get() = p.getInt("s_hot_dx", -12)
+        set(v) = put("s_hot_dx", v)
+    var hotspotDy: Int
+        get() = p.getInt("s_hot_dy", -10)
+        set(v) = put("s_hot_dy", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

@@ -1008,6 +1008,7 @@ class MainActivity : Activity() {
         isl.toolsShape = settings.toolsShape
         isl.toolsAngle = settings.toolsAngle.toFloat()
         isl.toolsDx = 0f; isl.toolsDy = 0f   // the tools stay with the island (no dragging)
+        isl.hotDx = dp(settings.hotspotDx).toFloat(); isl.hotDy = dp(settings.hotspotDy).toFloat()
         isl.toolsAngle = 0f
         isl.onToolsMoved = { dx, dy ->
             val d = resources.displayMetrics.density

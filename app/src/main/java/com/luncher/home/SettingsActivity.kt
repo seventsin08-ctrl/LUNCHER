@@ -716,6 +716,8 @@ class SettingsActivity : Activity() {
             slider(tools, "Opacity", 40, 100, s.toolsOpacity, { "$it%" }) { s.toolsOpacity = it }
             segment(tools, "Shape", listOf("pill" to "Pill", "rounded" to "Rounded", "square" to "Square", "leaf" to "Leaf"),
                 s.toolsShape) { s.toolsShape = it }
+            slider(tools, "Tap Area ← Left / Right →", -60, 60, s.hotspotDx, { "${it}dp" }) { s.hotspotDx = it }
+            slider(tools, "Tap Area ↑ Up / Down ↓", -40, 40, s.hotspotDy, { "${it}dp" }) { s.hotspotDy = it }
             info(tools, "Tap the camera area at the top to open the tools; they tuck back around the camera after a few seconds (or tap the island again).")
         }
 
