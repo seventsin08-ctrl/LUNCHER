@@ -372,7 +372,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             Gravity.START or Gravity.CENTER_VERTICAL))
         top.addView(android.widget.TextView(ctx).apply {
             text = "✕"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0x40FFFFFF) }
+            background = android.graphics.drawable.GradientDrawable().apply { setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x40FFFFFF) }
             setOnClickListener { hideViewer(toMiddle = true) }
         }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.END or Gravity.CENTER_VERTICAL))
         root.addView(top, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { bottomMargin = dp(8) })
