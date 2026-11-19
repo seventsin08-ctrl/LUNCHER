@@ -135,6 +135,15 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_side_hud", true)
         set(v) = put("s_side_hud", v)
 
+    /** Keep a small side-island bump on the screen edge (tap it for volume). */
+    var sideRest: Boolean
+        get() = p.getBoolean("s_side_rest", true)
+        set(v) = put("s_side_rest", v)
+    /** New messages pop out of the side island instead of the top island. */
+    var sideMessages: Boolean
+        get() = p.getBoolean("s_side_msgs", true)
+        set(v) = put("s_side_msgs", v)
+
     // ---- Hello screen
     var helloOnUnlock: Boolean
         get() = p.getBoolean("s_hello_unlock", false)

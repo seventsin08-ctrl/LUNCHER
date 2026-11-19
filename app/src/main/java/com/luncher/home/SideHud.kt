@@ -1,6 +1,7 @@
 package com.luncher.home
 
 import android.app.Activity
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -9,7 +10,12 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.media.AudioManager
+import android.text.TextPaint
+import android.text.TextUtils
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.dynamicanimation.animation.FloatValueHolder
@@ -18,33 +24,70 @@ import androidx.dynamicanimation.animation.SpringForce
 import kotlin.math.roundToInt
 
 /**
- * The concept "side island": a black shape that grows out of the left edge of the screen
- * (with soft, liquid curves where it meets the edge) for volume, Silent / Ring and Focus.
- * It never takes touches, so it can't get in the way.
+ * The "side island": a black liquid shape on the left edge of the screen.
+ * - Always rests as a small bump on the edge (tap it for a volume slider you can drag).
+ * - Grows out for volume, Silent / Ring, Focus — and new messages (icon + sender + text;
+ *   tap to open, swipe left to dismiss).
+ * Its window is only as big as what it shows, so it never blocks the app underneath.
  */
-class SideHud(private val act: Activity) {
+class SideHud(private val act: Activity, private val settings: Settings) {
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
 
+    private enum class Kind { REST, VOLUME, STATUS, MESSAGE }
+
     private var wm: WindowManager? = null
+    private var lp: WindowManager.LayoutParams? = null
     private var view: HudView? = null
-    private val hideRun = Runnable { retract() }
+    private val backToRest = Runnable { retract() }
+    private var onOpen: (() -> Unit)? = null
 
-    /** Volume 0..1 as a slider inside the shape. */
-    fun volume(level: Float) = show(Kind.VOLUME, level, null, emptyList())
+    private val audio get() = act.getSystemService(AudioManager::class.java)
 
-    /** An icon (or a column of icons) with a word beside it, e.g. SILENT or WORK. */
-    fun status(icons: List<Pair<Int, Int>>, label: String) = show(Kind.STATUS, 0f, label, icons)
-
-    private enum class Kind { VOLUME, STATUS }
-
-    private fun show(kind: Kind, level: Float, label: String?, icons: List<Pair<Int, Int>>) {
+    /** Show the resting bump (or remove everything if the side island is off). */
+    fun rest() {
+        if (!settings.sideHud || !settings.sideRest) { dismiss(); return }
         val v = view ?: create() ?: return
-        v.kind = kind; v.level = level; v.label = label
-        v.icons = icons.map { (res, tint) -> act.getDrawable(res)!!.mutate().apply { setTint(tint) } }
+        if (v.kind != Kind.REST) return
+        v.kind = Kind.REST
+        size(Kind.REST)
+        v.growTo(1f)
+    }
+
+    fun volume(level: Float) = show(Kind.VOLUME) { it.level = level }
+
+    fun status(icons: List<Pair<Int, Int>>, label: String) = show(Kind.STATUS) {
+        it.label = label
+        it.icons = icons.map { (res, tint) -> act.getDrawable(res)!!.mutate().apply { setTint(tint) } }
+    }
+
+    /** A new message: app icon in the shape, sender and text beside it. */
+    fun message(icon: Bitmap?, title: String, text: String, open: () -> Unit) = show(Kind.MESSAGE) {
+        it.appIcon = icon; it.label = title; it.body = text
+        onOpen = open
+    }
+
+    private fun show(kind: Kind, fill: (HudView) -> Unit) {
+        val v = view ?: create() ?: return
+        val wasRest = v.kind == Kind.REST
+        v.kind = kind
+        fill(v)
+        size(kind)
+        if (wasRest) v.grown = 0f
         v.invalidate()
-        v.grow()
-        v.removeCallbacks(hideRun)
-        v.postDelayed(hideRun, if (kind == Kind.VOLUME) 1400 else 1800)
+        v.growTo(1f)
+        v.removeCallbacks(backToRest)
+        v.postDelayed(backToRest, when (kind) { Kind.MESSAGE -> 5000L; Kind.VOLUME -> 1800L; else -> 1800L })
+        if (kind == Kind.MESSAGE) v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+
+    /** Window size for each state: tiny strip at rest, wider only while something is showing. */
+    private fun size(kind: Kind) {
+        val l = lp ?: return
+        val v = view ?: return
+        l.width = when (kind) { Kind.REST -> dp(20); Kind.VOLUME -> dp(96); Kind.STATUS -> dp(220); Kind.MESSAGE -> dp(320) }
+        l.flags = if (kind == Kind.STATUS) l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            else l.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        runCatching { wm?.updateViewLayout(v, l) }
     }
 
     private fun create(): HudView? {
@@ -54,81 +97,85 @@ class SideHud(private val act: Activity) {
             android.provider.Settings.canDrawOverlays(act) -> WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else -> WindowManager.LayoutParams.TYPE_APPLICATION
         }
+        if (type == WindowManager.LayoutParams.TYPE_APPLICATION && act.window?.decorView?.windowToken == null) return null
         val ctx = if (type == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) svc!! else act
         val w = ctx.getSystemService(WindowManager::class.java) ?: return null
         val v = HudView(act)
-        val lp = WindowManager.LayoutParams(dp(220), dp(240), type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+        val l = WindowManager.LayoutParams(dp(20), dp(250), type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.START or Gravity.TOP
-            y = (act.resources.displayMetrics.heightPixels * 0.22f).toInt()
+            y = (act.resources.displayMetrics.heightPixels * 0.3f).toInt()
             if (type == WindowManager.LayoutParams.TYPE_APPLICATION) token = act.window.decorView.windowToken
+            if (android.os.Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
-        if (runCatching { w.addView(v, lp) }.isFailure) return null
-        wm = w; view = v
+        if (runCatching { w.addView(v, l) }.isFailure) return null
+        wm = w; lp = l; view = v
         return v
     }
 
+    /** Shrink back to the resting bump (or away if resting is off). */
     private fun retract() {
         val v = view ?: return
-        v.shrink {
-            runCatching { wm?.removeViewImmediate(v) }
-            if (view === v) view = null
+        onOpen = null
+        v.growTo(0f) {
+            if (view !== v) return@growTo
+            if (settings.sideHud && settings.sideRest) { v.kind = Kind.REST; size(Kind.REST); v.growTo(1f) }
+            else dismiss()
         }
     }
 
     fun dismiss() {
         val v = view ?: return
-        view = null
+        view = null; lp = null
         runCatching { wm?.removeViewImmediate(v) }
     }
 
     private inner class HudView(ctx: Activity) : View(ctx) {
-        var kind = Kind.VOLUME
+        var kind = Kind.REST
         var level = 0f
         var label: String? = null
+        var body: String? = null
+        var appIcon: Bitmap? = null
         var icons: List<Drawable> = emptyList()
-        private var grown = 0f
+        var grown = 0f
         private var spring: SpringAnimation? = null
         private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
         private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3A3A3C.toInt() }
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF2F2F7.toInt() }
-        private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE; textSize = dp(16).toFloat(); typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setShadowLayer(dp(4).toFloat(), 0f, dp(1).toFloat(), 0x99000000.toInt())
+            setShadowLayer(dp(4).toFloat(), 0f, dp(1).toFloat(), 0xAA000000.toInt())
+        }
+        private val small = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xEEFFFFFF.toInt(); textSize = dp(13).toFloat()
+            setShadowLayer(dp(4).toFloat(), 0f, dp(1).toFloat(), 0xAA000000.toInt())
         }
         private val path = Path()
         private val r = RectF()
+        private val iconClip = Path()
         private val speaker = act.getDrawable(R.drawable.ic_speaker)!!.mutate()
 
-        private fun animateTo(target: Float, end: (() -> Unit)? = null) {
+        fun growTo(target: Float, end: (() -> Unit)? = null) {
             spring?.cancel()
             val holder = FloatValueHolder(grown)
             spring = SpringAnimation(holder).apply {
                 spring = SpringForce(target).apply {
                     stiffness = if (target > 0f) 380f else 900f
-                    dampingRatio = if (target > 0f) 0.68f else 1f
+                    dampingRatio = if (target > 0f) 0.66f else 1f
                 }
                 setMinimumVisibleChange(0.002f)
                 addUpdateListener { _, v, _ -> grown = v.coerceAtLeast(0f); invalidate() }
-                if (end != null) addEndListener { _, _, _, _ -> end() }
+                if (end != null) addEndListener { _, canceled, _, _ -> if (!canceled) end() }
                 start()
             }
         }
 
-        fun grow() = animateTo(1f)
-        fun shrink(end: () -> Unit) = animateTo(0f, end)
-
-        override fun onDraw(c: Canvas) {
-            if (grown <= 0.001f) return
-            val bodyW = (if (kind == Kind.VOLUME) dp(58) else dp(46)) * grown
-            val h = if (kind == Kind.VOLUME) dp(150).toFloat() else dp(44) + dp(40) * (icons.size - 1).coerceAtLeast(0).toFloat()
-            val top = (height - h) / 2f
-            val bottom = top + h
+        private fun shape(bodyW: Float, top: Float, bottom: Float) {
             val f = dp(26) * grown.coerceAtMost(1f)
             val rad = minOf(dp(20).toFloat(), bodyW / 2f)
-            // Liquid shape: soft fillets where it leaves the screen edge, round outer corners.
             path.reset()
             path.moveTo(0f, top - f)
             path.cubicTo(0f, top - f * 0.35f, f * 0.25f, top, f * 0.9f, top)
@@ -139,39 +186,116 @@ class SideHud(private val act: Activity) {
             path.lineTo(f * 0.9f, bottom)
             path.cubicTo(f * 0.25f, bottom, 0f, bottom + f * 0.35f, 0f, bottom + f)
             path.close()
-            c.drawPath(path, black)
+        }
+
+        override fun onDraw(c: Canvas) {
+            if (grown <= 0.001f) return
             val a = ((grown - 0.4f) / 0.6f).coerceIn(0f, 1f)
-            if (a <= 0f) return
-            if (kind == Kind.VOLUME) {
-                val inset = dp(7).toFloat()
-                r.set(inset, top + inset, bodyW - inset, bottom - inset)
-                val cr = dp(14).toFloat()
-                track.alpha = (255 * a).toInt()
-                c.drawRoundRect(r, cr, cr, track)
-                c.save()
-                c.clipRect(r.left, r.bottom - r.height() * level, r.right, r.bottom)
-                fill.alpha = (255 * a).toInt()
-                c.drawRoundRect(r, cr, cr, fill)
-                c.restore()
-                val s = dp(22)
-                speaker.setBounds((bodyW / 2 - s / 2).toInt(), (r.bottom - dp(10) - s).toInt(), (bodyW / 2 + s / 2).toInt(), (r.bottom - dp(10)).toInt())
-                speaker.setTint(if (level > 0.2f) 0xFF6E6E73.toInt() else Color.WHITE)
-                speaker.alpha = (255 * a).toInt()
-                speaker.draw(c)
-            } else {
-                val s = dp(24)
-                var y = top + dp(10)
-                for (d in icons) {
-                    d.setBounds((bodyW / 2 - s / 2).toInt(), y.toInt(), (bodyW / 2 + s / 2).toInt(), (y + s).toInt())
-                    d.alpha = (255 * a).toInt()
-                    d.draw(c)
-                    y += dp(40)
+            when (kind) {
+                Kind.REST -> {
+                    // A slim liquid bump resting on the edge.
+                    val h = dp(64).toFloat()
+                    val top = (height - h) / 2f
+                    shape(dp(6) * grown, top, top + h)
+                    c.drawPath(path, black)
                 }
-                label?.let {
-                    text.alpha = (255 * a).toInt()
-                    c.drawText(it, bodyW + dp(14), (top + bottom) / 2f + dp(6), text)
+                Kind.VOLUME -> {
+                    val bodyW = dp(58) * grown
+                    val h = dp(150).toFloat(); val top = (height - h) / 2f; val bottom = top + h
+                    shape(bodyW, top, bottom); c.drawPath(path, black)
+                    if (a <= 0f) return
+                    val inset = dp(7).toFloat()
+                    r.set(inset, top + inset, bodyW - inset, bottom - inset)
+                    val cr = dp(14).toFloat()
+                    track.alpha = (255 * a).toInt(); c.drawRoundRect(r, cr, cr, track)
+                    c.save(); c.clipRect(r.left, r.bottom - r.height() * level, r.right, r.bottom)
+                    fill.alpha = (255 * a).toInt(); c.drawRoundRect(r, cr, cr, fill); c.restore()
+                    val s = dp(22)
+                    speaker.setBounds((bodyW / 2 - s / 2).toInt(), (r.bottom - dp(10) - s).toInt(), (bodyW / 2 + s / 2).toInt(), (r.bottom - dp(10)).toInt())
+                    speaker.setTint(if (level > 0.2f) 0xFF6E6E73.toInt() else Color.WHITE)
+                    speaker.alpha = (255 * a).toInt(); speaker.draw(c)
+                }
+                Kind.STATUS -> {
+                    val bodyW = dp(46) * grown
+                    val h = dp(44) + dp(40) * (icons.size - 1).coerceAtLeast(0).toFloat()
+                    val top = (height - h) / 2f; val bottom = top + h
+                    shape(bodyW, top, bottom); c.drawPath(path, black)
+                    if (a <= 0f) return
+                    val s = dp(24); var y = top + dp(10)
+                    for (d in icons) {
+                        d.setBounds((bodyW / 2 - s / 2).toInt(), y.toInt(), (bodyW / 2 + s / 2).toInt(), (y + s).toInt())
+                        d.alpha = (255 * a).toInt(); d.draw(c); y += dp(40)
+                    }
+                    label?.let { text.alpha = (255 * a).toInt(); c.drawText(it, bodyW + dp(14), (top + bottom) / 2f + dp(6), text) }
+                }
+                Kind.MESSAGE -> {
+                    val bodyW = dp(54) * grown
+                    val h = dp(62).toFloat(); val top = (height - h) / 2f; val bottom = top + h
+                    shape(bodyW, top, bottom); c.drawPath(path, black)
+                    if (a <= 0f) return
+                    val s = dp(36).toFloat()
+                    val ix = (bodyW - s) / 2f; val iy = (top + bottom - s) / 2f
+                    appIcon?.let { bmp ->
+                        c.save()
+                        iconClip.reset(); iconClip.addRoundRect(ix, iy, ix + s, iy + s, s * 0.24f, s * 0.24f, Path.Direction.CW)
+                        c.clipPath(iconClip)
+                        val p = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (255 * a).toInt() }
+                        r.set(ix, iy, ix + s, iy + s); c.drawBitmap(bmp, null, r, p)
+                        c.restore()
+                    }
+                    val tx = bodyW + dp(12); val maxW = (width - tx - dp(8)).coerceAtLeast(dp(40).toFloat())
+                    text.alpha = (255 * a).toInt(); small.alpha = (240 * a).toInt()
+                    val t = TextUtils.ellipsize(label ?: "", text, maxW, TextUtils.TruncateAt.END).toString()
+                    val b = TextUtils.ellipsize(body ?: "", small, maxW, TextUtils.TruncateAt.END).toString()
+                    c.drawText(t, tx, (top + bottom) / 2f - dp(3), text)
+                    c.drawText(b, tx, (top + bottom) / 2f + dp(15), small)
                 }
             }
+        }
+
+        // ---- touch: tap the bump for volume, drag to change it; tap a message to open, swipe left to dismiss
+        private var downX = 0f
+        private var downY = 0f
+        private var startLevel = 0f
+        private var dragging = false
+
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = e.rawX; downY = e.rawY; dragging = false; startLevel = level
+                    removeCallbacks(backToRest)
+                }
+                MotionEvent.ACTION_MOVE -> if (kind == Kind.VOLUME) {
+                    val dy = downY - e.rawY
+                    if (kotlin.math.abs(dy) > dp(6)) dragging = true
+                    if (dragging) {
+                        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                        val lv = (startLevel + dy / dp(150)).coerceIn(0f, 1f)
+                        val steps = (lv * max).roundToInt()
+                        if (steps != audio.getStreamVolume(AudioManager.STREAM_MUSIC)) {
+                            runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, steps, 0) }
+                            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        }
+                        level = lv; invalidate()
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val dx = e.rawX - downX
+                    when {
+                        kind == Kind.MESSAGE && dx < -dp(30) -> retract()
+                        kind == Kind.MESSAGE && kotlin.math.abs(dx) < dp(10) -> { val o = onOpen; retract(); o?.invoke() }
+                        kind == Kind.REST -> {
+                            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                            volume(audio.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat())
+                            return true
+                        }
+                        else -> {}
+                    }
+                    postDelayed(backToRest, 1800)
+                }
+            }
+            return true
         }
     }
 }

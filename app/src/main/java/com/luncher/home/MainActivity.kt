@@ -379,7 +379,8 @@ class MainActivity : Activity() {
         NotificationService.onPosted = { pkg, title, text -> showNotificationInIsland(pkg, title, text) }
         NotificationService.onOngoing = { refreshOngoing() }
         startPrivacyWatch()
-        sideHud = SideHud(this)
+        sideHud = SideHud(this, settings)
+        root.post { runCatching { sideHud.rest() } }
         setupSidebar()
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
         ContextCompat.registerReceiver(this, ringerReceiver, IntentFilter(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION), ContextCompat.RECEIVER_EXPORTED)
@@ -645,6 +646,7 @@ class MainActivity : Activity() {
         }
         if (::controlCenter.isInitialized) controlCenter.tileStyle = settings.ccStyle
         setupSidebar()
+        if (::sideHud.isInitialized) runCatching { sideHud.rest() }
         loadSpatialWallpaper()
         appliedVersion = settings.version
         applyStyleGlobals()
@@ -5263,7 +5265,7 @@ class MainActivity : Activity() {
     /** New notifications appear briefly in the Dynamic Island (not during a silencing Focus). */
     private val lastIslandNote = HashMap<String, Long>()
     private fun showNotificationInIsland(pkg: String, title: String, text: String) {
-        if (!::island.isInitialized || !settings.island || (!isActive && overlayIsland == null)) return
+        if (!::island.isInitialized) return
         val f = focusId
         if (f != null && Focus.silences(this, f)) return
         if (mediaController?.packageName == pkg) return
@@ -5273,6 +5275,17 @@ class MainActivity : Activity() {
         if (now - (lastIslandNote[pkg] ?: 0L) < 4000L) return
         lastIslandNote[pkg] = now
         val app = allApps.firstOrNull { it.packageName == pkg }
+        // Messages come out of the side island; the top island stays for music, timers and calls.
+        if (settings.sideHud && settings.sideMessages && ::sideHud.isInitialized) {
+            sideHud.message(app?.icon, title.ifBlank { app?.label ?: "Message" }, text) {
+                if (app != null) runCatching {
+                    startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(app.component)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
+                }
+            }
+            return
+        }
+        if (!settings.island || (!isActive && overlayIsland == null)) return
         island.flash(IslandActivity("note", app?.icon, R.drawable.ic_music, Color.WHITE,
             title.ifBlank { app?.label ?: "Notification" }, text, null, false, Color.WHITE,
             if (app != null) listOf("Open" to { launch(app, null) }) else emptyList()), 4500)

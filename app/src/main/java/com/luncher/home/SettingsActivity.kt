@@ -504,7 +504,13 @@ class SettingsActivity : Activity() {
         toggle(isl, "Always Show Island", "A small island stays at the top; pull it down (or tap it) for quick controls",
             s.islandAlways) { s.islandAlways = it; previewChanged() }
         toggle(isl, "Side Island for Volume & Silent", "Volume, Silent and Focus grow out of the screen edge",
-            s.sideHud) { s.sideHud = it }
+            s.sideHud) { s.sideHud = it; rebuild() }
+        if (s.sideHud) {
+            toggle(isl, "Always Show Side Island", "A small bump stays on the left edge; tap it for a volume slider you can drag",
+                s.sideRest) { s.sideRest = it }
+            toggle(isl, "Messages in Side Island", "New messages slide out of the edge (tap to open, swipe left to dismiss); " +
+                "music stays in the top island", s.sideMessages) { s.sideMessages = it }
+        }
         toggle(isl, "Assistant Button", "Show an AI assistant button in the island's pull-down controls",
             s.assistant != "off") { on ->
             s.assistant = if (on) (getSharedPreferences("luncher", MODE_PRIVATE).getString("last_assistant", "gemini") ?: "gemini") else "off"
