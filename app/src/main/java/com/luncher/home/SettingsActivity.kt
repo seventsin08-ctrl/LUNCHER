@@ -580,8 +580,8 @@ class SettingsActivity : Activity() {
         val chatSec = section("CHAT WINDOW")
         toggle(chatSec, "Photos & Attachments", "See photos right in the chat; videos, voice messages and files show as a tap-to-open chip",
             s.sideMedia) { s.sideMedia = it }
-        toggle(chatSec, "Chat History Button", "After a chat closes, a small button with the app's logo stays on the edge — " +
-            "tap it for Recent Chats, tap a chat to open it again, swipe it into the edge to hide it", s.sideHistory) { s.sideHistory = it }
+        toggle(chatSec, "Chat Button in Side Island", "Under the volume slider: the latest app's logo and a red count — " +
+            "tap it for Recent Chats, tap a chat to open it again", s.sideHistory) { s.sideHistory = it }
         toggle(chatSec, "Reply Box", "Answer from the chat window — works with any app that has Reply in its notifications " +
             "(Messenger, WhatsApp, Telegram, Instagram, SMS, Discord…)", s.sideReply) { s.sideReply = it }
         info(chatSec, "Photo viewer — tap a photo in the chat to open it. A preview shows while you change these.")

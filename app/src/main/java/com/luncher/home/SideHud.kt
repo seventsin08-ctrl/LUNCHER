@@ -37,6 +37,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
 
     private enum class Kind { REST, VOLUME, STATUS, MESSAGE }
+    /** Half the side island window's height, in dp. */
+    private val HALF = 150
 
     private var wm: WindowManager? = null
     private var lp: WindowManager.LayoutParams? = null
@@ -64,7 +66,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         return Color.argb(a, Color.red(base), Color.green(base), Color.blue(base))
     }
 
-    private fun windowY() = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(125)
+    private fun windowY() = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(HALF)
 
     /** Show the resting bump (or remove everything if the side island is off). */
     fun rest() {
@@ -90,7 +92,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
     }
 
-    fun volume(level: Float) = show(Kind.VOLUME) { it.level = level }
+    fun volume(level: Float) = show(Kind.VOLUME) { it.glideLevel(level) }
 
     fun status(icons: List<Pair<Int, Int>>, label: String) = show(Kind.STATUS) {
         it.label = label
@@ -285,7 +287,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
 
         root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(dp(320), View.MeasureSpec.AT_MOST))
-        val center = hudLp.y + dp(125)
+        val center = hudLp.y + dp(HALF)
         val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -497,7 +499,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val ctx = if (type == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) svc!! else act
         val w = ctx.getSystemService(WindowManager::class.java) ?: return null
         val v = HudView(act)
-        val l = WindowManager.LayoutParams(dp(20), dp(250), type,
+        val l = WindowManager.LayoutParams(dp(20), dp(HALF * 2), type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
@@ -559,6 +561,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
      * shape), with the latest app's logo and a red count. Tap for Recent Chats, swipe into the edge to hide.
      */
     fun showHistoryButton() {
+        // The chat button is now part of the side island's own shape (under the volume slider).
+        if (true) return
         if (!settings.sideHistory) return
         val hudLp = lp ?: return
         val w = wm ?: return
@@ -605,7 +609,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-            x = 0; y = hudLp.y + dp(125) + dp(62)
+            x = 0; y = hudLp.y + dp(HALF) + dp(62)
             token = hudLp.token
             if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
@@ -673,7 +677,10 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         b.postDelayed({ runCatching { wm?.removeViewImmediate(b) } }, 600)
     }
 
-    private fun toggleHistory() { if (histPanel != null) hideHistory() else showHistory() }
+    private fun toggleHistory() {
+        if (histPanel != null) hideHistory()
+        else { view?.removeCallbacks(backToRest); showHistory() }
+    }
 
     /** "Recent Chats": every conversation from all apps; tap one to open its chat window again. */
     private fun showHistory() {
@@ -755,7 +762,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(dp(420), View.MeasureSpec.AT_MOST))
-        val btnY = hudLp.y + dp(125) + dp(58)
+        val btnY = hudLp.y + dp(HALF) + dp(75) - dp(27)
         val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
@@ -782,6 +789,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private fun hideHistory() {
         val p = histPanel ?: return
         histPanel = null
+        view?.let { v -> if (v.kind == Kind.VOLUME) { v.removeCallbacks(backToRest); v.postDelayed(backToRest, 2200) } }
         p.animate().alpha(0f).scaleX(0.7f).scaleY(0.85f).setDuration(170).withEndAction { runCatching { wm?.removeViewImmediate(p) } }.start()
     }
 
@@ -808,6 +816,17 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         var icons: List<Drawable> = emptyList()
         var grown = 0f
         var cardShown = false
+        private var levelAnim: android.animation.ValueAnimator? = null
+        /** The slider fill glides to the new level instead of jumping. */
+        fun glideLevel(to: Float) {
+            levelAnim?.cancel()
+            if (grown < 0.05f) { level = to; return }
+            levelAnim = android.animation.ValueAnimator.ofFloat(level, to).apply {
+                duration = 180; interpolator = android.view.animation.DecelerateInterpolator()
+                addUpdateListener { level = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        }
         private var spring: SpringAnimation? = null
         private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
         private val mirror = android.graphics.Matrix()
@@ -815,6 +834,62 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         /** x for something of width [w] placed at [x] from the edge, flipped on the right edge. */
         private fun mx(x: Float, w: Float = 0f) = if (isRight) width - x - w else x
         private fun flip() { if (isRight) { mirror.setScale(-1f, 1f, width / 2f, 0f); path.transform(mirror) } }
+        private val glassFill = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val glassRim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = maxOf(1f, dp(1).toFloat()) }
+        private val badge = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF3B30.toInt() }
+        private val badgeText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; textAlign = Paint.Align.CENTER; textSize = dp(10).toFloat(); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        private val chatIcon = act.getDrawable(R.drawable.ic_chat)!!.mutate()
+        private val clip = Path()
+        /** Where the chat button sits (for taps), in view coordinates. */
+        var chatSlot = RectF()
+
+        /** Fill the shape: solid colour, or frosted glass with a soft shine and a light rim. */
+        fun drawBody(c: Canvas) {
+            if (settings.sideColor == "glass") {
+                black.color = Color.argb((150 * settings.sideOpacity / 100f).toInt().coerceIn(60, 220), 22, 22, 26)
+                c.drawPath(path, black)
+                val b = android.graphics.RectF(); path.computeBounds(b, true)
+                glassFill.shader = android.graphics.LinearGradient(b.left, b.top, b.right, b.bottom,
+                    intArrayOf(0x40FFFFFF, 0x10FFFFFF, 0x24FFFFFF), floatArrayOf(0f, 0.55f, 1f), android.graphics.Shader.TileMode.CLAMP)
+                c.drawPath(path, glassFill)
+                glassRim.shader = android.graphics.LinearGradient(b.left, b.top, b.left, b.bottom,
+                    intArrayOf(0x88FFFFFF.toInt(), 0x22FFFFFF, 0x55FFFFFF), null, android.graphics.Shader.TileMode.CLAMP)
+                c.drawPath(path, glassRim)
+            } else c.drawPath(path, black)
+        }
+
+        /** The chat button inside the shape: latest app's logo (or a chat icon) and the red count. */
+        fun drawChatSlot(c: Canvas, bodyW: Float, slotTop: Float, a: Float) {
+            val s = dp(36).toFloat()
+            val cx = mx(bodyW / 2f); val cy = slotTop + dp(30)
+            // Grows in a touch after the shape, for a smooth reveal.
+            val k = ((a - 0.15f) / 0.85f).coerceIn(0f, 1f)
+            val sz = s * (0.6f + 0.4f * k)
+            chatSlot.set(cx - s / 2 - dp(6), cy - s / 2 - dp(6), cx + s / 2 + dp(6), cy + s / 2 + dp(6))
+            val ic = lastIcon
+            if (ic != null) {
+                c.save()
+                clip.reset(); clip.addCircle(cx, cy, sz / 2, Path.Direction.CW); c.clipPath(clip)
+                val pp = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (255 * k).toInt() }
+                r.set(cx - sz / 2, cy - sz / 2, cx + sz / 2, cy + sz / 2); c.drawBitmap(ic, null, r, pp)
+                c.restore()
+            } else {
+                badge.color = 0x33FFFFFF; badge.alpha = (90 * k).toInt(); c.drawCircle(cx, cy, sz / 2, badge)
+                val i = (sz * 0.56f).toInt()
+                chatIcon.setBounds((cx - i / 2).toInt(), (cy - i / 2).toInt(), (cx + i / 2).toInt(), (cy + i / 2).toInt())
+                chatIcon.alpha = (255 * k).toInt(); chatIcon.draw(c)
+            }
+            if (unread > 0) {
+                badge.color = 0xFFFF3B30.toInt(); badge.alpha = (255 * k).toInt()
+                val bx = cx + sz * 0.36f; val by = cy - sz * 0.36f
+                c.drawCircle(bx, by, dp(8).toFloat(), badge)
+                badgeText.alpha = (255 * k).toInt()
+                c.drawText(if (unread > 9) "9+" else "$unread", bx, by + dp(4), badgeText)
+            }
+        }
+
         private fun flipRect() { if (isRight) r.set(width - r.right, r.top, width - r.left, r.bottom) }
         private val restPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var restShaderTop = -1f
@@ -890,8 +965,12 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 }
                 Kind.VOLUME -> {
                     val bodyW = dp(58) * grown
-                    val h = dp(150).toFloat(); val top = (height - h) / 2f; val bottom = top + h
-                    shape(bodyW, top, bottom); flip(); c.drawPath(path, black)
+                    val chat = settings.sideHistory && !preview
+                    val sliderH = dp(150).toFloat()
+                    val h = sliderH + (if (chat) dp(60) else 0)
+                    val top = (height - h) / 2f; val bottom = top + sliderH
+                    shape(bodyW, top, top + h); flip(); drawBody(c)
+                    if (chat && a > 0f) drawChatSlot(c, bodyW, top + sliderH, a)
                     if (a <= 0f) return
                     val inset = dp(7).toFloat()
                     r.set(inset, top + inset, bodyW - inset, bottom - inset); flipRect()
@@ -909,7 +988,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     val bodyW = dp(46) * grown
                     val h = dp(44) + dp(40) * (icons.size - 1).coerceAtLeast(0).toFloat()
                     val top = (height - h) / 2f; val bottom = top + h
-                    shape(bodyW, top, bottom); flip(); c.drawPath(path, black)
+                    shape(bodyW, top, bottom); flip(); drawBody(c)
                     if (a <= 0f) return
                     val s = dp(24); var y = top + dp(10)
                     for (d in icons) {
@@ -925,7 +1004,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 Kind.MESSAGE -> {
                     val bodyW = dp(54) * grown
                     val h = dp(62).toFloat(); val top = (height - h) / 2f; val bottom = top + h
-                    shape(bodyW, top, bottom); flip(); c.drawPath(path, black)
+                    shape(bodyW, top, bottom); flip(); drawBody(c)
                     if (a <= 0f) return
                     val s = dp(36).toFloat()
                     val ix = mx((bodyW - s) / 2f, s); val iy = (top + bottom - s) / 2f
@@ -993,13 +1072,18 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                         // Save where you dropped it (as % of the screen height).
                         moving = false
                         val h = act.resources.displayMetrics.heightPixels.toFloat()
-                        settings.sideY = (((lp?.y ?: 0) + dp(125)) / h * 100f).roundToInt().coerceIn(5, 90)
+                        settings.sideY = (((lp?.y ?: 0) + dp(HALF)) / h * 100f).roundToInt().coerceIn(5, 90)
                         onMoved?.invoke()
                         performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                         postDelayed(backToRest, 1200)
                         return true
                     }
                     val dx = e.rawX - downX
+                    if (kind == Kind.VOLUME && !dragging && chatSlot.contains(e.x, e.y)) {
+                        performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        toggleHistory()
+                        return true
+                    }
                     when {
                         kind == Kind.MESSAGE && (if (isRight) dx > dp(30) else dx < -dp(30)) -> retract()
                         kind == Kind.MESSAGE && kotlin.math.abs(dx) < dp(10) -> { val o = onOpen; retract(); o?.invoke() }
