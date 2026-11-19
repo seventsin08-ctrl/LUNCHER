@@ -52,6 +52,11 @@ class Sidebar(
     private var handleLp: WindowManager.LayoutParams? = null
     private var panelRoot: FrameLayout? = null
     private var zoneListener: (() -> Unit)? = null
+    private var panelItems: List<View> = emptyList()
+    // Springs for the panel: a soft, slightly lively open and a calm, no-bounce close.
+    private val OPEN = Motion.Spec(340f, 0.78f)
+    private val OPEN_Y = Motion.Spec(300f, 0.72f)
+    private val CLOSE = Motion.Spec(520f, 1f)
     private var panel: View? = null
     private var overApps = false
 
@@ -257,13 +262,23 @@ class Sidebar(
         OverlayZones.setSidebar(sp(100) + dp(20), right)
         handle?.animate()?.alpha(0f)?.setDuration(120)?.start()
         root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-        // Slide in from the edge, the icons following one after another.
-        val off = dp(130).toFloat() * (if (right) 1 else -1)
-        Motion.spring(card, DynamicAnimation.TRANSLATION_X, 0f, Motion.FLUID, start = off)
-        for ((i, v) in items.withIndex()) {
-            v.alpha = 0f; v.translationX = off * 0.4f
-            v.animate().alpha(1f).translationX(0f).setStartDelay(40L + i * 22L).setDuration(240)
-                .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        // Grows out of the edge like the side island: slides in while stretching from the edge,
+        // settling with a soft spring; the icons follow one after another.
+        val off = dp(110).toFloat() * (if (right) 1 else -1)
+        panelItems = items
+        card.alpha = 0f
+        card.post {
+            card.pivotX = if (right) card.width.toFloat() else 0f
+            card.pivotY = card.height / 2f
+            Motion.spring(card, DynamicAnimation.TRANSLATION_X, 0f, OPEN, start = off)
+            Motion.spring(card, DynamicAnimation.SCALE_X, 1f, OPEN, start = 0.55f)
+            Motion.spring(card, DynamicAnimation.SCALE_Y, 1f, OPEN_Y, start = 0.82f)
+            card.animate().alpha(1f).setDuration(200).setInterpolator(android.view.animation.DecelerateInterpolator(1.5f)).start()
+            for ((i, v) in items.withIndex()) {
+                v.alpha = 0f; v.translationX = off * 0.35f; v.scaleX = 0.8f; v.scaleY = 0.8f
+                v.animate().alpha(1f).translationX(0f).scaleX(1f).scaleY(1f).setStartDelay(70L + i * 28L).setDuration(320)
+                    .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+            }
         }
         // Safety: never leave the panel stuck on screen.
         root.postDelayed({ if (panelRoot === root) close() }, 60_000)
@@ -278,11 +293,23 @@ class Sidebar(
         handle?.animate()?.alpha(1f)?.setDuration(200)?.start()
         val remove = { runCatching { wm?.removeViewImmediate(root) }; Unit }
         if (immediate || card == null) { remove(); return }
-        val off = dp(140).toFloat() * (if (settings.sidebarRight) 1 else -1)
-        card.animate().translationX(off).alpha(0f).setDuration(200)
-            .setInterpolator(android.view.animation.AccelerateInterpolator(1.6f))
-            .withEndAction { remove() }.start()
-        root.postDelayed({ if (root.isAttachedToWindow) remove() }, 600)
+        // Shrinks back into the edge: icons fade first, then the panel tucks away (no bounce).
+        val right = settings.sidebarRight
+        val off = dp(110).toFloat() * (if (right) 1 else -1)
+        card.pivotX = if (right) card.width.toFloat() else 0f
+        card.pivotY = card.height / 2f
+        val its = panelItems; panelItems = emptyList()
+        for ((i, v) in its.asReversed().withIndex()) {
+            v.animate().cancel()
+            v.animate().alpha(0f).translationX(off * 0.25f).scaleX(0.85f).scaleY(0.85f)
+                .setStartDelay(i * 12L).setDuration(140).start()
+        }
+        Motion.spring(card, DynamicAnimation.SCALE_X, 0.55f, CLOSE)
+        Motion.spring(card, DynamicAnimation.SCALE_Y, 0.85f, CLOSE)
+        Motion.spring(card, DynamicAnimation.TRANSLATION_X, off, CLOSE) { remove() }
+        card.animate().alpha(0f).setStartDelay(60).setDuration(190)
+            .setInterpolator(android.view.animation.AccelerateInterpolator(1.4f)).start()
+        root.postDelayed({ if (root.isAttachedToWindow) remove() }, 700)
     }
 
     private fun chosenApps(): List<AppInfo> {

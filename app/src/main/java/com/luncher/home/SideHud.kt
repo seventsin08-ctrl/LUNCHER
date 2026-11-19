@@ -1153,8 +1153,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             val holder = FloatValueHolder(grown)
             spring = SpringAnimation(holder).apply {
                 spring = SpringForce(target).apply {
-                    stiffness = if (target > 0f) 380f else 900f
-                    dampingRatio = if (target > 0f) 0.66f else 1f
+                    // Opens with a soft, lively settle; closes calmly without a bounce.
+                    stiffness = (if (target > 0f) 360f else 520f) / (Motion.scale * Motion.scale).coerceAtLeast(0.2f)
+                    dampingRatio = if (target > 0f) 0.74f else 1f
                 }
                 setMinimumVisibleChange(0.002f)
                 addUpdateListener { _, v, _ -> grown = v.coerceAtLeast(0f); invalidate() }
