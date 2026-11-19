@@ -494,6 +494,17 @@ class DynamicIsland(
         else if (a != null) bindExpanded(a) else collapse()
     }
 
+    /** While Search is open the island (tools) fades away, and comes back when it closes. */
+    fun setSearching(on: Boolean) {
+        searching = on
+        pill.animate().cancel()
+        if (pill.visibility != View.VISIBLE) return
+        pill.animate().alpha(if (on) 0f else 1f).scaleX(sizeScale * (if (on) 0.9f else 1f)).scaleY(sizeScale * (if (on) 0.9f else 1f))
+            .setDuration((if (on) 180L else 280L)).start()
+        pill.isEnabled = !on
+    }
+    private var searching = false
+
     private fun idleW() = if (toolsOn) dp(16) + toolCount * dp(34) else dp(118)
     private var toolCount = 0
 
@@ -515,8 +526,11 @@ class DynamicIsland(
                 setOnClickListener { v ->
                     buzz()
                     v.animate().scaleX(0.8f).scaleY(0.8f).setDuration(80).withEndAction { Motion.scaleTo(v, 1f, Motion.BOUNCY) }.start()
+                    // The gear spins as it opens the launcher settings.
+                    if (q.label == "Settings") (v as? FrameLayout)?.getChildAt(0)?.animate()?.rotationBy(360f)?.setDuration(520)
+                        ?.setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f))?.start()
                     q.onTap()
-                    v.postDelayed({ if (toolsRow.visibility == View.VISIBLE && !expanded) showTools(true) }, 260)
+                    v.postDelayed({ if (toolsRow.visibility == View.VISIBLE && !expanded) showTools(true) }, 600)
                 }
             }
             b.addView(ImageView(act).apply {

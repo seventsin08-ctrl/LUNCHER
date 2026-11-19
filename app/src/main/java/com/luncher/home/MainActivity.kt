@@ -500,8 +500,13 @@ class MainActivity : Activity() {
     @Deprecated("Launcher handles back itself")
     override fun onBackPressed() = goHome()
 
+    private val holo by lazy {
+        HoloSettings(this, root) { (0 until root.childCount).map { root.getChildAt(it) } }
+    }
+
     private fun goHome() {
         when {
+            holo.isOpen -> holo.close()
             drag != null -> cancelDrag()
             widgetDrag != null -> cancelWidgetDrag()
             menuLayer != null -> dismissMenu()
@@ -847,7 +852,8 @@ class MainActivity : Activity() {
             lockScreen()
         }
         list += QuickAction(R.drawable.ic_set_gear, "Settings", { false }) {
-            runCatching { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            // The launcher's own settings, as a hologram (gear spins, apps fade, panels pop in).
+            root.postDelayed({ holo.open() }, 180)
         }
         return list
     }
@@ -4657,6 +4663,7 @@ class MainActivity : Activity() {
     // ================================================================ search
 
     private fun openSearch() {
+        if (::island.isInitialized) island.setSearching(true)
         searchField.setText("")
         filterSearch("")
         searchOverlay.visibility = View.VISIBLE
@@ -4677,6 +4684,7 @@ class MainActivity : Activity() {
     }
 
     private fun closeSearch(animate: Boolean = true) {
+        if (::island.isInitialized) island.setSearching(false)
         imm().hideSoftInputFromWindow(searchField.windowToken, 0)
         searchField.clearFocus()
         val fast = !animate || anim == 0f
