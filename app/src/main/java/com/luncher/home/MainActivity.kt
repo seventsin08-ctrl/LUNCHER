@@ -383,6 +383,19 @@ class MainActivity : Activity() {
         sideHud.onPlayPause = { togglePlay() }
         sideHud.onMoved = { setupSidebar() }
         NotificationService.loadHistory(this)
+        // Recently used apps for the side island's extension (tap to switch apps).
+        sideHud.recentProvider = {
+            switcherEntries().map { e ->
+                val app = e.app
+                app.icon to {
+                    runCatching {
+                        startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(app.component)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
+                    }
+                    Unit
+                }
+            }
+        }
         sideHud.historyProvider = { NotificationService.chatHistory.values.toList() }
         sideHud.appLookup = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } }
         sideHud.openChat = { c ->

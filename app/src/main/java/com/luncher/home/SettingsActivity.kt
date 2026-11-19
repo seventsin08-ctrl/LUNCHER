@@ -547,6 +547,8 @@ class SettingsActivity : Activity() {
                     }
                 }
             }
+            toggle(side2, "Recent Apps", "An extension under the chat button: your recently used apps — scroll it and tap one " +
+                "to switch apps quickly", s.sideRecents) { s.sideRecents = it }
             toggle(side2, "Always Show on Edge", "A slim sliver stays on the edge when nothing is showing", s.sideRest) {
                 s.sideRest = it; rebuild()
             }

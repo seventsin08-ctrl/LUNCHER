@@ -39,6 +39,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private enum class Kind { REST, VOLUME, STATUS, MESSAGE }
     /** Half the side island window's height, in dp. */
     private val HALF = 150
+    /** Taller window only while the volume shape (with recent apps) is open. */
+    private val TALL_HALF = 250
+    private fun halfH() = (lp?.height ?: dp(HALF * 2)) / 2
 
     private var wm: WindowManager? = null
     private var lp: WindowManager.LayoutParams? = null
@@ -66,7 +69,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         return Color.argb(a, Color.red(base), Color.green(base), Color.blue(base))
     }
 
-    private fun windowY() = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(HALF)
+    private fun windowY() = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - halfH()
 
     /** Show the resting bump (or remove everything if the side island is off). */
     fun rest() {
@@ -85,7 +88,18 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         v.growTo(1f)
     }
 
-    fun volume(level: Float) = show(Kind.VOLUME) { it.glideLevel(level) }
+    fun volume(level: Float) = show(Kind.VOLUME) {
+        it.glideLevel(level)
+        // Extension under the chat button: your recently used apps (scrollable).
+        // Refresh at most every 3 s so holding the volume key stays smooth.
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - recentsAt > 3000) {
+            recentsAt = now
+            it.recents = if (settings.sideRecents && !preview) runCatching { recentProvider?.invoke() }.getOrNull().orEmpty().take(15) else emptyList()
+            it.recentScroll = 0f
+        }
+    }
+    private var recentsAt = 0L
 
     fun status(icons: List<Pair<Int, Int>>, label: String) = show(Kind.STATUS) {
         it.label = label
@@ -208,7 +222,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val h = root.measuredHeight
         // Where it goes: same spot when updating; beside the side island when it's the first;
         // otherwise under the last window (or above the first one if there's no room).
-        val center = hudLp.y + dp(HALF)
+        val center = hudLp.y + hudLp.height / 2
         var y: Int; var x = dp(66)
         if (keepX != null && keepY != null) { x = keepX; y = keepY }
         else if (cards.isEmpty()) y = (center - h / 2).coerceAtLeast(dp(40))
@@ -440,6 +454,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val l = lp ?: return
         val v = view ?: return
         l.width = when (kind) { Kind.REST -> dp(20); Kind.VOLUME -> dp(96); Kind.STATUS -> dp(220); Kind.MESSAGE -> dp(320) }
+        // Grow/shrink the height around the same centre (taller only for volume + recent apps).
+        val newH = dp(if (kind == Kind.VOLUME && v.recents.isNotEmpty()) TALL_HALF * 2 else HALF * 2)
+        if (newH != l.height) { val c = l.y + l.height / 2; l.height = newH; l.y = c - newH / 2 }
         l.flags = if (kind == Kind.STATUS) l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             else l.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         runCatching { wm?.updateViewLayout(v, l) }
@@ -469,6 +486,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
         if (runCatching { w.addView(v, l) }.isFailure) return null
         wm = w; lp = l; view = v; createdRight = isRight
+        recentsAt = 0L
         return v
     }
 
@@ -492,6 +510,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     // ---------------------------------------------------------------- message history (middle window)
+
+    /** Recently used apps for the side island's extension: (icon, open). */
+    var recentProvider: (() -> List<Pair<Bitmap?, () -> Unit>>)? = null
 
     /** Set by the launcher. */
     var historyProvider: (() -> List<ChatInfo>)? = null
@@ -682,6 +703,41 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         /** Where the chat button sits (for taps), in view coordinates. */
         var chatSlot = RectF()
 
+        // ---- recently used apps (scrollable column under the chat button)
+        var recents: List<Pair<Bitmap?, () -> Unit>> = emptyList()
+        var recentScroll = 0f
+        var recentArea = RectF()
+        private val rowH get() = dp(48).toFloat()
+        private val divider = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF; strokeWidth = maxOf(1f, dp(1) * 0.8f) }
+
+        fun recentsHeight(): Float = if (recents.isEmpty()) 0f else minOf(recents.size, 4) * rowH + dp(12)
+        private fun maxScroll() = (recents.size * rowH + dp(12) - recentsHeight()).coerceAtLeast(0f)
+
+        fun drawRecents(c: Canvas, bodyW: Float, areaTop: Float, areaH: Float, a: Float) {
+            val k = ((a - 0.25f) / 0.75f).coerceIn(0f, 1f)
+            recentArea.set(mx(0f, bodyW), areaTop, mx(0f, bodyW) + bodyW, areaTop + areaH)
+            divider.alpha = (70 * k).toInt()
+            c.drawLine(mx(dp(12).toFloat()), areaTop + 1, mx(bodyW - dp(12)), areaTop + 1, divider)
+            c.save()
+            c.clipRect(recentArea)
+            val s = dp(38).toFloat()
+            val cx = mx(bodyW / 2f)
+            val pp = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+            for ((i, item) in recents.withIndex()) {
+                val cy = areaTop + dp(6) + rowH * i + rowH / 2 - recentScroll
+                if (cy < areaTop - rowH || cy > areaTop + areaH + rowH) continue
+                // Icons fade near the top / bottom edge of the scroll area.
+                val edge = minOf(cy - areaTop, areaTop + areaH - cy).coerceAtLeast(0f)
+                pp.alpha = (255 * k * (edge / dp(18)).coerceIn(0.25f, 1f)).toInt()
+                val bmp = item.first ?: continue
+                clip.reset(); clip.addRoundRect(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2, s * 0.26f, s * 0.26f, Path.Direction.CW)
+                c.save(); c.clipPath(clip)
+                r.set(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2); c.drawBitmap(bmp, null, r, pp)
+                c.restore()
+            }
+            c.restore()
+        }
+
         /** Fill the shape: solid colour, or frosted glass with a soft shine and a light rim. */
         fun drawBody(c: Canvas) {
             if (settings.sideColor == "glass") {
@@ -804,10 +860,13 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     val bodyW = dp(58) * grown
                     val chat = settings.sideHistory && !preview
                     val sliderH = dp(150).toFloat()
-                    val h = sliderH + (if (chat) dp(60) else 0)
+                    val chatH = if (chat) dp(60).toFloat() else 0f
+                    val recH = recentsHeight()
+                    val h = sliderH + chatH + recH
                     val top = (height - h) / 2f; val bottom = top + sliderH
                     shape(bodyW, top, top + h); flip(); drawBody(c)
                     if (chat && a > 0f) drawChatSlot(c, bodyW, top + sliderH, a)
+                    if (recH > 0f && a > 0f) drawRecents(c, bodyW, top + sliderH + chatH, recH, a)
                     if (a <= 0f) return
                     val inset = dp(7).toFloat()
                     r.set(inset, top + inset, bodyW - inset, bottom - inset); flipRect()
@@ -871,6 +930,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         private var dragging = false
         private var moving = false
         private var startY = 0
+        private var inRecents = false
+        private var startScroll = 0f
         /** Long-press: pick the side island up and drag it up or down the edge. */
         private val startMove = Runnable {
             if (!dragging) { moving = true; performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) }
@@ -879,6 +940,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         override fun onTouchEvent(e: MotionEvent): Boolean {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    inRecents = kind == Kind.VOLUME && recents.isNotEmpty() && recentArea.contains(e.x, e.y)
+                    startScroll = recentScroll
                     downX = e.rawX; downY = e.rawY; dragging = false; moving = false; startLevel = level
                     startY = lp?.y ?: 0
                     removeCallbacks(backToRest)
@@ -889,6 +952,15 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     l.y = (startY + (e.rawY - downY)).toInt()
                         .coerceIn(-dp(60), act.resources.displayMetrics.heightPixels - dp(200))
                     runCatching { wm?.updateViewLayout(this, l) }
+                } else if (inRecents) {
+                    val dy = downY - e.rawY
+                    if (kotlin.math.abs(dy) > dp(6)) { dragging = true; removeCallbacks(startMove) }
+                    if (dragging) {
+                        val before = (recentScroll / rowH).toInt()
+                        recentScroll = (startScroll + dy).coerceIn(0f, maxScroll())
+                        if ((recentScroll / rowH).toInt() != before) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        invalidate()
+                    }
                 } else if (kind == Kind.VOLUME) {
                     val dy = downY - e.rawY
                     if (kotlin.math.abs(dy) > dp(6)) { dragging = true; removeCallbacks(startMove) }
@@ -909,13 +981,24 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                         // Save where you dropped it (as % of the screen height).
                         moving = false
                         val h = act.resources.displayMetrics.heightPixels.toFloat()
-                        settings.sideY = (((lp?.y ?: 0) + dp(HALF)) / h * 100f).roundToInt().coerceIn(5, 90)
+                        settings.sideY = (((lp?.y ?: 0) + halfH()) / h * 100f).roundToInt().coerceIn(5, 90)
                         onMoved?.invoke()
                         performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                         postDelayed(backToRest, 1200)
                         return true
                     }
                     val dx = e.rawX - downX
+                    if (inRecents && !dragging) {
+                        // Tap an app: jump straight to it.
+                        val i = ((e.y - recentArea.top - dp(6) + recentScroll) / rowH).toInt()
+                        recents.getOrNull(i)?.let { item ->
+                            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                            item.second()
+                            retract()
+                            return true
+                        }
+                    }
+                    if (inRecents) { postDelayed(backToRest, 4000); return true }
                     if (kind == Kind.VOLUME && !dragging && chatSlot.contains(e.x, e.y)) {
                         performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                         toggleHistory()

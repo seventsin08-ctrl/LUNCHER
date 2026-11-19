@@ -77,6 +77,14 @@ object Setup {
             })
         if (Build.VERSION.SDK_INT >= 33) list += Item("post", "Notifications", "Lets the launcher show its own small status notifications",
             { granted(it, Manifest.permission.POST_NOTIFICATIONS) }, runtime = Manifest.permission.POST_NOTIFICATIONS)
+        list += Item("usage", "Usage Access", "Recently used apps in the side island and app switcher",
+            { a -> runCatching {
+                val ops = a.getSystemService(android.app.AppOpsManager::class.java)
+                val mode = if (Build.VERSION.SDK_INT >= 29) ops.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), a.packageName)
+                    else @Suppress("DEPRECATION") ops.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), a.packageName)
+                mode == android.app.AppOpsManager.MODE_ALLOWED
+            }.getOrDefault(false) },
+            open = { a -> go(a, Intent(SysSettings.ACTION_USAGE_ACCESS_SETTINGS, pkgUri(a)), Intent(SysSettings.ACTION_USAGE_ACCESS_SETTINGS)) })
         list += Item("write", "Modify System Settings", "Brightness, rotation lock and ringtones",
             { SysSettings.System.canWrite(it) },
             open = { a -> go(a, Intent(SysSettings.ACTION_MANAGE_WRITE_SETTINGS, pkgUri(a))) })

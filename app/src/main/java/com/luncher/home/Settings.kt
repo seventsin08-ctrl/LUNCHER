@@ -180,6 +180,10 @@ class Settings(ctx: Context) {
     var sideHistory: Boolean
         get() = p.getBoolean("s_side_history", true)
         set(v) = put("s_side_history", v)
+    /** Recently used apps under the side island's chat button. */
+    var sideRecents: Boolean
+        get() = p.getBoolean("s_side_recents", true)
+        set(v) = put("s_side_recents", v)
     /** Reply box in the chat window. */
     var sideReply: Boolean
         get() = p.getBoolean("s_side_reply", true)
