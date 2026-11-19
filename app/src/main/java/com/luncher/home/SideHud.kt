@@ -682,94 +682,169 @@ class SideHud(private val act: Activity, private val settings: Settings, private
      * listed under it (scroll for more), and how many apps at the bottom. Tap a conversation
      * to open its chat window. Drag the top bar to move it.
      */
-    private fun showHistory() {
-        hideHistory()
+    private fun showHistory() = showHistory(null)
+
+    /** Message History: every notification and message, grouped by app, easy to scan. */
+    private fun showHistory(filterPkg: String?, keepAt: Pair<Int, Int>? = null) {
+        hideHistory(immediate = keepAt != null)
         val hudLp = lp ?: return
         val w = wm ?: return
         val ctx = act
         val m = ctx.resources.displayMetrics
         unread = 0
         view?.invalidate()
-        val chats = historyProvider?.invoke().orEmpty()
+        // "New" = arrived since the window was last opened (kept while you switch filters).
+        val seen = if (keepAt == null) settings.historySeen.also { histSeen = it } else histSeen
+        val all = historyProvider?.invoke().orEmpty()
         // Group by app, newest app first; newest conversation first inside each.
-        val groups = chats.groupBy { it.pkg }.entries.sortedByDescending { e -> e.value.maxOf { it.time } }
+        val allGroups = all.groupBy { it.pkg }.entries.sortedByDescending { e -> e.value.maxOf { it.time } }
+        val groups = if (filterPkg == null) allGroups else allGroups.filter { it.key == filterPkg }
         val (sw, sh) = settings.winSize("hist")
-        val width = if (sw > 0) dp(sw).coerceAtMost(m.widthPixels - dp(16)) else minOf((m.widthPixels * 0.88f).toInt(), dp(380))
+        val width = if (sw > 0) dp(sw).coerceAtMost(m.widthPixels - dp(16)) else minOf((m.widthPixels * 0.92f).toInt(), dp(400))
         val root = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = cardBackground(dp(28).toFloat())
+            setPadding(dp(16), dp(12), dp(16), dp(10))
+            // Nearly solid so the home screen behind never makes it hard to read.
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(28).toFloat()
+                colors = intArrayOf(Color.argb(250, 34, 34, 38), Color.argb(252, 18, 18, 20))
+                orientation = android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM
+                setStroke(maxOf(1, dp(1)), 0x33FFFFFF)
+            }
             elevation = dp(14).toFloat()
         }
+        // Header: title + "N messages · M apps", Clear, ✕  (drag it to move the window)
         val head = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(8)) }
-        head.addView(android.widget.TextView(ctx).apply {
-            text = "Message History"; textSize = 19f; setTextColor(Color.WHITE); typeface = Typeface.create("sans-serif", Typeface.BOLD)
-        }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val titles = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        titles.addView(android.widget.TextView(ctx).apply {
+            text = "Notifications"; textSize = 20f; setTextColor(Color.WHITE); typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        })
+        val totalMsgs = all.sumOf { maxOf(1, it.messages.size) }
+        val newCount = all.count { it.time > seen }
+        titles.addView(android.widget.TextView(ctx).apply {
+            text = buildString {
+                append(if (totalMsgs == 1) "1 message" else "$totalMsgs messages")
+                append(" · "); append(if (allGroups.size == 1) "1 app" else "${allGroups.size} apps")
+                if (newCount > 0) append(" · $newCount new")
+            }
+            textSize = 12.5f; setTextColor(0x99FFFFFF.toInt())
+        })
+        head.addView(titles, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (all.isNotEmpty()) head.addView(android.widget.TextView(ctx).apply {
+            text = "Clear"; textSize = 13f; setTextColor(0xFF0A84FF.toInt()); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setOnClickListener {
+                performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                NotificationService.clearHistory(act)
+                showHistory(null, histPanelLp?.let { it.x to it.y })
+            }
+        })
         head.addView(circleButton("✕") { hideHistory() }, android.widget.LinearLayout.LayoutParams(dp(30), dp(30)))
         root.addView(head)
+
+        // Filter chips: All + one per app (logo + count). Tap to see only that app.
+        if (allGroups.size > 1) {
+            val chipScroll = android.widget.HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+            val chips = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            fun chip(icon: Bitmap?, label: String?, count: Int, on: Boolean, pkg: String?) {
+                val c = android.widget.LinearLayout(ctx).apply {
+                    orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(if (icon != null) 6 else 12), dp(5), dp(10), dp(5))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(16).toFloat(); setColor(if (on) 0xFF0A84FF.toInt() else 0x26FFFFFF)
+                    }
+                    setOnClickListener { performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); showHistory(pkg, histPanelLp?.let { it.x to it.y }) }
+                }
+                if (icon != null) c.addView(roundIcon(icon, dp(22)), android.widget.LinearLayout.LayoutParams(dp(22), dp(22)))
+                c.addView(android.widget.TextView(ctx).apply {
+                    text = if (label != null) "$label  $count" else "$count"; textSize = 12.5f; setTextColor(Color.WHITE)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(dp(if (icon != null) 6 else 0), 0, 0, 0)
+                })
+                chips.addView(c, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, dp(32)).apply { marginEnd = dp(6) })
+            }
+            chip(null, "All", totalMsgs, filterPkg == null, null)
+            for ((pkg, convs) in allGroups) chip(appLookup?.invoke(pkg)?.first, null, convs.sumOf { maxOf(1, it.messages.size) }, filterPkg == pkg, pkg)
+            chipScroll.addView(chips)
+            root.addView(chipScroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
+        }
+
         // Scrollable list (drag the corner grip to make the window bigger or smaller)
         val scroll = MaxScroll(ctx, if (sh > 0) dp(sh) else (m.heightPixels * 0.55f).toInt())
         val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
         if (groups.isEmpty()) list.addView(android.widget.TextView(ctx).apply {
-            text = "No messages yet"; textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(0, dp(16), 0, dp(16)); gravity = Gravity.CENTER
+            text = "No notifications yet\nNew messages and notifications will show up here"
+            textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(0, dp(20), 0, dp(20)); gravity = Gravity.CENTER
         })
         for ((pkg, convs) in groups) {
             val app = appLookup?.invoke(pkg)
-            // App row: logo, name, how many chats
+            // App row: logo, name, how many messages
             val appRow = android.widget.LinearLayout(ctx).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, dp(4))
+                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, dp(4))
             }
-            appRow.addView(roundIcon(app?.first, dp(34)), android.widget.LinearLayout.LayoutParams(dp(34), dp(34)))
+            appRow.addView(roundIcon(app?.first, dp(30)), android.widget.LinearLayout.LayoutParams(dp(30), dp(30)))
             appRow.addView(android.widget.TextView(ctx).apply {
-                text = app?.second ?: pkg; textSize = 16f; setTextColor(Color.WHITE)
+                text = app?.second ?: pkg; textSize = 15f; setTextColor(Color.WHITE)
                 typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(10), 0, 0, 0)
             }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val appNew = convs.any { it.time > seen }
             appRow.addView(android.widget.TextView(ctx).apply {
-                text = "${convs.size}"; textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                text = "${convs.sumOf { maxOf(1, it.messages.size) }}"; textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                 setPadding(dp(8), dp(2), dp(8), dp(2))
-                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x33FFFFFF) }
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (appNew) 0xFF0A84FF.toInt() else 0x33FFFFFF) }
             })
             list.addView(appRow)
-            // That app's conversations, under its logo
+            // Each conversation / notification as its own card, with its latest messages shown.
             for (c in convs.sortedByDescending { it.time }) {
-                val row = android.widget.LinearLayout(ctx).apply {
-                    orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(44), dp(8), dp(4), dp(8))
-                    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33FFFFFF), null,
-                        android.graphics.drawable.ColorDrawable(Color.WHITE))
+                val isNew = c.time > seen
+                val cardV = android.widget.LinearLayout(ctx).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(9), dp(12), dp(10))
+                    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33FFFFFF),
+                        android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(if (isNew) 0x220A84FF else 0x14FFFFFF) }, null)
                     setOnClickListener {
                         hideHistory()
                         chat(app?.first, app?.second ?: "Messages", c) { openChat?.invoke(c) }
                     }
                 }
-                val texts = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
-                texts.addView(android.widget.TextView(ctx).apply {
-                    text = c.title; textSize = 14f; setTextColor(Color.WHITE); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                val top = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                if (isNew) top.addView(View(ctx).apply {
+                    background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFF0A84FF.toInt()) }
+                }, android.widget.LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(7) })
+                top.addView(android.widget.TextView(ctx).apply {
+                    text = c.title.ifBlank { app?.second ?: "Notification" }; textSize = 14.5f; setTextColor(Color.WHITE); maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END; typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                top.addView(android.widget.TextView(ctx).apply { text = ago(c.time); textSize = 11.5f; setTextColor(0x80FFFFFF.toInt()); setPadding(dp(6), 0, 0, 0) })
+                cardV.addView(top)
+                // Latest messages (up to 3), each with who sent it when there are several people.
+                val showWho = c.messages.map { it.first }.filter { it.isNotBlank() }.toSet().size > 1
+                val shown = c.messages.takeLast(3)
+                val firstIdx = c.messages.size - shown.size
+                for ((i, pair) in shown.withIndex()) {
+                    val (who, msg) = pair
+                    val med = c.media.getOrNull(firstIdx + i)
+                    val body = when { msg.isNotBlank() -> msg; med != null -> "${med.emoji} ${med.label}"; else -> null } ?: continue
+                    cardV.addView(android.widget.TextView(ctx).apply {
+                        val prefix = if (showWho && who.isNotBlank()) "$who: " else ""
+                        text = android.text.SpannableStringBuilder(prefix + body).apply {
+                            if (prefix.isNotEmpty()) setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, prefix.length, 0)
+                        }
+                        textSize = 13.5f; setTextColor(0xD9FFFFFF.toInt()); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+                        setPadding(if (isNew) dp(15) else 0, dp(3), 0, 0)
+                    })
+                }
+                if (c.messages.size > 3) cardV.addView(android.widget.TextView(ctx).apply {
+                    text = "+${c.messages.size - 3} earlier · tap to see all"; textSize = 11.5f; setTextColor(0xFF0A84FF.toInt())
+                    setPadding(if (isNew) dp(15) else 0, dp(4), 0, 0)
                 })
-                val last = c.messages.lastOrNull()
-                val lm = c.media.lastOrNull()
-                texts.addView(android.widget.TextView(ctx).apply {
-                    text = when { !last?.second.isNullOrBlank() -> last!!.second; lm != null -> "${lm.emoji} ${lm.label}"; else -> "" }
-                    textSize = 12.5f; setTextColor(0x99FFFFFF.toInt()); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-                })
-                row.addView(texts, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(android.widget.TextView(ctx).apply { text = ago(c.time); textSize = 11f; setTextColor(0x80FFFFFF.toInt()); setPadding(dp(6), 0, 0, 0) })
-                list.addView(row)
+                list.addView(cardV, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
             }
-            list.addView(View(ctx).apply { setBackgroundColor(0x22FFFFFF) },
-                android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, maxOf(1, dp(1) / 2)).apply { topMargin = dp(6) })
         }
         scroll.addView(list)
         root.addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
-        // Counter: how many apps are in the history
-        root.addView(android.widget.TextView(ctx).apply {
-            val n = groups.size
-            text = if (n == 1) "1 app" else "$n apps"; textSize = 12f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER
-            setPadding(0, dp(10), 0, 0)
-        }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
         val histGrip = resizeGrip()
         root.addView(histGrip, gripLp())
 
@@ -780,21 +855,30 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             gravity = Gravity.CENTER
             // Island open at the top: start just under it instead of in the middle.
             if (topLimit() > 0) { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = topLimit() }
+            if (keepAt != null) { gravity = keepGravity; x = keepAt.first; y = keepAt.second }
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
-        histPanel = root
+        histPanel = root; histPanelLp = l; keepGravity = l.gravity
         dragBy(head, root, l)
-        resizeBy(histGrip, root, l, scroll, "hist", minW = dp(240))
-        root.alpha = 0f; root.scaleX = 0.85f; root.scaleY = 0.85f
-        root.animate().alpha(1f).setDuration(200).start()
-        Motion.scaleTo(root, 1f, Motion.BOUNCY)
-        root.postDelayed({ if (histPanel === root) hideHistory() }, 90_000)
+        resizeBy(histGrip, root, l, scroll, "hist", minW = dp(260))
+        if (keepAt == null) {
+            root.alpha = 0f; root.scaleX = 0.85f; root.scaleY = 0.85f
+            root.animate().alpha(1f).setDuration(200).start()
+            Motion.scaleTo(root, 1f, Motion.BOUNCY)
+        }
+        root.postDelayed({ if (histPanel === root) hideHistory() }, 120_000)
+        // Everything on screen now counts as seen (the blue dots go away next time).
+        settings.historySeen = System.currentTimeMillis()
     }
+    private var histPanelLp: WindowManager.LayoutParams? = null
+    private var histSeen = 0L
+    private var keepGravity = Gravity.CENTER
 
-    private fun hideHistory() {
+    private fun hideHistory(immediate: Boolean = false) {
         val p = histPanel ?: return
         histPanel = null
+        if (immediate) { runCatching { wm?.removeViewImmediate(p) }; return }
         view?.let { v -> if (v.kind == Kind.VOLUME) { v.removeCallbacks(backToRest); v.postDelayed(backToRest, 2200) } }
         p.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(170).withEndAction { runCatching { wm?.removeViewImmediate(p) } }.start()
     }

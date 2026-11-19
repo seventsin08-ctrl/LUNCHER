@@ -49,7 +49,7 @@ class NotificationService : NotificationListenerService() {
                 val arr = org.json.JSONArray()
                 for (c in chatHistory.values) {
                     val ms = org.json.JSONArray()
-                    for ((w, t) in c.messages.takeLast(12)) ms.put(org.json.JSONArray().put(w).put(t))
+                    for ((w, t) in c.messages.takeLast(30)) ms.put(org.json.JSONArray().put(w).put(t))
                     arr.put(org.json.JSONObject().put("pkg", c.pkg).put("title", c.title).put("time", c.time).put("m", ms))
                 }
                 java.io.File(ctx.filesDir, "chat_history.json").writeText(arr.toString())
@@ -58,9 +58,30 @@ class NotificationService : NotificationListenerService() {
 
         private fun remember(ctx: android.content.Context, pkg: String, chat: ChatInfo) {
             val key = pkg + "|" + chat.title
-            chatHistory.remove(key); chatHistory[key] = chat
-            while (chatHistory.size > 40) chatHistory.remove(chatHistory.keys.first())
+            val old = chatHistory.remove(key)
+            chatHistory[key] = if (old == null) chat else merge(old, chat)
+            while (chatHistory.size > 150) chatHistory.remove(chatHistory.keys.first())
         }
+
+        /**
+         * Keep every message of a conversation: a new notification often only carries the latest
+         * few, so add just the part that's new (where the old tail and the new head overlap).
+         */
+        private fun merge(old: ChatInfo, new: ChatInfo): ChatInfo {
+            val a = old.messages; val b = new.messages
+            var k = minOf(a.size, b.size)
+            while (k > 0 && a.takeLast(k) != b.take(k)) k--
+            // No overlap and the new list is just the old one again in a different shape: keep new.
+            val msgs = ArrayList(a); val media = ArrayList<ChatMedia?>()
+            for (i in a.indices) media += old.media.getOrNull(i)
+            for (i in k until b.size) { msgs += b[i]; media += new.media.getOrNull(i) }
+            val drop = (msgs.size - 40).coerceAtLeast(0)
+            return ChatInfo(new.pkg, new.title, msgs.drop(drop), new.open ?: old.open, new.time,
+                media.drop(drop), new.reply, new.replyInputs)
+        }
+
+        /** Forget everything (the Clear button in Message History). */
+        fun clearHistory(ctx: android.content.Context) { chatHistory.clear(); lastChat.clear(); saveHistory(ctx) }
         private val main = Handler(Looper.getMainLooper())
         /** Ongoing activities (navigation, clock, calls…) for the island, keyed by notification key. */
         val ongoing = LinkedHashMap<String, OngoingInfo>()
