@@ -266,7 +266,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         me = Card(chat.pkg, root, l).also { it.wantW = width }
         cards[chat.pkg] = me
         cardOf[root] = me
-        dragBy(head, root, l, onStart = { root.removeCallbacks(me.close) }, onEnd = { if (!me.holding) me.restartTimer(9000) })
+        dragBy(head, root, l, onStart = { root.removeCallbacks(me.close) }, onEnd = { if (!me.holding) me.restartTimer(9000); positionClips() })
         if (settings.sideReply && chat.reply != null) root.post { showClips() }
         resizeBy(chatGrip, root, l, scroll, "chat", minW = dp(220))
         me.restartTimer()
@@ -422,6 +422,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     val d = m.density
                     settings.setWinSize(key, (l.width / d).toInt(), (scroll.maxH / d).toInt())
                     cardOf[win]?.wantW = l.width
+                    positionClips()
                     grip.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                 }
             }
@@ -681,6 +682,15 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             text = "📋  CLIPBOARD"; textSize = 11f; setTextColor(0x99FFFFFF.toInt())
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(android.widget.TextView(ctx).apply {
+            text = "Clear"; textSize = 12f; setTextColor(0xFFFF453A.toInt()); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(8), dp(4), dp(10), dp(4))
+            setOnClickListener {
+                performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                for (t in Clips.list(act)) Clips.remove(act, t)
+                refreshClips()
+            }
+        })
         head.addView(circleButton("✕") { hideClips() }, android.widget.LinearLayout.LayoutParams(dp(22), dp(22)))
         root.addView(head)
         val scroll = android.widget.HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false }
@@ -696,15 +706,18 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = first.lp.gravity
-            // Where you last dragged it, or just above the chat window.
-            x = p.getInt("clip_x", first.lp.x)
-            y = p.getInt("clip_y", -1).takeIf { it >= 0 } ?: (first.lp.y - dp(96)).coerceAtLeast(maxOf(dp(30), topLimit()))
+            x = first.lp.x; y = (first.lp.y - dp(96)).coerceAtLeast(dp(24))
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
         clipPanel = root; clipLp = l
-        dragBy(head, root, l, onEnd = { p.edit().putInt("clip_x", l.x).putInt("clip_y", l.y).apply() })
+        // Dragging the strip remembers where it sits relative to the chat window.
+        dragBy(head, root, l, onEnd = {
+            val c = cards.values.firstOrNull() ?: return@dragBy
+            p.edit().putInt("clip_dx", l.x - c.lp.x).putInt("clip_dy", l.y - (c.lp.y - root.height - dp(8))).apply()
+        })
         refreshClips()
+        root.post { positionClips() }
         root.alpha = 0f; root.translationY = dp(12).toFloat()
         root.animate().alpha(1f).translationY(0f).setDuration(220).start()
     }
@@ -720,11 +733,27 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             })
             return
         }
-        for (t in items) row.addView(android.widget.TextView(act).apply {
-            text = if (t.length > 26) t.take(25) + "…" else t
-            textSize = 13f; setTextColor(Color.WHITE); maxLines = 1
-            setPadding(dp(12), dp(7), dp(12), dp(7))
+        for (t in items) row.addView(android.widget.LinearLayout(act).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, dp(4), 0)
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(0x2EFFFFFF) }
+            addView(android.widget.TextView(act).apply {
+                text = if (t.length > 22) t.take(21) + "…" else t
+                textSize = 13f; setTextColor(Color.WHITE); maxLines = 1
+                setPadding(0, dp(7), dp(6), dp(7))
+            })
+            // ✕ on every item: delete it from the clipboard strip.
+            addView(android.widget.TextView(act).apply {
+                text = "✕"; textSize = 11f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
+                contentDescription = "Delete"
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x33FFFFFF)
+                }
+                setOnClickListener {
+                    performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    Clips.remove(act, t); refreshClips()
+                }
+            }, android.widget.LinearLayout.LayoutParams(dp(22), dp(22)))
             setOnClickListener {
                 performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                 val target = activeInput ?: cards.values.firstNotNullOfOrNull { c ->
@@ -740,6 +769,20 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             }
         }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) })
+    }
+
+    /** Keep the strip lined up with the chat window: same edge, same width, just above it. */
+    private fun positionClips() {
+        val panel = clipPanel ?: return
+        val l = clipLp ?: return
+        val c = cards.values.firstOrNull() ?: return
+        val p = act.getSharedPreferences("luncher", android.content.Context.MODE_PRIVATE)
+        val h = if (panel.height > 0) panel.height else dp(84)
+        l.gravity = c.lp.gravity
+        l.width = c.lp.width
+        l.x = c.lp.x + p.getInt("clip_dx", 0)
+        l.y = (c.lp.y - h - dp(8) + p.getInt("clip_dy", 0)).coerceAtLeast(dp(24))
+        runCatching { wm?.updateViewLayout(panel, l) }
     }
 
     private fun hideClips() {
