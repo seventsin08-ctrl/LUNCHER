@@ -703,7 +703,7 @@ class SettingsActivity : Activity() {
         // ---------------- Island tools bar (shown when nothing is playing)
         val tools = section("ISLAND TOOLS")
         toggle(tools, "Tools Bar", "Always on screen — on the Home Screen and over every app: " +
-            "Flashlight, Brightness, Silent, Game Mode, Lock Screen and Settings", s.islandTools) {
+            "Flashlight, Brightness, Camera, Silent, Game Mode, Lock Screen and Settings", s.islandTools) {
             s.islandTools = it; runCatching { SidebarService.sync(this) }; rebuild()
         }
         if (s.islandTools) {

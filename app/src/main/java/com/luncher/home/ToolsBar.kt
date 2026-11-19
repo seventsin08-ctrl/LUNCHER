@@ -114,6 +114,14 @@ class ToolsBar(private val ctx: Context) {
         return listOf(
             Tool(R.drawable.ic_cc_flashlight, "Flashlight", { torchOn }) { setTorch(!torchOn) },
             Tool(R.drawable.ic_cc_sun, "Brightness", { false }) { cycleBrightness() },
+            Tool(R.drawable.ic_cc_camera, "Camera", { false }) {
+                val ok = runCatching {
+                    ctx.startActivity(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.isSuccess || runCatching {
+                    ctx.startActivity(Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.isSuccess
+                if (!ok) toast("No camera app found")
+            },
             Tool(R.drawable.ic_cc_bell_off, "Silent", { am.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL }) {
                 runCatching {
                     am.ringerMode = if (am.ringerMode == android.media.AudioManager.RINGER_MODE_NORMAL)
