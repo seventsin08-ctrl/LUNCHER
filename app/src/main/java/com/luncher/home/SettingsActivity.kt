@@ -48,7 +48,7 @@ class SettingsActivity : Activity() {
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
         Category("phone", "Phone & Connections", 0xFF30D158.toInt(), R.drawable.ic_cc_wifi, listOf("PHONE & CONNECTIVITY", "CONNECTIONS")),
         Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
-        Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "HELLO"))
+        Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "RESET"))
     )
     private val groups = listOf(listOf("look", "home", "island", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
     /** null = the Settings home page. */
@@ -572,14 +572,21 @@ class SettingsActivity : Activity() {
             info(side, "Tip: tap or swipe the handle inward to open. Long-press the handle and drag to move it up or down.")
         }
 
-        // ---------------- Hello screen
-        val hello = section("HELLO")
-        button(hello, "Play “hello” Screen", 0xFF0A84FF.toInt()) {
-            startActivity(Intent(this, MainActivity::class.java).putExtra("hello", true)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-        }
-        toggle(hello, "Show “hello” After Unlocking", "The welcome animation plays each time you unlock", s.helloOnUnlock) {
-            s.helloOnUnlock = it
+        // ---------------- Reset (starts again with the "hello" setup screen)
+        val hello = section("RESET")
+        info(hello, "Reset puts the launcher back to how it was when you first installed it: layout, folders, widgets, " +
+            "island, theme and every setting. It starts again with the “hello” screen. Export your setup first if you want to keep it.")
+        button(hello, "Reset Launcher…", 0xFFFF453A.toInt()) {
+            android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
+                .setTitle("Reset Apple Launcher?")
+                .setMessage("Everything goes back to the start. This can't be undone.")
+                .setPositiveButton("Reset") { _, _ ->
+                    getSharedPreferences("luncher", MODE_PRIVATE).edit().clear().commit()
+                    java.io.File(filesDir, "restored").deleteRecursively()
+                    restartLauncher()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
 
         // ---------------- Backup & transfer (like moving to a new iPhone)

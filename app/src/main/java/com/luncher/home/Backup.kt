@@ -18,7 +18,8 @@ import java.util.zip.ZipOutputStream
 object Backup {
     private const val PREFS = "luncher"
     /** Temporary state that shouldn't move to another phone. */
-    private val skip = setOf("clip_stamp", "timer_end", "timer_total", "s_version", "asked_bt_permission")
+    private val skip = setOf("clip_stamp", "timer_end", "timer_total", "s_version", "asked_bt_permission",
+        "hello_done", "hello_seen_version")
 
     class Result(val ok: Boolean, val message: String)
 
@@ -99,6 +100,7 @@ object Backup {
         }
         val ed = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear()
         for (k in values.keys()) {
+            if (k in skip) continue
             val o = values.getJSONObject(k)
             when (o.getString("t")) {
                 "s" -> ed.putString(k, restoredMedia[k] ?: o.getString("v"))

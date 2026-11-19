@@ -228,7 +228,6 @@ class MainActivity : Activity() {
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             if (isActive || hasWindowFocus()) playUnlockZoom()
-            if (settings.helloOnUnlock) showHello()
         }
     }
 
@@ -384,10 +383,11 @@ class MainActivity : Activity() {
         setupSidebar()
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
         ContextCompat.registerReceiver(this, ringerReceiver, IntentFilter(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION), ContextCompat.RECEIVER_EXPORTED)
-        // "hello" on the first start after installing or updating, or when asked from Settings.
-        val ver = runCatching { androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0)) }.getOrDefault(0L)
-        if (intent?.getBooleanExtra("hello", false) == true || prefs.getLong("hello_seen_version", 0L) != ver) {
-            prefs.edit().putLong("hello_seen_version", ver).apply()
+        // "hello" only when the launcher is set up fresh: first install, or after a reset / imported setup.
+        // (Anyone who already saw it in an earlier version counts as set up.)
+        val fresh = !prefs.getBoolean("hello_done", false) && !prefs.contains("hello_seen_version")
+        if (fresh) {
+            prefs.edit().putBoolean("hello_done", true).apply()
             root.postDelayed({ showHello() }, 300)
         }
         registerReceivers()
@@ -465,7 +465,6 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra("hello", false)) { showHello(); return }
         goHome()
     }
 
