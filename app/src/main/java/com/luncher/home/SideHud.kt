@@ -84,7 +84,6 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         size(Kind.REST)
         v.growTo(1f)
     }
-    }
 
     fun volume(level: Float) = show(Kind.VOLUME) { it.glideLevel(level) }
 
