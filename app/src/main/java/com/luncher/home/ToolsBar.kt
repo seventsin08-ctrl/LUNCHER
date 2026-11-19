@@ -84,12 +84,15 @@ class ToolsBar(private val ctx: Context) {
         }
         if (runCatching { w.addView(r, l) }.isFailure) return
         wm = w; root = r; lp = l; current = this
+        push = 0; yielding = false
+        OverlayZones.listen(zoneFit)
         runCatching { ctx.getSystemService(android.hardware.camera2.CameraManager::class.java)?.registerTorchCallback(torchCb, main) }
         rebuild(animateIn = true)
     }
 
     fun detach() {
         if (current === this) current = null
+        OverlayZones.unlisten(zoneFit)
         runCatching { ctx.getSystemService(android.hardware.camera2.CameraManager::class.java)?.unregisterTorchCallback(torchCb) }
         root?.let { r -> runCatching { wm?.removeViewImmediate(r) } }
         root = null; lp = null
@@ -98,11 +101,61 @@ class ToolsBar(private val ctx: Context) {
     /** Fades away while the launcher's Search is open, and comes back after. */
     fun setSearching(on: Boolean) {
         searching = on
+        applyVisibility()
+    }
+
+    // ---------------------------------------------------------------- never covering anything
+    private var yielding = false          // something else needs this spot right now
+    private var push = 0                  // moved down to clear the open island
+    private val zoneFit: () -> Unit = { main.post { fitZones() } }
+
+    /**
+     * Steps aside for the other floating pieces: hides while the Sidebar or the open side
+     * island would overlap it, and slides down below the Dynamic Island while it's open.
+     */
+    private fun fitZones() {
         val r = root ?: return
+        val l = lp ?: return
+        if (r.width == 0) { r.post { fitZones() }; return }
+        val loc = IntArray(2); r.getLocationOnScreen(loc)
+        // Use where it normally sits (without the island push) to decide.
+        val me = android.graphics.Rect(loc[0], loc[1] - push, loc[0] + r.width, loc[1] - push + r.height)
+        val sw = ctx.resources.displayMetrics.widthPixels
+        var hide = false
+        val sb = OverlayZones.sidebarWidth
+        if (sb > 0) {
+            val zone = if (OverlayZones.sidebarRight) android.graphics.Rect(sw - sb, 0, sw, Int.MAX_VALUE / 2)
+                else android.graphics.Rect(0, 0, sb, Int.MAX_VALUE / 2)
+            if (android.graphics.Rect.intersects(zone, me)) hide = true
+        }
+        OverlayZones.sideHud?.let { if (android.graphics.Rect.intersects(it, me)) hide = true }
+        if (hide != yielding) { yielding = hide; applyVisibility() }
+        // Below the open island (it comes back up when the island folds).
+        val ib = OverlayZones.islandBottom
+        val want = if (ib > 0 && me.top < ib + dp(8) && me.bottom > 0) ib + dp(8) - me.top else 0
+        if (want != push) {
+            val from = push; push = want
+            android.animation.ValueAnimator.ofInt(from, want).apply {
+                duration = 280; interpolator = android.view.animation.DecelerateInterpolator(1.6f)
+                var last = from
+                addUpdateListener { a ->
+                    val v = a.animatedValue as Int
+                    l.y += v - last; last = v
+                    runCatching { wm?.updateViewLayout(root, l) }
+                }
+                start()
+            }
+        }
+    }
+
+    private fun applyVisibility() {
+        val r = root ?: return
+        val off = searching || yielding
         r.animate().cancel()
-        r.animate().alpha(if (on) 0f else 1f).setDuration(if (on) 160 else 260).start()
+        r.animate().alpha(if (off) 0f else 1f).scaleX(if (off) 0.85f else 1f).scaleY(if (off) 0.85f else 1f)
+            .setDuration(if (off) 160 else 260).start()
         lp?.let { l ->
-            l.flags = if (on) l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else l.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            l.flags = if (off) l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else l.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
             runCatching { wm?.updateViewLayout(r, l) }
         }
     }
@@ -251,8 +304,9 @@ class ToolsBar(private val ctx: Context) {
         frame.addView(bar, FrameLayout.LayoutParams(barW, h, Gravity.CENTER))
         bar.rotation = settings.toolsAngle.toFloat()
         r.addView(frame, FrameLayout.LayoutParams(bw, bh))
-        r.alpha = if (searching) 0f else 1f
+        r.alpha = if (searching || yielding) 0f else 1f
         runCatching { wm?.updateViewLayout(r, l) }
+        r.post { fitZones() }
         if (animateIn) {
             // The tab morphs: a little spin as it turns into ✕ (or back into the arrow).
             bar.rotation = settings.toolsAngle - 90f
@@ -354,10 +408,11 @@ class ToolsBar(private val ctx: Context) {
         val frame = DragFrame().apply { clipChildren = false }
         frame.addView(fan, FrameLayout.LayoutParams(W, H))
         r.addView(frame, FrameLayout.LayoutParams(W, H))
-        r.alpha = if (searching) 0f else 1f
+        r.alpha = if (searching || yielding) 0f else 1f
         l.x = -disc
         l.y = l.y.coerceIn(-disc / 2, ctx.resources.displayMetrics.heightPixels - H + disc / 2)
         runCatching { wm?.updateViewLayout(r, l) }
+        r.post { fitZones() }
         if (animateIn) {
             val style = settings.toolsAnim
             fan.pivotX = disc.toFloat(); fan.pivotY = disc.toFloat()
@@ -484,7 +539,7 @@ class ToolsBar(private val ctx: Context) {
                         val left = cx - wv / 2; val rightEdge = cx + wv / 2
                         val newEdge = when { left < 0 -> "left"; rightEdge > sw -> "right"; else -> "none" }
                         if (newEdge == "none") settings.toolsDx = ((cx - sw / 2) / d).roundToInt()
-                        settings.toolsDy = ((l.y - dp(64)) / d).roundToInt()
+                        settings.toolsDy = ((l.y - push - dp(64)) / d).roundToInt()
                         val changed = newEdge != settings.toolsEdge
                         settings.toolsEdge = newEdge
                         performHapticFeedback(HapticFeedbackConstants.CONFIRM)

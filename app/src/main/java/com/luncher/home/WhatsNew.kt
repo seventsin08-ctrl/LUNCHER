@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        86 to listOf("Tools bar never covers anything: it steps aside for the Sidebar and the open side island, and slides below the open Dynamic Island"),
         85 to listOf("What's New: every update's changes show once after updating (and any time in Settings › General)",
             "The “hello” screen plays once after every update"),
         84 to listOf("📷 Camera in the tools bar"),

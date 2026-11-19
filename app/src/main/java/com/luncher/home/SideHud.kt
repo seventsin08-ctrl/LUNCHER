@@ -588,6 +588,13 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         // Grow/shrink the height around the same centre (taller only for volume + recent apps).
         val newH = if (kind == Kind.VOLUME) maxOf(dp(HALF * 2), v.shapeHeight() + dp(24)) else dp(HALF * 2)
         if (newH != l.height) { val c = l.y + l.height / 2; l.height = newH; l.y = c - newH / 2 }
+        // Tell the tools bar where the open side island is, so it can step out of the way.
+        if (!preview) {
+            val sw = act.resources.displayMetrics.widthPixels
+            OverlayZones.setSideHud(if (kind == Kind.REST) null
+                else if (isRight) android.graphics.Rect(sw - l.width, l.y, sw, l.y + l.height)
+                else android.graphics.Rect(0, l.y, l.width, l.y + l.height))
+        }
         v.post { avoidZones() }
         l.flags = if (kind == Kind.STATUS) l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             else l.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
@@ -944,6 +951,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
 
     fun dismiss() {
         OverlayZones.unlisten(zoneFit); zoneAnim?.cancel()
+        if (!preview) OverlayZones.setSideHud(null)
         runCatching { histPanel?.let { wm?.removeViewImmediate(it) } }; histPanel = null
         hideAllCards(immediate = true)
         val v = view ?: return

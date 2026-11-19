@@ -19,6 +19,11 @@ object OverlayZones {
     fun unlisten(fn: () -> Unit) { listeners -= fn }
     private fun fire() { for (l in listeners.toList()) runCatching { l() } }
 
+    /** Screen area of the open side island (null while it's just the resting sliver). */
+    var sideHud: android.graphics.Rect? = null
+        private set
+    fun setSideHud(r: android.graphics.Rect?) { if (r != sideHud) { sideHud = r; fire() } }
+
     fun setIsland(bottom: Int) { if (bottom != islandBottom) { islandBottom = bottom; fire() } }
     fun setSidebar(width: Int, right: Boolean) {
         if (width != sidebarWidth || right != sidebarRight) { sidebarWidth = width; sidebarRight = right; fire() }
