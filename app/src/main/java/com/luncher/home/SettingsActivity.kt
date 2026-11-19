@@ -577,6 +577,22 @@ class SettingsActivity : Activity() {
             s.sideMedia) { s.sideMedia = it }
         toggle(chatSec, "Chat Button in Side Island", "Under the volume slider: the latest app's logo and a red count — " +
             "tap it for Message History (every app's chats under its logo), tap a chat to open its window", s.sideHistory) { s.sideHistory = it }
+        button(chatSec, "Open Message History", 0xFF0A84FF.toInt()) {
+            NotificationService.loadHistory(this)
+            ThemeEngine.resolve(this, s)
+            val p = sidePreview ?: SideHud(this, s, preview = true).also { sidePreview = it }
+            p.historyProvider = { NotificationService.chatHistory.values.toList() }
+            p.appLookup = { pkg -> runCatching {
+                val pm = packageManager
+                val d = pm.getApplicationIcon(pkg)
+                val b = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
+                val cv = android.graphics.Canvas(b); d.setBounds(0, 0, 96, 96); d.draw(cv)
+                b to pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+            }.getOrNull() }
+            p.openChat = { c -> packageManager.getLaunchIntentForPackage(c.pkg)?.let { runCatching { startActivity(it) } } }
+            p.openHistory()
+        }
+        info(chatSec, "On the Home Screen or in any app: tap the side island's sliver, then the app logo under the volume slider.")
         toggle(chatSec, "Reply Box", "Answer from the chat window — works with any app that has Reply in its notifications " +
             "(Messenger, WhatsApp, Telegram, Instagram, SMS, Discord…)", s.sideReply) { s.sideReply = it }
 

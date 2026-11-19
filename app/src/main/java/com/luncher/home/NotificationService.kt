@@ -22,6 +22,45 @@ class NotificationService : NotificationListenerService() {
         val lastChat = HashMap<String, ChatInfo>()
         /** Recent conversations from every app, newest last (for the side island's history). */
         val chatHistory = LinkedHashMap<String, ChatInfo>()
+        private var loaded = false
+
+        /** Bring back the saved history (after a restart). */
+        fun loadHistory(ctx: android.content.Context) {
+            if (loaded) return
+            loaded = true
+            runCatching {
+                val f = java.io.File(ctx.filesDir, "chat_history.json")
+                if (!f.exists()) return
+                val arr = org.json.JSONArray(f.readText())
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val ms = o.getJSONArray("m")
+                    val msgs = (0 until ms.length()).map { ms.getJSONArray(it).let { p -> p.getString(0) to p.getString(1) } }
+                    val c = ChatInfo(o.getString("pkg"), o.getString("title"), msgs, null, o.getLong("time"))
+                    val key = c.pkg + "|" + c.title
+                    if (!chatHistory.containsKey(key)) chatHistory[key] = c
+                }
+            }
+        }
+
+        /** Save the history (text only) so it survives restarts. */
+        fun saveHistory(ctx: android.content.Context) {
+            runCatching {
+                val arr = org.json.JSONArray()
+                for (c in chatHistory.values) {
+                    val ms = org.json.JSONArray()
+                    for ((w, t) in c.messages.takeLast(12)) ms.put(org.json.JSONArray().put(w).put(t))
+                    arr.put(org.json.JSONObject().put("pkg", c.pkg).put("title", c.title).put("time", c.time).put("m", ms))
+                }
+                java.io.File(ctx.filesDir, "chat_history.json").writeText(arr.toString())
+            }
+        }
+
+        private fun remember(ctx: android.content.Context, pkg: String, chat: ChatInfo) {
+            val key = pkg + "|" + chat.title
+            chatHistory.remove(key); chatHistory[key] = chat
+            while (chatHistory.size > 40) chatHistory.remove(chatHistory.keys.first())
+        }
         private val main = Handler(Looper.getMainLooper())
         /** Ongoing activities (navigation, clock, calls…) for the island, keyed by notification key. */
         val ongoing = LinkedHashMap<String, OngoingInfo>()
@@ -42,6 +81,23 @@ class NotificationService : NotificationListenerService() {
         main.post { runCatching { HeadsetPopup.get(applicationContext) } }
         recount()
         runCatching { activeNotifications }.getOrNull()?.forEach { track(it) }
+        // Fill Message History from the chats already in your notifications.
+        val existing = runCatching { activeNotifications }.getOrNull().orEmpty()
+            .filter { it.packageName != packageName && !it.isOngoing && it.isClearable &&
+                it.notification.flags and Notification.FLAG_GROUP_SUMMARY == 0 }
+            .sortedBy { it.postTime }
+        val chats = existing.mapNotNull { sbn ->
+            val ex = sbn.notification.extras
+            val title = ex?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+            val text = ex?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+            if (title.isBlank() && text.isBlank()) null
+            else runCatching { readChat(sbn, title, text) }.getOrNull()?.let { sbn.packageName to it }
+        }
+        main.post {
+            loadHistory(this)
+            for ((pkg, c) in chats) { lastChat[pkg] = c; remember(this, pkg, c) }
+            saveHistory(this)
+        }
     }
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         recount()
@@ -56,9 +112,8 @@ class NotificationService : NotificationListenerService() {
         main.post {
             if (chat != null) {
                 lastChat[sbn.packageName] = chat
-                val key = sbn.packageName + "|" + chat.title
-                chatHistory.remove(key); chatHistory[key] = chat
-                while (chatHistory.size > 25) chatHistory.remove(chatHistory.keys.first())
+                remember(this, sbn.packageName, chat)
+                saveHistory(this)
             }
             onPosted?.invoke(sbn.packageName, title, text)
         }

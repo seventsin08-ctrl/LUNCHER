@@ -382,6 +382,7 @@ class MainActivity : Activity() {
         sideHud = SideHud(this, settings)
         sideHud.onPlayPause = { togglePlay() }
         sideHud.onMoved = { setupSidebar() }
+        NotificationService.loadHistory(this)
         sideHud.historyProvider = { NotificationService.chatHistory.values.toList() }
         sideHud.appLookup = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } }
         sideHud.openChat = { c ->

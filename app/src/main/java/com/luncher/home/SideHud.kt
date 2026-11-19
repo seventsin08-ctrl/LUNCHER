@@ -505,6 +505,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     /** Called for every new message so the chat button's red number stays right. */
     fun countNew() { unread++; view?.invalidate() }
 
+    /** Open Message History from anywhere (e.g. Settings). */
+    fun openHistory() { if (view == null) rest(); showHistory() }
+
     private fun toggleHistory() {
         if (histPanel != null) hideHistory()
         else { view?.removeCallbacks(backToRest); showHistory() }
