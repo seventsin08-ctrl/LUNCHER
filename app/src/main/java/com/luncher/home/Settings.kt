@@ -298,6 +298,10 @@ class Settings(ctx: Context) {
     var toolsEdge: String
         get() = p.getString("s_tools_edge", "none") ?: "none"
         set(v) { p.edit().putString("s_tools_edge", v).apply() }
+    /** How the tools circle opens: "blossom", "ripple", "spin" or "fade". */
+    var toolsAnim: String
+        get() = p.getString("s_tools_anim", "ripple") ?: "ripple"
+        set(v) = put("s_tools_anim", v)
     /** Tools bar folded into its small arrow tab. Saved without refreshing. */
     var toolsCollapsed: Boolean
         get() = p.getBoolean("s_tools_collapsed", false)

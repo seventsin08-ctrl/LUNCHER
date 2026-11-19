@@ -715,12 +715,14 @@ class SettingsActivity : Activity() {
             segment(tools, "Shape", listOf("pill" to "Pill", "rounded" to "Rounded", "square" to "Square", "leaf" to "Leaf"),
                 s.toolsShape) { s.toolsShape = it }
             slider(tools, "Angle", -30, 30, s.toolsAngle, { "$it°" }) { s.toolsAngle = it }
+            segment(tools, "Opening Animation", listOf("ripple" to "Ripple", "blossom" to "Blossom", "spin" to "Spin", "fade" to "Fade"),
+                s.toolsAnim) { s.toolsAnim = it }
             button(tools, "Reset Position", 0xFF0A84FF.toInt()) {
                 s.toolsDx = 0; s.toolsDy = 0
                 s.toolsScale = s.toolsScale // nudges the launcher to re-apply the look
                 android.widget.Toast.makeText(this, "The tools bar is back at the top", android.widget.Toast.LENGTH_SHORT).show()
             }
-            info(tools, "It never hides by itself. Tap its arrow ⌃ to fold it into a small tab, and ⌄ to open it again. " +
+            info(tools, "Push it past a side of the screen (even a little) and it becomes a half circle on that edge. It never hides by itself. Tap its arrow ⌃ to fold it into a small tab, and ⌄ to open it again. " +
                 "Move it: hold the bar for a moment, then drag it anywhere on the screen.")
         }
 

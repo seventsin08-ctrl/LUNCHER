@@ -351,8 +351,22 @@ class ToolsBar(private val ctx: Context) {
         l.y = l.y.coerceIn(-disc / 2, ctx.resources.displayMetrics.heightPixels - H + disc / 2)
         runCatching { wm?.updateViewLayout(r, l) }
         if (animateIn) {
-            // Blossom: the circle grows out of the edge, then the tools fly out of the ✕ one by one.
+            val style = settings.toolsAnim
             fan.pivotX = disc.toFloat(); fan.pivotY = disc.toFloat()
+            if (style == "ripple") {
+                // Circles ripple out from the edge; each tool pops in as the wave reaches it.
+                val rings = RippleRings(disc, iconCol)
+                fan.addView(rings, 0, FrameLayout.LayoutParams(W, H))
+                rings.play()
+            }
+            if (style == "spin") { fan.rotation = -160f * inward; fan.animate().rotation(0f).setDuration(520)
+                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start() }
+            if (style == "fade") {
+                fan.alpha = 0f; fan.scaleX = 0.92f; fan.scaleY = 0.92f
+                fan.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(320).start()
+                return
+            }
+            // The circle grows out of the edge, then the tools fly out of the ✕ one by one.
             fan.scaleX = 0.2f; fan.scaleY = 0.2f; fan.alpha = 0f
             fan.animate().alpha(1f).setDuration(180).start()
             Motion.spring(fan, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_X, 1f, Motion.Spec(380f, 0.8f))
@@ -364,11 +378,42 @@ class ToolsBar(private val ctx: Context) {
                 v.translationX = d[0]; v.translationY = d[1]
                 v.scaleX = 0.2f; v.scaleY = 0.2f; v.alpha = 0f
                 v.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f)
-                    .setStartDelay(90L + idx * 40L).setDuration(420)
+                    .setStartDelay((if (style == "ripple") 160L + idx * 45L else 90L + idx * 40L))
+                    .setDuration(if (style == "spin") 520 else 420)
                     .setInterpolator(android.view.animation.PathInterpolator(0.25f, 1.35f, 0.4f, 1f)).start()
             }
         }
     }
+
+    /** Expanding rings for the "Ripple" opening. */
+    private inner class RippleRings(private val maxR: Int, private val color: Int) : View(ctx) {
+        private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE; strokeWidth = dp(2).toFloat()
+        }
+        private var t = 0f
+        fun play() {
+            android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 900; interpolator = android.view.animation.DecelerateInterpolator(1.4f)
+                addUpdateListener { t = it.animatedValue as Float; invalidate() }
+                doOnEndCompat { (parent as? android.view.ViewGroup)?.removeView(this@RippleRings) }
+                start()
+            }
+        }
+        override fun onDraw(c: android.graphics.Canvas) {
+            for (i in 0 until 3) {
+                val k = (t * 1.35f - i * 0.18f).coerceIn(0f, 1f)
+                if (k <= 0f) continue
+                p.color = color
+                p.alpha = ((1f - k) * 200).toInt()
+                c.drawCircle(width / 2f, height / 2f, maxR * k, p)
+            }
+        }
+    }
+
+    private fun android.animation.ValueAnimator.doOnEndCompat(fn: () -> Unit) =
+        addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) = fn()
+        })
 
     /** Tools fly back into the centre, then [done]. */
     private fun foldEdge(fan: FrameLayout, done: () -> Unit) {
@@ -427,7 +472,9 @@ class ToolsBar(private val ctx: Context) {
                             (l.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT -> sw - l.x - wv / 2
                             else -> sw / 2 + l.x
                         }
-                        val newEdge = when { cx < dp(90) -> "left"; cx > sw - dp(90) -> "right"; else -> "none" }
+                        // Even a little of it past a side (10%… half) → it becomes the circle on that edge.
+                        val left = cx - wv / 2; val rightEdge = cx + wv / 2
+                        val newEdge = when { left < 0 -> "left"; rightEdge > sw -> "right"; else -> "none" }
                         if (newEdge == "none") settings.toolsDx = ((cx - sw / 2) / d).roundToInt()
                         settings.toolsDy = ((l.y - dp(64)) / d).roundToInt()
                         val changed = newEdge != settings.toolsEdge
