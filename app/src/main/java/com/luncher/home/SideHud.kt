@@ -150,9 +150,8 @@ class SideHud(private val act: Activity, private val settings: Settings) {
         var grown = 0f
         private var spring: SpringAnimation? = null
         private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
-        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = maxOf(1f, dp(1) * 0.8f); color = Color.WHITE
-        }
+        private val restPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var restShaderTop = -1f
         private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3A3A3C.toInt() }
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF2F2F7.toInt() }
         private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -204,13 +203,20 @@ class SideHud(private val act: Activity, private val settings: Settings) {
             val a = ((grown - 0.4f) / 0.6f).coerceIn(0f, 1f)
             when (kind) {
                 Kind.REST -> {
-                    // A slim liquid sliver hugging the edge, with a faint rim so it reads on dark wallpapers.
-                    val h = dp(70).toFloat()
+                    // Resting: a soft black sliver hugging the edge like the phone's bezel,
+                    // fading out at both ends — no corners, no outline.
+                    val h = dp(120).toFloat()
                     val top = (height - h) / 2f
-                    shape(dp(5) * grown, top, top + h, dp(8).toFloat())
-                    c.drawPath(path, black)
-                    rim.alpha = (60 * grown).toInt().coerceIn(0, 60)
-                    c.drawPath(path, rim)
+                    val w = dp(4) * grown
+                    if (restShaderTop != top) {
+                        restShaderTop = top
+                        restPaint.shader = android.graphics.LinearGradient(0f, top, 0f, top + h,
+                            intArrayOf(0x00000000, 0xFF000000.toInt(), 0xFF000000.toInt(), 0x00000000),
+                            floatArrayOf(0f, 0.3f, 0.7f, 1f), android.graphics.Shader.TileMode.CLAMP)
+                    }
+                    restPaint.alpha = (230 * grown).toInt().coerceIn(0, 230)
+                    r.set(-w, top, w, top + h)
+                    c.drawRoundRect(r, w, w * 6f, restPaint)
                 }
                 Kind.VOLUME -> {
                     val bodyW = dp(58) * grown
