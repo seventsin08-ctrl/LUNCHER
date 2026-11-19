@@ -1,6 +1,8 @@
 package com.luncher.home
 
 import android.app.Activity
+import android.os.Build
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -104,7 +106,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
      */
     fun chat(icon: Bitmap?, appLabel: String, chat: ChatInfo, open: () -> Unit) {
         hideHistory()
-        hideHistoryButton()
+        hideHistoryButton(keep = true)
         lastIcon = icon
         hadChat = true
         message(icon, chat.title, chat.messages.lastOrNull()?.second ?: "", open)
@@ -447,6 +449,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     private fun show(kind: Kind, fill: (HudView) -> Unit) {
+        // The chat button is separate: it tucks away while volume / status / messages show.
+        if (histBtn != null) { hideHistory(); hideHistoryButton(keep = true) }
         val v = view ?: create() ?: return
         val wasRest = v.kind == Kind.REST
         if (kind != Kind.MESSAGE) hideCard()
@@ -503,12 +507,13 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private fun retract() {
         hideCard()
         // After a chat closes (or you swipe it away), leave the little history button on the edge.
-        if (hadChat && settings.sideHistory) { hadChat = false; view?.postDelayed({ showHistoryButton() }, 350) }
+        if (hadChat && settings.sideHistory) { hadChat = false; histWanted = true }
         val v = view ?: return
         onOpen = null
         v.growTo(0f) {
             if (view !== v) return@growTo
             if (settings.sideHud && settings.sideRest) { v.kind = Kind.REST; size(Kind.REST); v.growTo(1f) }
+            if (histWanted && histBtn == null) v.postDelayed({ if (v.kind == Kind.REST) showHistoryButton() }, 300)
             else dismiss()
         }
     }
@@ -537,66 +542,126 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     fun countNew() { unread++ }
 
     /** Small round button (latest app's logo + red count) resting under the side island. */
+    /** The chat button wants to be shown (a chat closed and you didn't swipe it away). */
+    private var histWanted = false
+
+    /**
+     * The chat button: its own little liquid bump on the edge (separate from the volume / status
+     * shape), with the latest app's logo and a red count. Tap for Recent Chats, swipe into the edge to hide.
+     */
     fun showHistoryButton() {
         if (!settings.sideHistory) return
         val hudLp = lp ?: return
         val w = wm ?: return
-        hideHistoryButton()
+        histWanted = true
+        // Only while the side island is resting — never on top of the volume slider or a message.
+        if (view?.kind != null && view?.kind != Kind.REST) return
+        hideHistoryButton(keep = true, immediate = true)
         val ctx = act
-        val size = dp(46)
-        val btn = FrameLayout(ctx).apply {
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(bodyColor()); setStroke(maxOf(1, dp(1)), 0x33FFFFFF)
-            }
-            elevation = dp(8).toFloat()
-        }
-        btn.addView(android.widget.ImageView(ctx).apply {
+        val bubble = LiquidBubble(ctx)
+        val icon = android.widget.ImageView(ctx).apply {
             val ic = lastIcon
             if (ic != null) setImageBitmap(ic) else { setImageResource(R.drawable.ic_cc_notes); setColorFilter(Color.WHITE) }
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setOval(0, 0, view.width, view.height)
             }
             clipToOutline = true
-        }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
-        if (unread > 0) btn.addView(android.widget.TextView(ctx).apply {
-            text = if (unread > 9) "9+" else "$unread"; textSize = 10f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+        }
+        val box = FrameLayout(ctx)
+        box.addView(icon, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
+        if (unread > 0) box.addView(android.widget.TextView(ctx).apply {
+            text = if (unread > 9) "9+" else "$unread"; textSize = 9.5f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFFFF3B30.toInt()) }
-        }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.TOP or Gravity.END))
+        }, FrameLayout.LayoutParams(dp(17), dp(17), Gravity.TOP or Gravity.END))
+        bubble.addView(box, FrameLayout.LayoutParams(dp(42), dp(42), (if (isRight) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL)
+            .apply { if (isRight) rightMargin = dp(6) else leftMargin = dp(6) })
         var downX = 0f
-        btn.setOnTouchListener { v, e ->
+        bubble.setOnTouchListener { _, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downX = e.rawX; v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).start() }
+                MotionEvent.ACTION_DOWN -> { downX = e.rawX; box.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).start() }
                 MotionEvent.ACTION_UP -> {
-                    Motion.scaleTo(v, 1f, Motion.BOUNCY)
+                    Motion.scaleTo(box, 1f, Motion.BOUNCY)
                     val dx = e.rawX - downX
                     // Swipe it into the edge to put it away until the next message.
-                    if (if (isRight) dx > dp(24) else dx < -dp(24)) { unread = 0; hideHistoryButton() }
-                    else { v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); toggleHistory() }
+                    if (if (isRight) dx > dp(20) else dx < -dp(20)) { unread = 0; histWanted = false; hideHistory(); hideHistoryButton() }
+                    else { bubble.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); toggleHistory() }
                 }
-                MotionEvent.ACTION_CANCEL -> Motion.scaleTo(v, 1f, Motion.BOUNCY)
+                MotionEvent.ACTION_CANCEL -> Motion.scaleTo(box, 1f, Motion.BOUNCY)
             }
             true
         }
-        val l = WindowManager.LayoutParams(size + dp(8), size + dp(8), hudLp.type,
+        val l = WindowManager.LayoutParams(dp(60), dp(96), hudLp.type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-            x = dp(4); y = hudLp.y + dp(125) + dp(58)
+            x = 0; y = hudLp.y + dp(125) + dp(62)
             token = hudLp.token
+            if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
-        val holder = FrameLayout(ctx).apply { clipChildren = false; addView(btn, FrameLayout.LayoutParams(size, size, Gravity.CENTER)) }
-        if (runCatching { w.addView(holder, l) }.isFailure) return
-        histBtn = holder
-        btn.scaleX = 0f; btn.scaleY = 0f
-        Motion.scaleTo(btn, 1f, Motion.BOUNCY)
+        if (runCatching { w.addView(bubble, l) }.isFailure) return
+        histBtn = bubble
+        bubble.grow(true, null)
+        box.alpha = 0f; box.scaleX = 0.4f; box.scaleY = 0.4f
+        box.animate().alpha(1f).setStartDelay(120).setDuration(200).start()
+        box.postDelayed({ Motion.scaleTo(box, 1f, Motion.BOUNCY) }, 120)
     }
 
-    private fun hideHistoryButton() {
+    /** A black liquid bump growing out of the screen edge (same look as the side island). */
+    private inner class LiquidBubble(ctx: Activity) : FrameLayout(ctx) {
+        private var g = 0f
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val path = Path()
+        private val m = android.graphics.Matrix()
+        init { setWillNotDraw(false); clipChildren = false }
+
+        fun grow(open: Boolean, end: (() -> Unit)?) {
+            ValueAnimator.ofFloat(g, if (open) 1f else 0f).apply {
+                duration = if (open) 460 else 220
+                interpolator = if (open) android.view.animation.OvershootInterpolator(1.3f) else android.view.animation.AccelerateInterpolator()
+                addUpdateListener { g = it.animatedValue as Float; invalidate() }
+                if (end != null) addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(a: android.animation.Animator) = end()
+                })
+                start()
+            }
+        }
+
+        override fun onDraw(c: Canvas) {
+            if (g <= 0.001f) return
+            val bw = dp(54) * g
+            val h = dp(54).toFloat()
+            val top = (height - h) / 2f; val bottom = top + h
+            val f = dp(18) * g.coerceAtMost(1f)
+            val rad = minOf(h / 2f, maxOf(bw, 1f) / 2f)
+            path.reset()
+            path.moveTo(0f, top - f)
+            path.cubicTo(0f, top - f * 0.35f, f * 0.25f, top, f * 0.9f, top)
+            path.lineTo(bw - rad, top)
+            path.quadTo(bw, top, bw, top + rad)
+            path.lineTo(bw, bottom - rad)
+            path.quadTo(bw, bottom, bw - rad, bottom)
+            path.lineTo(f * 0.9f, bottom)
+            path.cubicTo(f * 0.25f, bottom, 0f, bottom + f * 0.35f, 0f, bottom + f)
+            path.close()
+            if (isRight) { m.setScale(-1f, 1f, width / 2f, 0f); path.transform(m) }
+            p.color = bodyColor()
+            c.drawPath(path, p)
+        }
+    }
+
+    private fun hideHistoryButton(keep: Boolean = false, immediate: Boolean = false) {
+        if (!keep) histWanted = false
         val b = histBtn ?: return
         histBtn = null
-        b.animate().alpha(0f).scaleX(0.5f).scaleY(0.5f).setDuration(160).withEndAction { runCatching { wm?.removeViewImmediate(b) } }.start()
+        if (immediate) { runCatching { wm?.removeViewImmediate(b) }; return }
+        val lb = b as? LiquidBubble
+        if (lb != null) {
+            for (i in 0 until lb.childCount) lb.getChildAt(i).animate().alpha(0f).scaleX(0.4f).scaleY(0.4f).setDuration(140).start()
+            lb.grow(false) { runCatching { wm?.removeViewImmediate(b) } }
+        } else runCatching { wm?.removeViewImmediate(b) }
+        b.postDelayed({ runCatching { wm?.removeViewImmediate(b) } }, 600)
     }
 
     private fun toggleHistory() { if (histPanel != null) hideHistory() else showHistory() }
