@@ -761,7 +761,11 @@ class SettingsActivity : Activity() {
 
         // ---------------- About
         val about = section("GENERAL")
-        toggle(about, "Voice Activation", "Say “voice activation”, then “open” and an app name — e.g. “open Messenger”",
+        toggle(about, "Assistant Button in Sidebar", "Tap the ✦ orb at the top of the Sidebar and talk: set timers, open apps, " +
+            "send messages, call, take notes, or say “give me the report”", s.sidebarAssistant) { s.sidebarAssistant = it }
+        toggle(about, "Assistant Speaks Answers", "Reads replies and your report out loud", s.assistantVoice) { s.assistantVoice = it }
+        button(about, "Try the Assistant", 0xFF0A84FF.toInt()) { AssistantActivity.open(this) }
+        toggle(about, "Wake Word (“voice activation”)", "Off by default. When on, the phone listens for “voice activation” and opens the assistant hands-free",
             s.voiceOn) { on ->
             s.voiceOn = on
             if (on && !VoiceService.hasMic(this)) requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC)

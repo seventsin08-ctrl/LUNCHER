@@ -255,6 +255,15 @@ class Settings(ctx: Context) {
         get() = p.getInt("s_side_ms", 1800)
         set(v) = put("s_side_ms", v)
 
+    /** Assistant button at the top of the Sidebar. */
+    var sidebarAssistant: Boolean
+        get() = p.getBoolean("s_sidebar_ai", true)
+        set(v) = put("s_sidebar_ai", v)
+    /** The assistant answers out loud. */
+    var assistantVoice: Boolean
+        get() = p.getBoolean("s_ai_voice", true)
+        set(v) = put("s_ai_voice", v)
+
     /** Listen for "voice activation", then "open <app>". */
     var voiceOn: Boolean
         get() = p.getBoolean("s_voice", false)

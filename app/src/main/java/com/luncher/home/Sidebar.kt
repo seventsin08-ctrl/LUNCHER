@@ -149,6 +149,12 @@ class Sidebar(
         scroll.addView(col)
         val chosen = chosenApps()
         val items = ArrayList<View>()
+        // The assistant: tap to talk (timer, message, call, notes, report…).
+        if (settings.sidebarAssistant) {
+            val ai = assistantItem { close(immediate = true); AssistantActivity.open(act) }
+            col.addView(ai, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT).apply { bottomMargin = sp(10) })
+            items += ai
+        }
         for ((i, a) in chosen.withIndex()) {
             if (i == 2 && chosen.size > 3) col.addView(View(act).apply {
                 background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(0x66FFFFFF) }
@@ -277,6 +283,41 @@ class Sidebar(
         val all = apps()
         val picked = settings.sidebarApps.mapNotNull { pkg -> all.firstOrNull { it.packageName == pkg } }
         return picked.ifEmpty { all.take(8) }
+    }
+
+    /** Glowing orb button for the assistant. */
+    private fun assistantItem(onClick: () -> Unit): View {
+        val v = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); onClick() }
+            setOnTouchListener { view, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.88f).scaleY(0.88f).setDuration(90).start()
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> Motion.scaleTo(view, 1f, Motion.BOUNCY)
+                }
+                false
+            }
+        }
+        val orb = TextView(act).apply {
+            text = "✦"; textSize = 24f * k.coerceIn(0.8f, 1.2f); setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF5E5CE6.toInt(), 0xFF0A84FF.toInt(), 0xFF64D2FF.toInt())).apply { shape = GradientDrawable.OVAL }
+            elevation = dp(6).toFloat()
+        }
+        // Gentle breathing glow so it reads as "alive".
+        val pulse = android.animation.ObjectAnimator.ofFloat(orb, View.ALPHA, 1f, 0.78f).apply {
+            duration = 1400; repeatMode = android.animation.ValueAnimator.REVERSE; repeatCount = android.animation.ValueAnimator.INFINITE
+        }
+        orb.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) = pulse.start()
+            override fun onViewDetachedFromWindow(view: View) = pulse.cancel()
+        })
+        v.addView(orb, LinearLayout.LayoutParams(sp(54), sp(54)))
+        v.addView(TextView(act).apply {
+            text = "Assistant"; textSize = 12f * k.coerceIn(0.8f, 1.2f); visibility = if (settings.sidebarLabels) View.VISIBLE else View.GONE
+            setTextColor(Color.WHITE); gravity = Gravity.CENTER; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(5) })
+        return v
     }
 
     private fun appItem(label: String, app: AppInfo?, onClick: () -> Unit): View {

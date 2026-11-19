@@ -184,12 +184,20 @@ class VoiceService : Service() {
             if (!woke) { busy = false; main.postDelayed({ startWatching() }, 250); return }
             // Said it all in one go? "voice activation open messenger"
             val rest = all.firstNotNullOfOrNull { t -> WAKE.firstOrNull { t.contains(it) }?.let { w -> t.substringAfter(w).trim() } }
-            showOverlay()
-            if (!rest.isNullOrBlank() && rest.contains("open")) { main.postDelayed({ handle(listOf(rest)) }, 500); return }
-            main.postDelayed({ recognize(command = true) }, 650)
+            // Hand over to the assistant screen (timers, messages, calls, notes, report…),
+            // then go back to waiting for the wake word once it closes.
+            AssistantActivity.open(this, rest?.takeIf { it.length > 2 })
+            waitForAssistant()
             return
         }
         handle(all)
+    }
+
+    private fun waitForAssistant() {
+        main.postDelayed({
+            if (AssistantActivity.active) waitForAssistant()
+            else { busy = false; main.postDelayed({ startWatching() }, 400) }
+        }, 1200)
     }
 
     // ------------------------------------------------------------------ 3. do it
