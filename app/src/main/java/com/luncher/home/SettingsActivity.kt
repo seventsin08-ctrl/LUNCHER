@@ -297,6 +297,7 @@ class SettingsActivity : Activity() {
 
     override fun onPause() {
         visible = false
+        ToolsBar.settingsMode(null) // back to the tools bar
         sidePreview?.dismiss(); sidePreview = null
         // Apply sidebar changes (side, size, apps) right away, even over other apps.
         runCatching { SidebarService.sync(this) }
@@ -306,6 +307,8 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        // The tools bar turns into ✕ while you're in here; tapping it closes Settings.
+        ToolsBar.settingsMode { finish() }
         if (pendingRingtone != null && SysSettings.System.canWrite(this)) applyRingtone()
         // Permission rows may have changed while the user was in system settings.
         rebuild()

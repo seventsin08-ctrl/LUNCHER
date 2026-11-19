@@ -34,6 +34,14 @@ class ToolsBar(private val ctx: Context) {
         /** The bar on screen right now (so the launcher can fade it while Search is open). */
         var current: ToolsBar? = null
             private set
+        /** While the launcher's Settings is open, the bar becomes a single ✕ that closes it. */
+        var exitAction: (() -> Unit)? = null
+            private set
+        fun settingsMode(exit: (() -> Unit)?) {
+            if (exitAction == null && exit == null) return
+            exitAction = exit
+            current?.let { b -> b.main.post { b.rebuild(animateIn = true) } }
+        }
     }
 
     private class Tool(val icon: Int, val label: String, val on: () -> Boolean, val tap: (View) -> Unit)
@@ -150,7 +158,8 @@ class ToolsBar(private val ctx: Context) {
         r.removeAllViews()
         ThemeEngine.resolve(ctx, settings)
         val k = settings.toolsScale / 100f
-        val collapsed = settings.toolsCollapsed
+        val exit = exitAction
+        val collapsed = settings.toolsCollapsed || exit != null
         val (bg, stroke, iconCol) = colors()
         val h = dp(36 * k)
         val btn = dp(30 * k)
@@ -186,6 +195,19 @@ class ToolsBar(private val ctx: Context) {
                 FrameLayout.LayoutParams(dp(17 * k), dp(17 * k), Gravity.CENTER))
             bar.addView(b, LinearLayout.LayoutParams(btn, btn).apply { marginStart = dp(2 * k); marginEnd = dp(2 * k) })
         }
+        // In Settings: just a ✕ that closes it (the bar comes back once you leave).
+        if (exit != null) {
+            val x = android.widget.TextView(ctx).apply {
+                text = "✕"; textSize = 15f * k; setTextColor(iconCol); gravity = Gravity.CENTER
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                contentDescription = "Close Settings"
+                setOnClickListener { v ->
+                    v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    v.animate().rotationBy(90f).scaleX(0.8f).scaleY(0.8f).setDuration(160).withEndAction { exit() }.start()
+                }
+            }
+            bar.addView(x, LinearLayout.LayoutParams(dp(24 * k), dp(24 * k)))
+        }
         // The arrow: fold the bar into a small tab (⌃), or open it again (⌄).
         val arrow = FrameLayout(ctx).apply {
             contentDescription = if (collapsed) "Show tools" else "Hide tools"
@@ -200,7 +222,7 @@ class ToolsBar(private val ctx: Context) {
             setImageResource(R.drawable.ic_set_chevron); setColorFilter(iconCol)
             rotation = if (collapsed) -90f else 90f   // ⌄ = show, ⌃ = hide
         }, FrameLayout.LayoutParams(dp(14 * k), dp(14 * k), Gravity.CENTER))
-        bar.addView(arrow, LinearLayout.LayoutParams(dp(24 * k), dp(24 * k)).apply { marginStart = dp(if (collapsed) 0f else 4 * k) })
+        if (exit == null) bar.addView(arrow, LinearLayout.LayoutParams(dp(24 * k), dp(24 * k)).apply { marginStart = dp(if (collapsed) 0f else 4 * k) })
 
         // Size the window to the (tilted) bar so empty corners never block taps.
         val barW = dp(8 * k) + dp(6 * k) + list.size * (btn + dp(4 * k)) + dp(24 * k) + dp(if (collapsed) 0f else 4 * k)
@@ -214,6 +236,10 @@ class ToolsBar(private val ctx: Context) {
         r.alpha = if (searching) 0f else 1f
         runCatching { wm?.updateViewLayout(r, l) }
         if (animateIn) {
+            // The tab morphs: a little spin as it turns into ✕ (or back into the arrow).
+            bar.rotation = settings.toolsAngle - 90f
+            bar.animate().rotation(settings.toolsAngle.toFloat()).setDuration(320)
+                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
             bar.alpha = 0f; bar.scaleX = 0.7f; bar.scaleY = 0.7f
             bar.animate().alpha(1f).setDuration(220).start()
             Motion.scaleTo(bar, 1f, Motion.FLUID)
