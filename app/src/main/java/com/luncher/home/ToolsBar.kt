@@ -269,23 +269,33 @@ class ToolsBar(private val ctx: Context) {
         val exit = exitAction
         val folded = settings.toolsCollapsed || exit != null
         val (bg, stroke, iconCol) = colors()
-        val btn = dp(34 * k)
-        val ring = dp(88 * k)                       // where the tools sit
-        val disc = if (folded) dp(30 * k) else ring + btn / 2 + dp(10 * k)
-        val W = disc + dp(2); val H = disc * 2
+        val btn = dp(36 * k)
+        val ring = dp(96 * k)                                  // radius the tools sit on
+        val disc = if (folded) dp(30 * k) else ring + btn / 2 + dp(12 * k)
+        // The window is the WHOLE circle; half of it sits off-screen, so it looks like a half
+        // circle on the edge — and stays a complete circle while you drag it away.
+        val W = disc * 2; val H = disc * 2
+        val inward = if (right) -1 else 1                      // +x points into the screen
         val fan = object : FrameLayout(ctx) {
             private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = bg }
             private val rim = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 style = android.graphics.Paint.Style.STROKE; strokeWidth = maxOf(1, dp(1)).toFloat(); color = stroke
             }
-            init { setWillNotDraw(false); clipChildren = false }
+            init { setWillNotDraw(false); clipChildren = false; elevation = dp(6).toFloat() }
             override fun onDraw(c: android.graphics.Canvas) {
-                val cx = if (right) width.toFloat() else 0f
-                c.drawCircle(cx, height / 2f, disc.toFloat() - 1, fill)
-                c.drawCircle(cx, height / 2f, disc.toFloat() - 1, rim)
+                c.drawCircle(width / 2f, height / 2f, disc - 1f, fill)
+                c.drawCircle(width / 2f, height / 2f, disc - 1f, rim)
             }
         }
-        // Centre button: ✕ (fold, or close Settings) — or the arrow tab when folded.
+        // Where something sits: (distance into the screen from the edge, offset up/down) → view position.
+        fun place(v: View, size: Int, inX: Int, dy: Int) {
+            fan.addView(v, FrameLayout.LayoutParams(size, size).apply {
+                gravity = Gravity.TOP or Gravity.LEFT
+                leftMargin = disc + inward * inX - size / 2
+                topMargin = disc + dy - size / 2
+            })
+        }
+        // Centre: ✕ in the middle of the half circle (fold / close Settings), or the arrow tab.
         val centre = android.widget.TextView(ctx).apply {
             gravity = Gravity.CENTER; setTextColor(iconCol); typeface = android.graphics.Typeface.DEFAULT_BOLD
             text = when { exit != null -> "✕"; folded -> if (right) "‹" else "›"; else -> "✕" }
@@ -294,7 +304,7 @@ class ToolsBar(private val ctx: Context) {
             background = if (!folded) GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(46, 255, 255, 255)) } else null
             setOnClickListener { v ->
                 v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                v.animate().rotationBy(if (right) -90f else 90f).setDuration(180).start()
+                v.animate().rotationBy(90f * inward).setDuration(180).start()
                 when {
                     exit != null -> v.postDelayed({ exit() }, 150)
                     folded -> { settings.toolsCollapsed = false; rebuild(animateIn = true) }
@@ -303,24 +313,20 @@ class ToolsBar(private val ctx: Context) {
             }
         }
         val cs = if (folded) dp(28 * k) else btn
-        val ccx = if (folded) dp(14 * k) else dp(22 * k)       // centre button's distance from the edge
-        fan.addView(centre, FrameLayout.LayoutParams(cs, cs).apply {
-            gravity = Gravity.TOP or (if (right) Gravity.RIGHT else Gravity.LEFT)
-            topMargin = H / 2 - cs / 2
-            if (right) rightMargin = ccx - cs / 2 else leftMargin = ccx - cs / 2
-        })
+        val cIn = if (folded) dp(15 * k) else (ring * 0.38f).toInt()
+        place(centre, cs, cIn, 0)
         val toolViews = ArrayList<View>()
         if (!folded) {
             val list = tools()
             val n = list.size
-            for ((i, t) in list.withIndex()) {
-                // Spread from -78° to +78° around the edge point.
-                val a = Math.toRadians(-78.0 + 156.0 * i / maxOf(1, n - 1))
-                val px = (ring * cos(a)).toInt()            // distance from the edge
-                val py = (ring * sin(a)).toInt()
+            for ((idx, t) in list.withIndex()) {
+                // Evenly spread from -62° to +62°: a balanced arc around the ✕.
+                val a = Math.toRadians(-62.0 + 124.0 * idx / maxOf(1, n - 1))
+                val inX = (ring * cos(a)).toInt()
+                val dy = (ring * sin(a)).toInt()
                 val on = t.on()
                 val b = FrameLayout(ctx).apply {
-                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (on) Color.WHITE else Color.argb(30, 255, 255, 255)) }
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (on) Color.WHITE else Color.argb(34, 255, 255, 255)) }
                     contentDescription = t.label
                     setOnClickListener { v ->
                         v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -330,14 +336,10 @@ class ToolsBar(private val ctx: Context) {
                     }
                 }
                 b.addView(ImageView(ctx).apply { setImageResource(t.icon); setColorFilter(if (on) 0xFF1C1C1E.toInt() else iconCol) },
-                    FrameLayout.LayoutParams(dp(18 * k), dp(18 * k), Gravity.CENTER))
-                fan.addView(b, FrameLayout.LayoutParams(btn, btn).apply {
-                    gravity = Gravity.TOP or (if (right) Gravity.RIGHT else Gravity.LEFT)
-                    topMargin = H / 2 + py - btn / 2
-                    if (right) rightMargin = px - btn / 2 else leftMargin = px - btn / 2
-                })
-                // Remember how far it travels from the centre (for the blossom animation).
-                b.tag = floatArrayOf((if (right) -1 else 1) * (ccx - px).toFloat(), -py.toFloat())
+                    FrameLayout.LayoutParams(dp(19 * k), dp(19 * k), Gravity.CENTER))
+                place(b, btn, inX, dy)
+                // How far it travels to reach the ✕ (for blossoming out / folding back).
+                b.tag = floatArrayOf((inward * (cIn - inX)).toFloat(), (-dy).toFloat())
                 toolViews += b
             }
         }
@@ -345,21 +347,25 @@ class ToolsBar(private val ctx: Context) {
         frame.addView(fan, FrameLayout.LayoutParams(W, H))
         r.addView(frame, FrameLayout.LayoutParams(W, H))
         r.alpha = if (searching) 0f else 1f
-        l.y = l.y.coerceIn(0, ctx.resources.displayMetrics.heightPixels - H)
+        l.x = -disc
+        l.y = l.y.coerceIn(-disc / 2, ctx.resources.displayMetrics.heightPixels - H + disc / 2)
         runCatching { wm?.updateViewLayout(r, l) }
         if (animateIn) {
-            // Blossom: the half circle grows out of the edge, the tools fly out from the centre.
-            fan.pivotX = if (right) W.toFloat() else 0f; fan.pivotY = H / 2f
-            fan.scaleX = 0.3f; fan.scaleY = 0.3f; fan.alpha = 0f
-            fan.animate().alpha(1f).setDuration(200).start()
-            Motion.scaleTo(fan, 1f, Motion.FLUID)
-            for ((i, v) in toolViews.withIndex()) {
+            // Blossom: the circle grows out of the edge, then the tools fly out of the ✕ one by one.
+            fan.pivotX = disc.toFloat(); fan.pivotY = disc.toFloat()
+            fan.scaleX = 0.2f; fan.scaleY = 0.2f; fan.alpha = 0f
+            fan.animate().alpha(1f).setDuration(180).start()
+            Motion.spring(fan, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_X, 1f, Motion.Spec(380f, 0.8f))
+            Motion.spring(fan, androidx.dynamicanimation.animation.DynamicAnimation.SCALE_Y, 1f, Motion.Spec(380f, 0.8f))
+            centre.alpha = 0f; centre.rotation = -90f * inward
+            centre.animate().alpha(1f).rotation(0f).setStartDelay(60).setDuration(300).start()
+            for ((idx, v) in toolViews.withIndex()) {
                 val d = v.tag as FloatArray
                 v.translationX = d[0]; v.translationY = d[1]
-                v.scaleX = 0.3f; v.scaleY = 0.3f; v.alpha = 0f
+                v.scaleX = 0.2f; v.scaleY = 0.2f; v.alpha = 0f
                 v.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f)
-                    .setStartDelay(60L + i * 35L).setDuration(380)
-                    .setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
+                    .setStartDelay(90L + idx * 40L).setDuration(420)
+                    .setInterpolator(android.view.animation.PathInterpolator(0.25f, 1.35f, 0.4f, 1f)).start()
             }
         }
     }
@@ -427,7 +433,15 @@ class ToolsBar(private val ctx: Context) {
                         val changed = newEdge != settings.toolsEdge
                         settings.toolsEdge = newEdge
                         performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                        if (changed || newEdge != "none") main.post { rebuild(animateIn = true) }
+                        if (!changed && newEdge != "none") {
+                            // Same edge: glide back into place (no rebuild, no flash).
+                            val target = -(wv / 2)
+                            android.animation.ValueAnimator.ofInt(l.x, target).apply {
+                                duration = 260; interpolator = android.view.animation.DecelerateInterpolator(1.8f)
+                                addUpdateListener { a -> l.x = a.animatedValue as Int; runCatching { wm?.updateViewLayout(root, l) } }
+                                start()
+                            }
+                        } else if (changed) main.post { rebuild(animateIn = true) }
                         return true
                     }
                 }
