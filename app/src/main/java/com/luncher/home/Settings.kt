@@ -167,7 +167,22 @@ class Settings(ctx: Context) {
     /** Vertical position on the edge, % from the top. */
     var sideY: Int
         get() = p.getInt("s_side_y", 30)
-        set(v) = put("s_side_y", v)
+        set(v) { p.edit().putInt("s_side_y", v).apply() }
+    /** Which edge: false = left, true = right. */
+    var sideRight: Boolean
+        get() = p.getBoolean("s_side_right", false)
+        set(v) = put("s_side_right", v)
+    /** black | glass | theme | custom */
+    var sideColor: String
+        get() = p.getString("s_side_color", "black") ?: "black"
+        set(v) = put("s_side_color", v)
+    var sideCustomColor: Int
+        get() = p.getInt("s_side_custom", 0xFF1C1C1E.toInt())
+        set(v) = put("s_side_custom", v)
+    /** How solid the shape is, 30..100 %. */
+    var sideOpacity: Int
+        get() = p.getInt("s_side_opacity", 100)
+        set(v) = put("s_side_opacity", v)
     /** How long volume / status stay (ms); messages stay a bit longer. */
     var sideMs: Int
         get() = p.getInt("s_side_ms", 1800)

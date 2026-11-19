@@ -159,6 +159,14 @@ class SettingsActivity : Activity() {
         if (visible) p.show(s) else p.hide()
     }
 
+    /** A live side island on this screen while you edit it. */
+    private var sidePreview: SideHud? = null
+    private fun previewSide() {
+        ThemeEngine.resolve(this, s)
+        val p = sidePreview ?: SideHud(this, s, preview = true).also { sidePreview = it }
+        p.demo()
+    }
+
     private fun previewChanged(replay: Boolean = false) {
         val p = islandPreview ?: return
         if (replay) p.replay(s) else { p.show(s); p.refresh(s) }
@@ -218,6 +226,7 @@ class SettingsActivity : Activity() {
 
     override fun onPause() {
         visible = false
+        sidePreview?.dismiss(); sidePreview = null
         // Apply sidebar changes (side, size, apps) right away, even over other apps.
         runCatching { SidebarService.sync(this) }
         super.onPause()
@@ -492,7 +501,19 @@ class SettingsActivity : Activity() {
             }
             if (s.sideRest) segment(side2, "Tap the Sliver For", listOf("volume" to "Volume Slider", "music" to "Play / Pause",
                 "none" to "Nothing"), s.sideTap) { s.sideTap = it }
-            slider(side2, "Position on Edge", 10, 80, s.sideY, { "$it%" }) { s.sideY = it }
+            info(side2, "Look & position — a preview shows on the edge while you change these. " +
+                "Tip: long-press the side island (here or on the Home Screen) and drag it up or down.")
+            segment(side2, "Edge", listOf("left" to "Left", "right" to "Right"), if (s.sideRight) "right" else "left") {
+                s.sideRight = it == "right"; previewSide()
+            }
+            segment(side2, "Color", listOf("black" to "Black", "glass" to "Glass", "theme" to "Theme", "custom" to "Custom"),
+                s.sideColor) { s.sideColor = it; previewSide(); rebuild() }
+            if (s.sideColor == "custom") swatches(side2, "Custom Color", s.sideCustomColor) { s.sideCustomColor = it; previewSide() }
+            slider(side2, "Visibility", 30, 100, s.sideOpacity, { "$it%" },
+                live = { s.sideOpacity = it; sidePreview?.rest() }) { s.sideOpacity = it; previewSide() }
+            slider(side2, "Position on Edge", 10, 80, s.sideY, { "$it%" },
+                live = { s.sideY = it; sidePreview?.rest() }) { s.sideY = it; previewSide() }
+            button(side2, "Preview Side Island", 0xFF0A84FF.toInt()) { previewSide() }
             segment(side2, "Stays For", listOf("1200" to "Short", "1800" to "Normal", "3500" to "Long"), s.sideMs.toString()) {
                 s.sideMs = it.toInt()
             }

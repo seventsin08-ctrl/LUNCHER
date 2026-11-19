@@ -30,7 +30,7 @@ import kotlin.math.roundToInt
  *   tap to open, swipe left to dismiss).
  * Its window is only as big as what it shows, so it never blocks the app underneath.
  */
-class SideHud(private val act: Activity, private val settings: Settings) {
+class SideHud(private val act: Activity, private val settings: Settings, private val preview: Boolean = false) {
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
 
     private enum class Kind { REST, VOLUME, STATUS, MESSAGE }
@@ -44,14 +44,33 @@ class SideHud(private val act: Activity, private val settings: Settings) {
     var onPlayPause: (() -> Unit)? = null
 
     private val audio get() = act.getSystemService(AudioManager::class.java)
+    private val right get() = settings.sideRight
+    private var createdRight: Boolean? = null
+
+    /** The shape's colour (Settings › Side Island › Color and Visibility). */
+    fun bodyColor(): Int {
+        val base = when (settings.sideColor) {
+            "glass" -> Color.rgb(36, 36, 40)
+            "theme" -> IconFactory.blend(Color.BLACK, ThemeEngine.accent, 0.42f)
+            "custom" -> settings.sideCustomColor
+            else -> Color.BLACK
+        }
+        val a = (255 * settings.sideOpacity / 100f * (if (settings.sideColor == "glass") 0.82f else 1f)).toInt().coerceIn(40, 255)
+        return Color.argb(a, Color.red(base), Color.green(base), Color.blue(base))
+    }
+
+    private fun windowY() = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(125)
 
     /** Show the resting bump (or remove everything if the side island is off). */
     fun rest() {
-        if (!settings.sideHud || !settings.sideRest) { dismiss(); return }
+        if (!preview && (!settings.sideHud || !settings.sideRest)) { dismiss(); return }
+        // Switched edges: rebuild the window on the other side.
+        if (createdRight != null && createdRight != right) dismiss()
         lp?.let { l ->
-            val y = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(125)
+            val y = windowY()
             if (l.y != y) { l.y = y; view?.let { v -> runCatching { wm?.updateViewLayout(v, l) } } }
         }
+        view?.invalidate()
         val v = view ?: create() ?: return
         if (v.kind != Kind.REST) return
         v.kind = Kind.REST
@@ -100,6 +119,7 @@ class SideHud(private val act: Activity, private val settings: Settings) {
     private fun create(): HudView? {
         val svc = LuncherAccessibility.instance
         val type = when {
+            preview -> WindowManager.LayoutParams.TYPE_APPLICATION
             svc != null -> WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
             android.provider.Settings.canDrawOverlays(act) -> WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else -> WindowManager.LayoutParams.TYPE_APPLICATION
@@ -112,14 +132,14 @@ class SideHud(private val act: Activity, private val settings: Settings) {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
-            gravity = Gravity.START or Gravity.TOP
-            y = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(125)
+            gravity = (if (right) Gravity.END else Gravity.START) or Gravity.TOP
+            y = windowY()
             if (type == WindowManager.LayoutParams.TYPE_APPLICATION) token = act.window.decorView.windowToken
             if (android.os.Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(v, l) }.isFailure) return null
-        wm = w; lp = l; view = v
+        wm = w; lp = l; view = v; createdRight = right
         return v
     }
 
@@ -134,9 +154,16 @@ class SideHud(private val act: Activity, private val settings: Settings) {
         }
     }
 
+    /** Demo for the Settings preview: grow out with the volume slider, then rest. */
+    fun demo() {
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        rest()
+        view?.postDelayed({ volume(audio.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()) }, 120)
+    }
+
     fun dismiss() {
         val v = view ?: return
-        view = null; lp = null
+        view = null; lp = null; createdRight = null
         runCatching { wm?.removeViewImmediate(v) }
     }
 
@@ -150,6 +177,12 @@ class SideHud(private val act: Activity, private val settings: Settings) {
         var grown = 0f
         private var spring: SpringAnimation? = null
         private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+        private val mirror = android.graphics.Matrix()
+        private var restColor = 0
+        /** x for something of width [w] placed at [x] from the edge, flipped on the right edge. */
+        private fun mx(x: Float, w: Float = 0f) = if (right) width - x - w else x
+        private fun flip() { if (right) { mirror.setScale(-1f, 1f, width / 2f, 0f); path.transform(mirror) } }
+        private fun flipRect() { if (right) r.set(width - r.right, r.top, width - r.left, r.bottom) }
         private val restPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var restShaderTop = -1f
         private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3A3A3C.toInt() }
@@ -200,6 +233,7 @@ class SideHud(private val act: Activity, private val settings: Settings) {
 
         override fun onDraw(c: Canvas) {
             if (grown <= 0.001f) return
+            black.color = bodyColor()
             val a = ((grown - 0.4f) / 0.6f).coerceIn(0f, 1f)
             when (kind) {
                 Kind.REST -> {
@@ -208,29 +242,33 @@ class SideHud(private val act: Activity, private val settings: Settings) {
                     val h = dp(120).toFloat()
                     val top = (height - h) / 2f
                     val w = dp(4) * grown
-                    if (restShaderTop != top) {
-                        restShaderTop = top
+                    val col = bodyColor()
+                    if (restShaderTop != top || restColor != col) {
+                        restShaderTop = top; restColor = col
+                        val solid = col or 0xFF000000.toInt()
+                        val clear = solid and 0x00FFFFFF
                         restPaint.shader = android.graphics.LinearGradient(0f, top, 0f, top + h,
-                            intArrayOf(0x00000000, 0xFF000000.toInt(), 0xFF000000.toInt(), 0x00000000),
+                            intArrayOf(clear, solid, solid, clear),
                             floatArrayOf(0f, 0.3f, 0.7f, 1f), android.graphics.Shader.TileMode.CLAMP)
                     }
-                    restPaint.alpha = (230 * grown).toInt().coerceIn(0, 230)
-                    r.set(-w, top, w, top + h)
+                    restPaint.alpha = (android.graphics.Color.alpha(col) * 0.9f * grown).toInt().coerceIn(0, 255)
+                    r.set(-w, top, w, top + h); flipRect()
                     c.drawRoundRect(r, w, w * 6f, restPaint)
                 }
                 Kind.VOLUME -> {
                     val bodyW = dp(58) * grown
                     val h = dp(150).toFloat(); val top = (height - h) / 2f; val bottom = top + h
-                    shape(bodyW, top, bottom); c.drawPath(path, black)
+                    shape(bodyW, top, bottom); flip(); c.drawPath(path, black)
                     if (a <= 0f) return
                     val inset = dp(7).toFloat()
-                    r.set(inset, top + inset, bodyW - inset, bottom - inset)
+                    r.set(inset, top + inset, bodyW - inset, bottom - inset); flipRect()
                     val cr = dp(14).toFloat()
                     track.alpha = (255 * a).toInt(); c.drawRoundRect(r, cr, cr, track)
                     c.save(); c.clipRect(r.left, r.bottom - r.height() * level, r.right, r.bottom)
                     fill.alpha = (255 * a).toInt(); c.drawRoundRect(r, cr, cr, fill); c.restore()
                     val s = dp(22)
-                    speaker.setBounds((bodyW / 2 - s / 2).toInt(), (r.bottom - dp(10) - s).toInt(), (bodyW / 2 + s / 2).toInt(), (r.bottom - dp(10)).toInt())
+                    val sx = mx(bodyW / 2 - s / 2, s.toFloat()).toInt()
+                    speaker.setBounds(sx, (r.bottom - dp(10) - s).toInt(), sx + s, (r.bottom - dp(10)).toInt())
                     speaker.setTint(if (level > 0.2f) 0xFF6E6E73.toInt() else Color.WHITE)
                     speaker.alpha = (255 * a).toInt(); speaker.draw(c)
                 }
@@ -238,22 +276,26 @@ class SideHud(private val act: Activity, private val settings: Settings) {
                     val bodyW = dp(46) * grown
                     val h = dp(44) + dp(40) * (icons.size - 1).coerceAtLeast(0).toFloat()
                     val top = (height - h) / 2f; val bottom = top + h
-                    shape(bodyW, top, bottom); c.drawPath(path, black)
+                    shape(bodyW, top, bottom); flip(); c.drawPath(path, black)
                     if (a <= 0f) return
                     val s = dp(24); var y = top + dp(10)
                     for (d in icons) {
-                        d.setBounds((bodyW / 2 - s / 2).toInt(), y.toInt(), (bodyW / 2 + s / 2).toInt(), (y + s).toInt())
+                        val dx0 = mx(bodyW / 2 - s / 2, s.toFloat()).toInt()
+                        d.setBounds(dx0, y.toInt(), dx0 + s, (y + s).toInt())
                         d.alpha = (255 * a).toInt(); d.draw(c); y += dp(40)
                     }
-                    label?.let { text.alpha = (255 * a).toInt(); c.drawText(it, bodyW + dp(14), (top + bottom) / 2f + dp(6), text) }
+                    label?.let {
+                        text.alpha = (255 * a).toInt()
+                        c.drawText(it, mx(bodyW + dp(14), text.measureText(it)), (top + bottom) / 2f + dp(6), text)
+                    }
                 }
                 Kind.MESSAGE -> {
                     val bodyW = dp(54) * grown
                     val h = dp(62).toFloat(); val top = (height - h) / 2f; val bottom = top + h
-                    shape(bodyW, top, bottom); c.drawPath(path, black)
+                    shape(bodyW, top, bottom); flip(); c.drawPath(path, black)
                     if (a <= 0f) return
                     val s = dp(36).toFloat()
-                    val ix = (bodyW - s) / 2f; val iy = (top + bottom - s) / 2f
+                    val ix = mx((bodyW - s) / 2f, s); val iy = (top + bottom - s) / 2f
                     appIcon?.let { bmp ->
                         c.save()
                         iconClip.reset(); iconClip.addRoundRect(ix, iy, ix + s, iy + s, s * 0.24f, s * 0.24f, Path.Direction.CW)
@@ -266,8 +308,8 @@ class SideHud(private val act: Activity, private val settings: Settings) {
                     text.alpha = (255 * a).toInt(); small.alpha = (240 * a).toInt()
                     val t = TextUtils.ellipsize(label ?: "", text, maxW, TextUtils.TruncateAt.END).toString()
                     val b = TextUtils.ellipsize(body ?: "", small, maxW, TextUtils.TruncateAt.END).toString()
-                    c.drawText(t, tx, (top + bottom) / 2f - dp(3), text)
-                    c.drawText(b, tx, (top + bottom) / 2f + dp(15), small)
+                    c.drawText(t, mx(tx, text.measureText(t)), (top + bottom) / 2f - dp(3), text)
+                    c.drawText(b, mx(tx, small.measureText(b)), (top + bottom) / 2f + dp(15), small)
                 }
             }
         }
@@ -277,16 +319,29 @@ class SideHud(private val act: Activity, private val settings: Settings) {
         private var downY = 0f
         private var startLevel = 0f
         private var dragging = false
+        private var moving = false
+        private var startY = 0
+        /** Long-press: pick the side island up and drag it up or down the edge. */
+        private val startMove = Runnable {
+            if (!dragging) { moving = true; performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) }
+        }
 
         override fun onTouchEvent(e: MotionEvent): Boolean {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY; dragging = false; startLevel = level
+                    downX = e.rawX; downY = e.rawY; dragging = false; moving = false; startLevel = level
+                    startY = lp?.y ?: 0
                     removeCallbacks(backToRest)
+                    postDelayed(startMove, 450)
                 }
-                MotionEvent.ACTION_MOVE -> if (kind == Kind.VOLUME) {
+                MotionEvent.ACTION_MOVE -> if (moving) {
+                    val l = lp ?: return true
+                    l.y = (startY + (e.rawY - downY)).toInt()
+                        .coerceIn(-dp(60), act.resources.displayMetrics.heightPixels - dp(200))
+                    runCatching { wm?.updateViewLayout(this, l) }
+                } else if (kind == Kind.VOLUME) {
                     val dy = downY - e.rawY
-                    if (kotlin.math.abs(dy) > dp(6)) dragging = true
+                    if (kotlin.math.abs(dy) > dp(6)) { dragging = true; removeCallbacks(startMove) }
                     if (dragging) {
                         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
                         val lv = (startLevel + dy / dp(150)).coerceIn(0f, 1f)
@@ -299,9 +354,19 @@ class SideHud(private val act: Activity, private val settings: Settings) {
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    removeCallbacks(startMove)
+                    if (moving) {
+                        // Save where you dropped it (as % of the screen height).
+                        moving = false
+                        val h = act.resources.displayMetrics.heightPixels.toFloat()
+                        settings.sideY = (((lp?.y ?: 0) + dp(125)) / h * 100f).roundToInt().coerceIn(5, 90)
+                        performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                        postDelayed(backToRest, 1200)
+                        return true
+                    }
                     val dx = e.rawX - downX
                     when {
-                        kind == Kind.MESSAGE && dx < -dp(30) -> retract()
+                        kind == Kind.MESSAGE && (if (right) dx > dp(30) else dx < -dp(30)) -> retract()
                         kind == Kind.MESSAGE && kotlin.math.abs(dx) < dp(10) -> { val o = onOpen; retract(); o?.invoke() }
                         kind == Kind.REST -> {
                             performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)

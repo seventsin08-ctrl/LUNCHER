@@ -412,6 +412,7 @@ class MainActivity : Activity() {
         Tilt.resume()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
+        if (::sideHud.isInitialized) runCatching { sideHud.rest() }
         if (::island.isInitialized) detachOverlayIsland()
         refreshOngoing()
         if (::headsetPopup.isInitialized) headsetPopup.hostResumed = true
