@@ -300,6 +300,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
         card = root; cardLp = l
+        dragBy(head, root, l) { cardHomeX = l.x; cardHomeY = l.y; centered = false }
         cardHomeX = l.x; cardHomeY = l.y; centered = false
         // Grows out of the side island.
         root.pivotX = if (isRight) width.toFloat() else 0f
@@ -448,6 +449,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             }
         }
         if (runCatching { w.addView(root, l) }.isFailure) { holding = false; return }
+        dragBy(top, root, l)
         viewer = root
         // Opening animation (Settings › Chat Window › Photo Animation).
         root.cameraDistance = 9000f * m.density
@@ -463,6 +465,44 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 root.animate().alpha(1f).setDuration(200).start(); Motion.scaleTo(root, 1f, Motion.BOUNCY) }
         }
         root.postDelayed({ if (viewer === root) hideViewer() }, 30_000)
+    }
+
+    /**
+     * Every window (chat, photo / attachment, Recent Chats) can be moved:
+     * hold its top bar and drag it anywhere.
+     */
+    private fun dragBy(handle: View, win: View, l: WindowManager.LayoutParams, done: (() -> Unit)? = null) {
+        var sx = 0f; var sy = 0f; var ox = 0; var oy = 0; var moved = false
+        handle.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    sx = e.rawX; sy = e.rawY; ox = l.x; oy = l.y; moved = false
+                    view?.removeCallbacks(backToRest)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - sx; val dy = e.rawY - sy
+                    if (!moved && kotlin.math.abs(dx) + kotlin.math.abs(dy) > dp(6)) {
+                        moved = true
+                        win.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        win.animate().scaleX(1.03f).scaleY(1.03f).setDuration(120).start()
+                    }
+                    if (moved) {
+                        val fromEnd = (l.gravity and Gravity.END) == Gravity.END
+                        l.x = ox + (if (fromEnd) -dx else dx).toInt()
+                        l.y = oy + dy.toInt()
+                        runCatching { wm?.updateViewLayout(win, l) }
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (moved) {
+                        win.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
+                        done?.invoke()
+                    }
+                    if (!holding) { view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000) }
+                }
+            }
+            true
+        }
     }
 
     /** Where the chat window normally sits (next to the side island). */
@@ -858,6 +898,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         root.setOnTouchListener { _, e -> if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) hideHistory(); false }
         if (runCatching { w.addView(root, l) }.isFailure) return
         histPanel = root
+        dragBy(head, root, l)
         root.pivotX = if (isRight) width.toFloat() else 0f
         root.pivotY = root.measuredHeight / 2f
         root.alpha = 0f; root.scaleX = 0.6f; root.scaleY = 0.8f
