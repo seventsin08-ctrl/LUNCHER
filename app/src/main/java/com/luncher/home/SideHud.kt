@@ -371,14 +371,14 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         private val pnt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0x80FFFFFF.toInt(); strokeWidth = dp(2).toFloat(); strokeCap = Paint.Cap.ROUND
         }
+        private val arc = RectF()
         override fun onDraw(c: Canvas) {
-            // Pill in the middle + diagonal lines in the corner (like a window resize handle)
-            val cx = width / 2f; val cy = height / 2f
-            pnt.alpha = 70; c.drawLine(cx - dp(16), cy, cx + dp(16), cy, pnt)
-            pnt.alpha = 140
-            val r = width - dp(4).toFloat(); val b = height - dp(3).toFloat()
-            c.drawLine(r - dp(12), b, r, b - dp(12), pnt)
-            c.drawLine(r - dp(6), b, r, b - dp(6), pnt)
+            // iPadOS-style resize corner: a short curved stroke hugging the rounded corner.
+            pnt.style = Paint.Style.STROKE; pnt.strokeWidth = dp(3).toFloat(); pnt.alpha = 120
+            val rr = dp(14).toFloat()
+            val right = width - dp(2).toFloat(); val bottom = height - dp(2).toFloat()
+            arc.set(right - rr * 2, bottom - rr * 2, right, bottom)
+            c.drawArc(arc, 10f, 70f, false, pnt)
         }
     }.apply { contentDescription = "Resize window" }
 
@@ -434,10 +434,10 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private fun cardBackground(r: Float) = android.graphics.drawable.GradientDrawable().apply {
         cornerRadius = r
         if (settings.sideColor == "glass") {
-            colors = intArrayOf(Color.argb(215, 52, 52, 58), Color.argb(225, 24, 24, 28))
+            colors = intArrayOf(Color.argb(242, 44, 44, 48), Color.argb(246, 24, 24, 27))
             orientation = android.graphics.drawable.GradientDrawable.Orientation.TL_BR
             setStroke(maxOf(1, dp(1)), 0x55FFFFFF)
-        } else { setColor(Color.argb(238, 20, 20, 22)); setStroke(maxOf(1, dp(1)), Color.argb(45, 255, 255, 255)) }
+        } else { setColor(Color.argb(250, 22, 22, 24)); setStroke(maxOf(1, dp(1)), Color.argb(40, 255, 255, 255)) }
     }
 
     private fun roundIcon(bmp: Bitmap?, size: Int) = android.widget.ImageView(act).apply {
@@ -449,12 +449,19 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         clipToOutline = true
     }
 
-    private fun circleButton(t: String, fn: () -> Unit) = android.widget.TextView(act).apply {
-        text = t; textSize = 12f; setTextColor(0xEEFFFFFF.toInt()); gravity = Gravity.CENTER
-        background = android.graphics.drawable.GradientDrawable().apply {
-            setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x33FFFFFF)
+    /** Round grey button with a clean line icon (✕ and 🕘 become SF-style glyphs). */
+    private fun circleButton(t: String, fn: () -> Unit): View {
+        val icon = when (t) { "✕" -> R.drawable.ic_ap_xmark; "🕘" -> R.drawable.ic_ap_clock; else -> 0 }
+        val v: View = if (icon != 0) android.widget.FrameLayout(act).apply {
+            addView(android.widget.ImageView(act).apply { setImageResource(icon); setColorFilter(0xD9FFFFFF.toInt()) },
+                android.widget.FrameLayout.LayoutParams(dp(13), dp(13), Gravity.CENTER))
+            contentDescription = if (icon == R.drawable.ic_ap_xmark) "Close" else "History"
+        } else android.widget.TextView(act).apply { text = t; textSize = 12f; setTextColor(0xEEFFFFFF.toInt()); gravity = Gravity.CENTER }
+        v.background = android.graphics.drawable.GradientDrawable().apply {
+            setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x2EFFFFFF)
         }
-        setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); fn() }
+        v.setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); fn() }
+        return v
     }
 
     /** Photo / video / voice / file: Download it (when the app shared it), otherwise open it in the app. */
@@ -506,8 +513,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val ctx = act
         val bar = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0x26FFFFFF) }
-            setPadding(dp(12), 0, dp(4), 0)
+            // iMessage: a thin-outlined capsule, buttons inside it on the right.
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(20).toFloat(); setColor(0xFF1C1C1E.toInt()); setStroke(maxOf(1, dp(1)), 0x40FFFFFF)
+            }
+            setPadding(dp(14), dp(3), dp(4), dp(3))
         }
         val input = android.widget.EditText(ctx).apply {
             hint = "Reply…"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 14f
@@ -516,13 +526,27 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             tag = "reply"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
-        val send = android.widget.TextView(ctx).apply {
-            text = "↑"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        val send = android.widget.FrameLayout(ctx).apply {
+            contentDescription = "Send"
             background = android.graphics.drawable.GradientDrawable().apply {
                 setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0xFF0A84FF.toInt())
             }
+            addView(android.widget.ImageView(ctx).apply { setImageResource(R.drawable.ic_ap_arrow_up); setColorFilter(Color.WHITE) },
+                android.widget.FrameLayout.LayoutParams(dp(15), dp(15), Gravity.CENTER))
+            // Like iMessage: the blue arrow only shows once there's something to send.
+            alpha = 0f; scaleX = 0.6f; scaleY = 0.6f; isEnabled = false
         }
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val has = !s.isNullOrBlank()
+                if (has == send.isEnabled) return
+                send.isEnabled = has
+                send.animate().alpha(if (has) 1f else 0f).scaleX(if (has) 1f else 0.6f).scaleY(if (has) 1f else 0.6f)
+                    .setDuration(160).start()
+            }
+        })
         fun doSend() {
             val t = input.text.toString().trim()
             if (t.isEmpty()) return
@@ -545,12 +569,10 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             false
         }
         // Paste: whatever you copied (in any app) goes straight into the reply.
-        val paste = android.widget.TextView(ctx).apply {
-            text = "📋"; textSize = 15f; gravity = Gravity.CENTER
+        val paste = android.widget.FrameLayout(ctx).apply {
             contentDescription = "Paste"
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x26FFFFFF)
-            }
+            addView(android.widget.ImageView(ctx).apply { setImageResource(R.drawable.ic_ap_paste); setColorFilter(0x99FFFFFF.toInt()) },
+                android.widget.FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
             setOnClickListener {
                 performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                 activeInput = input to card
@@ -567,8 +589,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             }
         }
         bar.addView(input, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(paste, android.widget.LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(6) })
-        bar.addView(send, android.widget.LinearLayout.LayoutParams(dp(32), dp(32)))
+        bar.addView(paste, android.widget.LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(2) })
+        bar.addView(send, android.widget.LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(2) })
         return bar
     }
 
@@ -679,7 +701,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(0x55FFFFFF) }
         }, android.widget.LinearLayout.LayoutParams(dp(26), dp(4)).apply { marginEnd = dp(8) })
         head.addView(android.widget.TextView(ctx).apply {
-            text = "📋  CLIPBOARD"; textSize = 11f; setTextColor(0x99FFFFFF.toInt())
+            text = "Clipboard"; textSize = 13f; setTextColor(0xCCFFFFFF.toInt())
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         head.addView(android.widget.TextView(ctx).apply {
