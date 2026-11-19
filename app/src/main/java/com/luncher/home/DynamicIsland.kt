@@ -510,8 +510,8 @@ class DynamicIsland(
         showTools(a == null && !expanded && toolsOn && toolsOpen)
         if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), if (a == null) idleH() else dp(36),
             (if (a == null) idleH() else dp(36)) / 2f)
-        parkAtCamera(a == null && !expanded && toolsOn && !toolsOpen)
         else if (a != null) bindExpanded(a) else collapse()
+        parkAtCamera(a == null && !expanded && toolsOn && !toolsOpen)
     }
 
     /** While Search is open the island (tools) fades away, and comes back when it closes. */
