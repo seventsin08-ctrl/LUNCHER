@@ -44,7 +44,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     var onPlayPause: (() -> Unit)? = null
 
     private val audio get() = act.getSystemService(AudioManager::class.java)
-    private val right get() = settings.sideRight
+    private val isRight get() = settings.sideRight
     private var createdRight: Boolean? = null
 
     /** The shape's colour (Settings › Side Island › Color and Visibility). */
@@ -65,7 +65,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     fun rest() {
         if (!preview && (!settings.sideHud || !settings.sideRest)) { dismiss(); return }
         // Switched edges: rebuild the window on the other side.
-        if (createdRight != null && createdRight != right) dismiss()
+        if (createdRight != null && createdRight != isRight) dismiss()
         lp?.let { l ->
             val y = windowY()
             if (l.y != y) { l.y = y; view?.let { v -> runCatching { wm?.updateViewLayout(v, l) } } }
@@ -132,14 +132,14 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
-            gravity = (if (right) Gravity.END else Gravity.START) or Gravity.TOP
+            gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
             y = windowY()
             if (type == WindowManager.LayoutParams.TYPE_APPLICATION) token = act.window.decorView.windowToken
             if (android.os.Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(v, l) }.isFailure) return null
-        wm = w; lp = l; view = v; createdRight = right
+        wm = w; lp = l; view = v; createdRight = isRight
         return v
     }
 
@@ -180,9 +180,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         private val mirror = android.graphics.Matrix()
         private var restColor = 0
         /** x for something of width [w] placed at [x] from the edge, flipped on the right edge. */
-        private fun mx(x: Float, w: Float = 0f) = if (right) width - x - w else x
-        private fun flip() { if (right) { mirror.setScale(-1f, 1f, width / 2f, 0f); path.transform(mirror) } }
-        private fun flipRect() { if (right) r.set(width - r.right, r.top, width - r.left, r.bottom) }
+        private fun mx(x: Float, w: Float = 0f) = if (isRight) width - x - w else x
+        private fun flip() { if (isRight) { mirror.setScale(-1f, 1f, width / 2f, 0f); path.transform(mirror) } }
+        private fun flipRect() { if (isRight) r.set(width - r.right, r.top, width - r.left, r.bottom) }
         private val restPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var restShaderTop = -1f
         private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3A3A3C.toInt() }
@@ -366,7 +366,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     }
                     val dx = e.rawX - downX
                     when {
-                        kind == Kind.MESSAGE && (if (right) dx > dp(30) else dx < -dp(30)) -> retract()
+                        kind == Kind.MESSAGE && (if (isRight) dx > dp(30) else dx < -dp(30)) -> retract()
                         kind == Kind.MESSAGE && kotlin.math.abs(dx) < dp(10) -> { val o = onOpen; retract(); o?.invoke() }
                         kind == Kind.REST -> {
                             performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
