@@ -73,8 +73,6 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         if (!preview && (!settings.sideHud || !settings.sideRest)) { dismiss(); return }
         // Switched edges: rebuild the window on the other side.
         if (createdRight != null && createdRight != isRight) dismiss()
-        // Moved along the edge: rebuild the chat button at the new place.
-        if (histBtn != null && lp != null && lp!!.y != windowY()) hideHistoryButton(keep = true, immediate = true)
         lp?.let { l ->
             val y = windowY()
             if (l.y != y) { l.y = y; view?.let { v -> runCatching { wm?.updateViewLayout(v, l) } } }
@@ -85,11 +83,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         v.kind = Kind.REST
         size(Kind.REST)
         v.growTo(1f)
-        // The chat button lives with the resting side island and stays until you swipe it away.
-        if (!preview && settings.sideHistory && histWanted) {
-            val b = histBtn
-            if (b == null || !b.isAttachedToWindow) { histBtn = null; v.postDelayed({ if (v.kind == Kind.REST && histBtn == null) showHistoryButton() }, 250) }
-        }
+    }
     }
 
     fun volume(level: Float) = show(Kind.VOLUME) { it.glideLevel(level) }
@@ -105,85 +99,77 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         onOpen = open
     }
 
-    // ---------------------------------------------------------------- chat window
+    // ---------------------------------------------------------------- chat windows (one per app)
 
-    private var card: View? = null
-    private var cardLp: WindowManager.LayoutParams? = null
+    /** One chat window. Each app (Messenger, Telegram, WhatsApp…) gets its own, open side by side. */
+    private inner class Card(val pkg: String, val root: android.widget.LinearLayout, val lp: WindowManager.LayoutParams) {
+        var holding = false
+        val close = Runnable { if (!holding) hideCard(pkg) }
+        fun restartTimer(ms: Long = 12_000) { root.removeCallbacks(close); root.postDelayed(close, ms) }
+    }
+    private val cards = LinkedHashMap<String, Card>()
 
     /**
-     * A chat came in: the side island shows the app icon and a small window slides out beside it
-     * with the app's logo, the chat name and the latest messages (scroll to read more).
-     * Tap a message to open that chat; ✕ or wait to close it.
+     * A chat came in: the side island pops with the app icon and that app's chat window opens
+     * (or updates). Other apps' windows stay open too, stacked under each other.
      */
     fun chat(icon: Bitmap?, appLabel: String, chat: ChatInfo, open: () -> Unit) {
         hideHistory()
-        hideHistoryButton(keep = true)
         lastIcon = icon
-        hadChat = true
         message(icon, chat.title, chat.messages.lastOrNull()?.second ?: "", open)
-        val v = view ?: return
-        v.cardShown = true
-        v.invalidate()
-        showCard(icon, appLabel, chat, open)
-        v.removeCallbacks(backToRest)
-        v.postDelayed(backToRest, 9000)
+        view?.let { it.cardShown = settings.sideChatCard; it.invalidate() }
+        if (settings.sideChatCard) showCard(icon, appLabel, chat, open)
     }
 
     private fun showCard(icon: Bitmap?, appLabel: String, chat: ChatInfo, open: () -> Unit) {
-        hideCard(immediate = true)
         val hudLp = lp ?: return
         val w = wm ?: return
         val ctx = act
-        val width = dp(268)
+        val m = ctx.resources.displayMetrics
+        val width = dp(272)
+        // Same app again: replace its window in the same spot.
+        val old = cards[chat.pkg]
+        val keepX = old?.lp?.x; val keepY = old?.lp?.y
+        if (old != null) hideCard(chat.pkg, immediate = true)
+        lateinit var me: Card
         val root = object : android.widget.LinearLayout(ctx) {
-            // Touching the window keeps it open; letting go starts the timer again.
+            // Touching the window keeps it open; letting go starts its timer again.
             override fun dispatchTouchEvent(e: MotionEvent): Boolean {
-                val hv = view
                 when (e.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> hv?.removeCallbacks(backToRest)
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (!holding) hv?.postDelayed(backToRest, 6000)
+                    MotionEvent.ACTION_DOWN -> root2(this)?.root?.removeCallbacks(root2(this)?.close)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> root2(this)?.let { if (!it.holding) it.restartTimer(9000) }
                 }
                 return super.dispatchTouchEvent(e)
             }
         }.apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(24).toFloat()
-                setColor(Color.argb(236, 20, 20, 22)); setStroke(maxOf(1, dp(1)), Color.argb(45, 255, 255, 255))
-            }
+            setPadding(dp(14), dp(10), dp(14), dp(12))
+            background = cardBackground(dp(24).toFloat())
             elevation = dp(10).toFloat()
         }
-        // Header: platform logo + app name, close button
-        val head = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(android.widget.ImageView(ctx).apply {
-            if (icon != null) setImageBitmap(icon)
-            outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: android.graphics.Outline) =
-                    outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.26f)
-            }
-            clipToOutline = true
-        }, android.widget.LinearLayout.LayoutParams(dp(18), dp(18)))
+        // Header (drag it to move the window): logo, app name, history, close
+        val head = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        head.addView(roundIcon(icon, dp(20)), android.widget.LinearLayout.LayoutParams(dp(20), dp(20)))
         head.addView(android.widget.TextView(ctx).apply {
-            text = "${appLabel.uppercase()} · now"; textSize = 11f; setTextColor(0x99FFFFFF.toInt())
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(dp(7), 0, 0, 0)
+            text = "${appLabel.uppercase()} · ${ago(chat.time)}"; textSize = 11f; setTextColor(0x99FFFFFF.toInt())
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(dp(7), 0, 0, 0); maxLines = 1
         }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(android.widget.TextView(ctx).apply {
-            text = "✕"; textSize = 12f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
-            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0x33FFFFFF) }
-            setOnClickListener { retract() }
-        }, android.widget.LinearLayout.LayoutParams(dp(24), dp(24)))
+        head.addView(circleButton("🕘") { showHistory() }, android.widget.LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(6) })
+        head.addView(circleButton("✕") { hideCard(chat.pkg) }, android.widget.LinearLayout.LayoutParams(dp(26), dp(26)))
         root.addView(head)
         root.addView(android.widget.TextView(ctx).apply {
             text = chat.title; textSize = 15f; setTextColor(Color.WHITE); maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(0, dp(8), 0, dp(6))
-            setOnClickListener { retract(); open() }
+            typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(0, dp(6), 0, dp(6))
+            setOnClickListener { hideCard(chat.pkg); open() }
         })
-        // Scrollable list of the latest messages (newest at the bottom).
+        // Messages (scroll for more; newest at the bottom)
         val scroll = object : android.widget.ScrollView(ctx) {
             override fun onMeasure(wSpec: Int, hSpec: Int) =
-                super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec(dp(190), View.MeasureSpec.AT_MOST))
+                super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec(dp(170), View.MeasureSpec.AT_MOST))
         }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
         val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
         val showNames = chat.messages.map { it.first }.filter { it.isNotBlank() }.toSet().size > 1
@@ -197,36 +183,12 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 background = android.graphics.drawable.GradientDrawable().apply {
                     cornerRadius = dp(16).toFloat(); setColor(if (mine) 0xFF0A84FF.toInt() else 0x2EFFFFFF)
                 }
-                setOnClickListener { retract(); open() }
             }
             if (showNames && who.isNotBlank() && !mine) bubble.addView(android.widget.TextView(ctx).apply {
                 text = who; textSize = 11f; setTextColor(0xB3FFFFFF.toInt())
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             })
-            if (med?.image != null) {
-                // Photo right in the chat; tap to open it in the photo viewer.
-                bubble.addView(android.widget.ImageView(ctx).apply {
-                    setImageBitmap(med.image); adjustViewBounds = true; maxHeight = dp(200)
-                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                    outlineProvider = object : android.view.ViewOutlineProvider() {
-                        override fun getOutline(view: View, outline: android.graphics.Outline) =
-                            outline.setRoundRect(0, 0, view.width, view.height, dp(12).toFloat())
-                    }
-                    clipToOutline = true
-                    setOnClickListener { showViewer(med.image, open, med) }
-                }, android.widget.LinearLayout.LayoutParams(dp(176), android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = dp(2); bottomMargin = if (msg.isNotBlank()) dp(5) else 0
-                })
-            } else if (med != null) {
-                // Video, voice message, PDF…: a chip that opens it in the app.
-                bubble.addView(android.widget.TextView(ctx).apply {
-                    text = "${med.emoji}  ${med.label} · View"; textSize = 13f; setTextColor(Color.WHITE)
-                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-                    setPadding(dp(10), dp(7), dp(10), dp(7))
-                    background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x33FFFFFF) }
-                    setOnClickListener { showViewer(null, open, med) }
-                })
-            }
+            if (med != null) bubble.addView(attachmentChip(med, open))
             if (msg.isNotBlank()) bubble.addView(android.widget.TextView(ctx).apply { text = msg; textSize = 14f; setTextColor(Color.WHITE) })
             list.addView(bubble, android.widget.LinearLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -237,91 +199,177 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         root.addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-
-        // Reply right here (uses the app's own Reply, so it works for any chat app that has one).
-        if (settings.sideReply && chat.reply != null) {
-            val bar = android.widget.LinearLayout(ctx).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0x26FFFFFF) }
-                setPadding(dp(12), 0, dp(4), 0)
-            }
-            val input = android.widget.EditText(ctx).apply {
-                hint = "Reply…"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 14f
-                background = null; maxLines = 3; setPadding(0, dp(8), 0, dp(8))
-                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
-                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            }
-            val send = android.widget.TextView(ctx).apply {
-                text = "↑"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-                typeface = Typeface.create("sans-serif", Typeface.BOLD)
-                background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFF0A84FF.toInt()) }
-            }
-            fun doSend() {
-                val t = input.text.toString().trim()
-                if (t.isEmpty()) return
-                if (chat.sendReply(act, t)) {
-                    // Show it straight away as your (blue) message.
-                    list.addView(android.widget.TextView(ctx).apply {
-                        text = t; textSize = 14f; setTextColor(Color.WHITE); setPadding(dp(11), dp(7), dp(11), dp(8))
-                        background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF0A84FF.toInt()) }
-                    }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(5); gravity = Gravity.END })
-                    input.setText("")
-                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-                    root.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    if (centered) root.postDelayed({ returnCardHome() }, 1400)
-                } else android.widget.Toast.makeText(act, "This app doesn't allow replies here", android.widget.Toast.LENGTH_SHORT).show()
-            }
-            send.setOnClickListener { doSend() }
-            input.setOnEditorActionListener { _, _, _ -> doSend(); true }
-            // Typing needs the keyboard: let this window take focus only while you reply.
-            input.setOnTouchListener { v, e ->
-                if (e.actionMasked == MotionEvent.ACTION_DOWN) startTyping(v as android.widget.EditText)
-                false
-            }
-            bar.addView(input, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            bar.addView(send, android.widget.LinearLayout.LayoutParams(dp(32), dp(32)))
-            root.addView(bar, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        // Reply box (the app's own Reply, so it works for any chat app that has one)
+        if (settings.sideReply && chat.reply != null) root.addView(replyBar(chat, list, scroll) { me },
+            android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
-        }
 
         root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(dp(320), View.MeasureSpec.AT_MOST))
+            View.MeasureSpec.makeMeasureSpec(dp(360), View.MeasureSpec.AT_MOST))
+        val h = root.measuredHeight
+        // Where it goes: same spot when updating; beside the side island when it's the first;
+        // otherwise under the last window (or above the first one if there's no room).
         val center = hudLp.y + dp(HALF)
+        var y: Int; var x = dp(66)
+        if (keepX != null && keepY != null) { x = keepX; y = keepY }
+        else if (cards.isEmpty()) y = (center - h / 2).coerceAtLeast(dp(40))
+        else {
+            val last = cards.values.last()
+            y = last.lp.y + last.root.height.coerceAtLeast(dp(120)) + dp(10)
+            if (y + h > m.heightPixels - dp(50)) {
+                val first = cards.values.first()
+                y = first.lp.y - h - dp(10)
+                if (y < dp(40)) { y = dp(60) + cards.size * dp(34); x = dp(66) + cards.size * dp(14) }
+            }
+        }
         val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-            x = dp(66)
-            y = (center - root.measuredHeight / 2).coerceAtLeast(dp(30))
+            this.x = x; this.y = y
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
-        card = root; cardLp = l
-        dragBy(head, root, l) { cardHomeX = l.x; cardHomeY = l.y; centered = false }
-        cardHomeX = l.x; cardHomeY = l.y; centered = false
-        // Grows out of the side island.
+        me = Card(chat.pkg, root, l)
+        cards[chat.pkg] = me
+        cardOf[root] = me
+        dragBy(head, root, l, onStart = { root.removeCallbacks(me.close) }, onEnd = { if (!me.holding) me.restartTimer(9000) })
+        me.restartTimer()
+        // Grows out of the side island (a soft slide when it's an extra window).
         root.pivotX = if (isRight) width.toFloat() else 0f
-        root.pivotY = root.measuredHeight / 2f
+        root.pivotY = h / 2f
         root.alpha = 0f; root.scaleX = 0.5f; root.scaleY = 0.7f
         root.animate().alpha(1f).setDuration(180).start()
         Motion.scaleTo(root, 1f, Motion.BOUNCY)
     }
 
-    /** True while you're typing a reply or looking at a photo: the chat window stays open. */
-    private var holding = false
+    private val cardOf = HashMap<View, Card>()
+    private fun root2(v: View) = cardOf[v]
 
-    private fun startTyping(input: android.widget.EditText) {
-        val c = card ?: return
-        val l = cardLp ?: return
-        holding = true
-        view?.removeCallbacks(backToRest)
+    private fun cardBackground(r: Float) = android.graphics.drawable.GradientDrawable().apply {
+        cornerRadius = r
+        if (settings.sideColor == "glass") {
+            colors = intArrayOf(Color.argb(215, 52, 52, 58), Color.argb(225, 24, 24, 28))
+            orientation = android.graphics.drawable.GradientDrawable.Orientation.TL_BR
+            setStroke(maxOf(1, dp(1)), 0x55FFFFFF)
+        } else { setColor(Color.argb(238, 20, 20, 22)); setStroke(maxOf(1, dp(1)), Color.argb(45, 255, 255, 255)) }
+    }
+
+    private fun roundIcon(bmp: Bitmap?, size: Int) = android.widget.ImageView(act).apply {
+        if (bmp != null) setImageBitmap(bmp) else { setImageResource(R.drawable.ic_chat); setColorFilter(Color.WHITE) }
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: android.graphics.Outline) =
+                outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.26f)
+        }
+        clipToOutline = true
+    }
+
+    private fun circleButton(t: String, fn: () -> Unit) = android.widget.TextView(act).apply {
+        text = t; textSize = 12f; setTextColor(0xEEFFFFFF.toInt()); gravity = Gravity.CENTER
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x33FFFFFF)
+        }
+        setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); fn() }
+    }
+
+    /** Photo / video / voice / file: Download it (when the app shared it), otherwise open it in the app. */
+    private fun attachmentChip(med: ChatMedia, open: () -> Unit) = android.widget.TextView(act).apply {
+        val canSave = (med.image != null || med.uri != null) && Build.VERSION.SDK_INT >= 29
+        text = if (canSave) "${med.emoji}  ${med.label}   ⬇ Download" else "${med.emoji}  ${med.label} · Open in app"
+        textSize = 13f; setTextColor(Color.WHITE)
+        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        setPadding(dp(10), dp(7), dp(10), dp(7))
+        background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x33FFFFFF) }
+        setOnClickListener {
+            if (canSave) {
+                val ok = download(med)
+                if (ok) { text = "${med.emoji}  ${med.label}   ✓ Saved"; performHapticFeedback(HapticFeedbackConstants.CONFIRM) }
+                android.widget.Toast.makeText(act, if (ok) "Saved to Downloads › Apple Launcher" else "Couldn't save — open it in the app",
+                    android.widget.Toast.LENGTH_SHORT).show()
+            } else open()
+        }
+    }
+
+    /** Save an attachment to Downloads / Apple Launcher. */
+    private fun download(med: ChatMedia): Boolean = runCatching {
+        if (Build.VERSION.SDK_INT < 29) return false
+        val r = act.contentResolver
+        val mime = when {
+            med.mime.startsWith("image/") -> "image/jpeg"
+            med.mime.endsWith("/*") -> med.mime.replace("*", "mp4").replace("audio/mp4", "audio/mp4")
+            else -> med.mime
+        }
+        val ext = when { mime.startsWith("image/") -> "jpg"; mime.startsWith("video/") -> "mp4"; mime.startsWith("audio/") -> "m4a"
+            mime.contains("pdf") -> "pdf"; else -> "bin" }
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "AppleLauncher_${System.currentTimeMillis()}.$ext")
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/Apple Launcher")
+        }
+        val out = r.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+        var done = false
+        r.openOutputStream(out)?.use { os ->
+            val u = med.uri
+            if (u != null) done = runCatching { r.openInputStream(u)!!.use { it.copyTo(os) }; true }.getOrDefault(false)
+            if (!done) med.image?.let { done = it.compress(Bitmap.CompressFormat.JPEG, 95, os) }
+        }
+        if (!done) r.delete(out, null, null)
+        done
+    }.getOrDefault(false)
+
+    private fun replyBar(chat: ChatInfo, list: android.widget.LinearLayout, scroll: android.widget.ScrollView, card: () -> Card): View {
+        val ctx = act
+        val bar = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0x26FFFFFF) }
+            setPadding(dp(12), 0, dp(4), 0)
+        }
+        val input = android.widget.EditText(ctx).apply {
+            hint = "Reply…"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 14f
+            background = null; maxLines = 3; setPadding(0, dp(8), 0, dp(8))
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val send = android.widget.TextView(ctx).apply {
+            text = "↑"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0xFF0A84FF.toInt())
+            }
+        }
+        fun doSend() {
+            val t = input.text.toString().trim()
+            if (t.isEmpty()) return
+            if (chat.sendReply(act, t)) {
+                list.addView(android.widget.TextView(ctx).apply {
+                    text = t; textSize = 14f; setTextColor(Color.WHITE); setPadding(dp(11), dp(7), dp(11), dp(8))
+                    background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF0A84FF.toInt()) }
+                }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(5); gravity = Gravity.END })
+                input.setText("")
+                scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+                bar.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                val c = card(); c.holding = false; c.restartTimer(10_000)
+            } else android.widget.Toast.makeText(act, "This app doesn't allow replies here", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        send.setOnClickListener { doSend() }
+        input.setOnEditorActionListener { _, _, _ -> doSend(); true }
+        input.setOnTouchListener { v, e -> if (e.actionMasked == MotionEvent.ACTION_DOWN) startTyping(card(), v as android.widget.EditText); false }
+        bar.addView(input, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(send, android.widget.LinearLayout.LayoutParams(dp(32), dp(32)))
+        return bar
+    }
+
+    /** Typing needs the keyboard: let that one window take focus only while you reply. */
+    private fun startTyping(c: Card, input: android.widget.EditText) {
+        c.holding = true
+        c.root.removeCallbacks(c.close)
+        val l = c.lp
         if (l.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0) {
             l.flags = l.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
             l.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
-            runCatching { wm?.updateViewLayout(c, l) }
+            runCatching { wm?.updateViewLayout(c.root, l) }
         }
         input.post {
             input.requestFocus()
@@ -330,155 +378,14 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
     }
 
-    // ---------------------------------------------------------------- photo viewer (customisable)
-
-    private var viewer: View? = null
-
-    /** Opens a photo in a window under the chat (or centred / full screen — Settings › Chat Window). */
-    fun showViewer(bmp: Bitmap?, open: (() -> Unit)?, media: ChatMedia? = null) {
-        hideViewer(immediate = true)
-        val hudLp = lp ?: return
-        val w = wm ?: return
-        val ctx = act
-        val m = ctx.resources.displayMetrics
-        holding = true
-        view?.removeCallbacks(backToRest)
-        // With a chat open, the photo/attachment window takes the middle and the chat slides under it.
-        val stacked = card != null
-        val pos = if (stacked) "center" else settings.viewerPos
-        val full = pos == "full"
-        val width = when { stacked -> (m.widthPixels * 0.86f).toInt(); pos == "below" -> dp(268); pos == "center" -> (m.widthPixels * 0.88f).toInt(); else -> m.widthPixels }
-        val bg = when (settings.viewerBg) {
-            "glass" -> Color.argb(205, 44, 44, 48)
-            "theme" -> IconFactory.blend(Color.BLACK, ThemeEngine.accent, 0.35f) or 0xF0000000.toInt()
-            "custom" -> settings.viewerColor
-            else -> Color.argb(240, 12, 12, 14)
-        }
-        val root = android.widget.LinearLayout(ctx).apply {
-            orientation = android.widget.LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = if (full) 0f else dp(26).toFloat(); setColor(if (full) (bg and 0x00FFFFFF) or 0xF2000000.toInt() else bg)
-                if (!full) setStroke(maxOf(1, dp(1)), 0x2EFFFFFF)
-            }
-            elevation = dp(12).toFloat()
-        }
-        val shape = settings.viewerShape
-        // Top bar: what it is + ✕
-        val top = FrameLayout(ctx)
-        top.addView(android.widget.TextView(ctx).apply {
-            text = media?.let { "${it.emoji}  ${it.label}" } ?: "📷  Photo"; textSize = 13f; setTextColor(0xCCFFFFFF.toInt())
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(dp(6), 0, 0, 0)
-        }, FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.START or Gravity.CENTER_VERTICAL))
-        top.addView(android.widget.TextView(ctx).apply {
-            text = "✕"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            background = android.graphics.drawable.GradientDrawable().apply { setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x40FFFFFF) }
-            setOnClickListener { hideViewer(toMiddle = true) }
-        }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.END or Gravity.CENTER_VERTICAL))
-        root.addView(top, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { bottomMargin = dp(8) })
-        if (bmp == null) {
-            // The app didn't share the file itself (e.g. Messenger's "Sent a photo"): a card to open it there.
-            root.addView(android.widget.TextView(ctx).apply {
-                text = media?.emoji ?: "📎"; textSize = 54f; gravity = Gravity.CENTER
-                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(0x1FFFFFFF) }
-            }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(170)))
-            root.addView(android.widget.TextView(ctx).apply {
-                text = "This app keeps the ${media?.label?.lowercase() ?: "file"} inside the app — open it there to see it."
-                textSize = 13f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), 0)
-            })
-        }
-        val img = android.widget.ImageView(ctx).apply {
-            if (bmp != null) setImageBitmap(bmp)
-            adjustViewBounds = shape != "circle"
-            scaleType = if (shape == "circle") android.widget.ImageView.ScaleType.CENTER_CROP else android.widget.ImageView.ScaleType.FIT_CENTER
-            outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: android.graphics.Outline) {
-                    when (shape) {
-                        "circle" -> outline.setOval(0, 0, view.width, view.height)
-                        "square" -> outline.setRect(0, 0, view.width, view.height)
-                        "squircle" -> outline.setRoundRect(0, 0, view.width, view.height, minOf(view.width, view.height) * 0.3f)
-                        else -> outline.setRoundRect(0, 0, view.width, view.height, dp(18).toFloat())
-                    }
-                }
-            }
-            clipToOutline = true
-            setOnClickListener { hideViewer() }
-        }
-        val maxH = if (full) (m.heightPixels * 0.75f).toInt() else dp(if (pos == "below") 260 else 420)
-        if (bmp == null) Unit
-        else if (shape == "circle") root.addView(img, android.widget.LinearLayout.LayoutParams(minOf(width - dp(20), maxH), minOf(width - dp(20), maxH)))
-        else { img.maxHeight = maxH; root.addView(img, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)) }
-        val bar = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        fun pill(t: String, fn: () -> Unit) = android.widget.TextView(ctx).apply {
-            text = t; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(14), dp(7), dp(14), dp(7))
-            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0x33FFFFFF) }
-            setOnClickListener { fn() }
-        }.also { bar.addView(it, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-            android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(5), dp(10), dp(5), 0) }) }
-        if (open != null) pill("Open in App") { hideViewer(); retract(); open() }
-        root.addView(bar)
-        root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec((m.heightPixels * 0.62f).toInt(), View.MeasureSpec.AT_MOST))
-
-        val cl = cardLp
-        val c = card
-        val l = WindowManager.LayoutParams(width, if (full) android.view.ViewGroup.LayoutParams.MATCH_PARENT else android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-            hudLp.type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT).apply {
-            token = hudLp.token
-            when {
-                stacked && cl != null && c != null -> {
-                    // Middle of the screen; the chat window goes right under it.
-                    gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-                    val total = root.measuredHeight + dp(12) + c.height
-                    val topY = ((m.heightPixels - total) / 2).coerceAtLeast(dp(40))
-                    x = (m.widthPixels - width) / 2; y = topY
-                    moveCard((m.widthPixels - c.width) / 2, topY + root.measuredHeight + dp(12))
-                }
-                full || pos == "center" -> gravity = Gravity.CENTER
-                cl != null && c != null -> {
-                    gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-                    x = cl.x; y = cl.y + c.height + dp(10)
-                }
-                else -> { gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP; x = dp(66); y = hudLp.y + dp(80) }
-            }
-        }
-        if (runCatching { w.addView(root, l) }.isFailure) { holding = false; return }
-        dragBy(top, root, l)
-        viewer = root
-        // Opening animation (Settings › Chat Window › Photo Animation).
-        root.cameraDistance = 9000f * m.density
-        root.pivotX = if (pos == "below" && !stacked) (if (isRight) width.toFloat() else 0f) else width / 2f
-        root.pivotY = 0f
-        when (settings.viewerAnim) {
-            "slide" -> { root.alpha = 0f; root.translationY = -dp(40).toFloat()
-                root.animate().alpha(1f).translationY(0f).setDuration(320).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start() }
-            "fade" -> { root.alpha = 0f; root.animate().alpha(1f).setDuration(280).start() }
-            "flip" -> { root.alpha = 0f; root.rotationX = -80f
-                root.animate().alpha(1f).rotationX(0f).setDuration(480).setInterpolator(android.view.animation.OvershootInterpolator(1.1f)).start() }
-            else -> { root.alpha = 0f; root.scaleX = 0.6f; root.scaleY = 0.6f
-                root.animate().alpha(1f).setDuration(200).start(); Motion.scaleTo(root, 1f, Motion.BOUNCY) }
-        }
-        root.postDelayed({ if (viewer === root) hideViewer() }, 30_000)
-    }
-
     /**
-     * Every window (chat, photo / attachment, Recent Chats) can be moved:
-     * hold its top bar and drag it anywhere.
+     * Every window (chat windows, Message History) can be moved: hold its top bar and drag.
      */
-    private fun dragBy(handle: View, win: View, l: WindowManager.LayoutParams, done: (() -> Unit)? = null) {
+    private fun dragBy(handle: View, win: View, l: WindowManager.LayoutParams, onStart: (() -> Unit)? = null, onEnd: (() -> Unit)? = null) {
         var sx = 0f; var sy = 0f; var ox = 0; var oy = 0; var moved = false
         handle.setOnTouchListener { _, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    sx = e.rawX; sy = e.rawY; ox = l.x; oy = l.y; moved = false
-                    view?.removeCallbacks(backToRest)
-                }
+                MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; ox = l.x; oy = l.y; moved = false; onStart?.invoke() }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - sx; val dy = e.rawY - sy
                     if (!moved && kotlin.math.abs(dx) + kotlin.math.abs(dy) > dp(6)) {
@@ -494,99 +401,29 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (moved) {
-                        win.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
-                        done?.invoke()
-                    }
-                    if (!holding) { view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000) }
+                    if (moved) win.animate().scaleX(1f).scaleY(1f).setDuration(160).start()
+                    onEnd?.invoke()
                 }
             }
             true
         }
     }
 
-    /** Where the chat window normally sits (next to the side island). */
-    private var cardHomeX = 0
-    private var cardHomeY = 0
-    /** The chat window is in the middle of the screen (after viewing a photo). */
-    private var centered = false
-
-    /** Glide the chat window to a new spot. */
-    private fun moveCard(toX: Int, toY: Int) {
-        val c = card ?: return
-        val l = cardLp ?: return
-        val fx = l.x; val fy = l.y
-        ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 380; interpolator = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
-            addUpdateListener {
-                val f = it.animatedValue as Float
-                l.x = (fx + (toX - fx) * f).toInt(); l.y = (fy + (toY - fy) * f).toInt()
-                if (c.isAttachedToWindow) runCatching { wm?.updateViewLayout(c, l) }
-            }
-            start()
-        }
+    private fun hideCard(pkg: String, immediate: Boolean = false) {
+        val c = cards.remove(pkg) ?: return
+        cardOf.remove(c.root)
+        c.root.removeCallbacks(c.close)
+        if (cards.isEmpty()) view?.let { it.cardShown = false; it.invalidate() }
+        if (immediate) { runCatching { wm?.removeViewImmediate(c.root) }; return }
+        c.root.animate().alpha(0f).scaleX(0.6f).scaleY(0.8f).setDuration(180)
+            .withEndAction { runCatching { wm?.removeViewImmediate(c.root) } }.start()
     }
 
-    /** After replying from the middle, the chat window goes back beside the side island. */
-    private fun returnCardHome() {
-        if (!centered) return
-        centered = false
-        holding = false
-        moveCard(cardHomeX, cardHomeY)
-        view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000)
-    }
-
-    fun hideViewer(immediate: Boolean = false, toMiddle: Boolean = false) {
-        val v = viewer ?: return
-        viewer = null
-        holding = false
-        val c = card
-        if (c != null && toMiddle) {
-            // ✕ on the photo: the chat window moves to the middle so you can answer.
-            val m = act.resources.displayMetrics
-            centered = true
-            holding = true
-            moveCard((m.widthPixels - c.width) / 2, ((m.heightPixels - c.height) / 2).coerceAtLeast(dp(40)))
-            view?.removeCallbacks(backToRest)
-            // If you don't reply, it goes back to the side after a while.
-            view?.postDelayed({ if (centered && viewer == null) returnCardHome() }, 12_000)
-        } else if (c != null && !immediate) {
-            if (centered || cardLp?.x != cardHomeX) { centered = true; returnCardHome() }
-            else { view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000) }
-        }
-        if (immediate) { runCatching { wm?.removeViewImmediate(v) }; return }
-        v.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(180).withEndAction { runCatching { wm?.removeViewImmediate(v) } }.start()
-    }
-
-    /** Settings preview of the photo viewer with a sample picture. */
-    fun previewViewer() {
-        if (view == null) rest()
-        val b = Bitmap.createBitmap(600, 420, Bitmap.Config.ARGB_8888)
-        val c = Canvas(b)
-        val p = Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, 600f, 420f,
-            intArrayOf(0xFF2E3A59.toInt(), 0xFF8E5CF2.toInt(), 0xFFFF8A5C.toInt()), null, android.graphics.Shader.TileMode.CLAMP) }
-        c.drawRect(0f, 0f, 600f, 420f, p)
-        p.shader = null; p.color = 0x55FFFFFF; c.drawCircle(440f, 120f, 60f, p)
-        showViewer(b, null, null)
-    }
-
-    private fun hideCard(immediate: Boolean = false) {
-        hideViewer(immediate = true)
-        holding = false
-        val c = card ?: return
-        card = null; cardLp = null
-        view?.cardShown = false
-        if (immediate) { runCatching { wm?.removeViewImmediate(c) }; return }
-        c.animate().alpha(0f).scaleX(0.6f).scaleY(0.8f).setDuration(180)
-            .withEndAction { runCatching { wm?.removeViewImmediate(c) } }.start()
-    }
+    private fun hideAllCards(immediate: Boolean = false) { for (k in cards.keys.toList()) hideCard(k, immediate) }
 
     private fun show(kind: Kind, fill: (HudView) -> Unit) {
-        // The chat button is separate: it tucks away while volume / status / messages show.
-        if (histBtn != null) { hideHistory(); hideHistoryButton(keep = true) }
         val v = view ?: create() ?: return
         val wasRest = v.kind == Kind.REST
-        if (kind != Kind.MESSAGE) hideCard()
         v.kind = kind
         fill(v)
         size(kind)
@@ -638,16 +475,13 @@ class SideHud(private val act: Activity, private val settings: Settings, private
 
     /** Shrink back to the resting bump (or away if resting is off). */
     private fun retract() {
-        hideCard()
-        // After a chat closes (or you swipe it away), leave the little history button on the edge.
-        if (hadChat && settings.sideHistory) { hadChat = false; histWanted = true }
+        // Chat windows have their own timers; only the side island shape goes back to rest.
         val v = view ?: return
         onOpen = null
         v.growTo(0f) {
             if (view !== v) return@growTo
             if (settings.sideHud && settings.sideRest) { v.kind = Kind.REST; size(Kind.REST); v.growTo(1f) }
-            if (histWanted && histBtn == null) v.postDelayed({ if (v.kind == Kind.REST) showHistoryButton() }, 300)
-            else dismiss()
+            else if (cards.isEmpty() && histPanel == null) dismiss()
         }
     }
 
@@ -658,7 +492,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         view?.postDelayed({ volume(audio.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat()) }, 120)
     }
 
-    // ---------------------------------------------------------------- chat history button + list
+    // ---------------------------------------------------------------- message history (middle window)
 
     /** Set by the launcher. */
     var historyProvider: (() -> List<ChatInfo>)? = null
@@ -666,254 +500,133 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     var openChat: ((ChatInfo) -> Unit)? = null
 
     private var lastIcon: Bitmap? = null
-    private var hadChat = false
     private var unread = 0
-    private var histBtn: View? = null
     private var histPanel: View? = null
 
-    /** Called for every new message so the button's red number stays right. */
-    fun countNew() { unread++; histWanted = true }
-
-    /** Small round button (latest app's logo + red count) resting under the side island. */
-    /** The chat button wants to be shown (a chat closed and you didn't swipe it away). */
-    private var histWanted = true
-
-    /**
-     * The chat button: its own little liquid bump on the edge (separate from the volume / status
-     * shape), with the latest app's logo and a red count. Tap for Recent Chats, swipe into the edge to hide.
-     */
-    fun showHistoryButton() {
-        // The chat button is now part of the side island's own shape (under the volume slider).
-        if (true) return
-        if (!settings.sideHistory) return
-        val hudLp = lp ?: return
-        val w = wm ?: return
-        histWanted = true
-        // Only while the side island is resting — never on top of the volume slider or a message.
-        if (view?.kind != null && view?.kind != Kind.REST) return
-        hideHistoryButton(keep = true, immediate = true)
-        val ctx = act
-        val bubble = LiquidBubble(ctx)
-        val icon = android.widget.ImageView(ctx).apply {
-            val ic = lastIcon
-            if (ic != null) setImageBitmap(ic) else { setImageResource(R.drawable.ic_chat); setColorFilter(Color.WHITE); setPadding(dp(4), dp(4), dp(4), dp(4)) }
-            outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setOval(0, 0, view.width, view.height)
-            }
-            clipToOutline = true
-        }
-        val box = FrameLayout(ctx)
-        box.addView(icon, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
-        if (unread > 0) box.addView(android.widget.TextView(ctx).apply {
-            text = if (unread > 9) "9+" else "$unread"; textSize = 9.5f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFFFF3B30.toInt()) }
-        }, FrameLayout.LayoutParams(dp(17), dp(17), Gravity.TOP or Gravity.END))
-        bubble.addView(box, FrameLayout.LayoutParams(dp(42), dp(42), (if (isRight) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL)
-            .apply { if (isRight) rightMargin = dp(6) else leftMargin = dp(6) })
-        var downX = 0f
-        bubble.setOnTouchListener { _, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downX = e.rawX; box.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).start() }
-                MotionEvent.ACTION_UP -> {
-                    Motion.scaleTo(box, 1f, Motion.BOUNCY)
-                    val dx = e.rawX - downX
-                    // Swipe it into the edge to put it away until the next message.
-                    if (if (isRight) dx > dp(20) else dx < -dp(20)) { unread = 0; histWanted = false; hideHistory(); hideHistoryButton() }
-                    else { bubble.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); toggleHistory() }
-                }
-                MotionEvent.ACTION_CANCEL -> Motion.scaleTo(box, 1f, Motion.BOUNCY)
-            }
-            true
-        }
-        val l = WindowManager.LayoutParams(dp(60), dp(96), hudLp.type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT).apply {
-            gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-            x = 0; y = hudLp.y + dp(HALF) + dp(62)
-            token = hudLp.token
-            if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
-        if (runCatching { w.addView(bubble, l) }.isFailure) return
-        histBtn = bubble
-        bubble.grow(true, null)
-        box.alpha = 0f; box.scaleX = 0.4f; box.scaleY = 0.4f
-        box.animate().alpha(1f).setStartDelay(120).setDuration(200).start()
-        box.postDelayed({ Motion.scaleTo(box, 1f, Motion.BOUNCY) }, 120)
-    }
-
-    /** A black liquid bump growing out of the screen edge (same look as the side island). */
-    private inner class LiquidBubble(ctx: Activity) : FrameLayout(ctx) {
-        private var g = 0f
-        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val path = Path()
-        private val m = android.graphics.Matrix()
-        init { setWillNotDraw(false); clipChildren = false }
-
-        fun grow(open: Boolean, end: (() -> Unit)?) {
-            ValueAnimator.ofFloat(g, if (open) 1f else 0f).apply {
-                duration = if (open) 460 else 220
-                interpolator = if (open) android.view.animation.OvershootInterpolator(1.3f) else android.view.animation.AccelerateInterpolator()
-                addUpdateListener { g = it.animatedValue as Float; invalidate() }
-                if (end != null) addListener(object : android.animation.AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(a: android.animation.Animator) = end()
-                })
-                start()
-            }
-        }
-
-        override fun onDraw(c: Canvas) {
-            if (g <= 0.001f) return
-            val bw = dp(54) * g
-            val h = dp(54).toFloat()
-            val top = (height - h) / 2f; val bottom = top + h
-            val f = dp(18) * g.coerceAtMost(1f)
-            val rad = minOf(h / 2f, maxOf(bw, 1f) / 2f)
-            path.reset()
-            path.moveTo(0f, top - f)
-            path.cubicTo(0f, top - f * 0.35f, f * 0.25f, top, f * 0.9f, top)
-            path.lineTo(bw - rad, top)
-            path.quadTo(bw, top, bw, top + rad)
-            path.lineTo(bw, bottom - rad)
-            path.quadTo(bw, bottom, bw - rad, bottom)
-            path.lineTo(f * 0.9f, bottom)
-            path.cubicTo(f * 0.25f, bottom, 0f, bottom + f * 0.35f, 0f, bottom + f)
-            path.close()
-            if (isRight) { m.setScale(-1f, 1f, width / 2f, 0f); path.transform(m) }
-            p.color = bodyColor()
-            c.drawPath(path, p)
-        }
-    }
-
-    private fun hideHistoryButton(keep: Boolean = false, immediate: Boolean = false) {
-        if (!keep) histWanted = false
-        val b = histBtn ?: return
-        histBtn = null
-        if (immediate) { runCatching { wm?.removeViewImmediate(b) }; return }
-        val lb = b as? LiquidBubble
-        if (lb != null) {
-            for (i in 0 until lb.childCount) lb.getChildAt(i).animate().alpha(0f).scaleX(0.4f).scaleY(0.4f).setDuration(140).start()
-            lb.grow(false) { runCatching { wm?.removeViewImmediate(b) } }
-        } else runCatching { wm?.removeViewImmediate(b) }
-        b.postDelayed({ runCatching { wm?.removeViewImmediate(b) } }, 600)
-    }
+    /** Called for every new message so the chat button's red number stays right. */
+    fun countNew() { unread++; view?.invalidate() }
 
     private fun toggleHistory() {
         if (histPanel != null) hideHistory()
         else { view?.removeCallbacks(backToRest); showHistory() }
     }
 
-    /** "Recent Chats": every conversation from all apps; tap one to open its chat window again. */
+    /**
+     * Message History in the middle of the screen: each app's logo with its conversations
+     * listed under it (scroll for more), and how many apps at the bottom. Tap a conversation
+     * to open its chat window. Drag the top bar to move it.
+     */
     private fun showHistory() {
+        hideHistory()
         val hudLp = lp ?: return
         val w = wm ?: return
-        val chats = historyProvider?.invoke().orEmpty()
-        unread = 0
         val ctx = act
-        val width = dp(286)
+        val m = ctx.resources.displayMetrics
+        unread = 0
+        view?.invalidate()
+        val chats = historyProvider?.invoke().orEmpty()
+        // Group by app, newest app first; newest conversation first inside each.
+        val groups = chats.groupBy { it.pkg }.entries.sortedByDescending { e -> e.value.maxOf { it.time } }
+        val width = minOf((m.widthPixels * 0.88f).toInt(), dp(380))
         val root = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(24).toFloat(); setColor(Color.argb(240, 20, 20, 22)); setStroke(maxOf(1, dp(1)), 0x2EFFFFFF)
-            }
-            elevation = dp(12).toFloat()
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = cardBackground(dp(28).toFloat())
+            elevation = dp(14).toFloat()
         }
-        val head = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val head = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(8)) }
         head.addView(android.widget.TextView(ctx).apply {
-            text = "Recent Chats"; textSize = 17f; setTextColor(Color.WHITE); typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            text = "Message History"; textSize = 19f; setTextColor(Color.WHITE); typeface = Typeface.create("sans-serif", Typeface.BOLD)
         }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(android.widget.TextView(ctx).apply {
-            text = "✕"; textSize = 12f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
-            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0x33FFFFFF) }
-            setOnClickListener { hideHistory() }
-        }, android.widget.LinearLayout.LayoutParams(dp(26), dp(26)))
+        head.addView(circleButton("✕") { hideHistory() }, android.widget.LinearLayout.LayoutParams(dp(30), dp(30)))
         root.addView(head)
         val scroll = object : android.widget.ScrollView(ctx) {
             override fun onMeasure(wSpec: Int, hSpec: Int) =
-                super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec(dp(340), View.MeasureSpec.AT_MOST))
+                super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec((m.heightPixels * 0.55f).toInt(), View.MeasureSpec.AT_MOST))
         }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
         val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
-        if (chats.isEmpty()) list.addView(android.widget.TextView(ctx).apply {
-            text = "No messages yet"; textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(0, dp(14), 0, dp(10))
+        if (groups.isEmpty()) list.addView(android.widget.TextView(ctx).apply {
+            text = "No messages yet"; textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(0, dp(16), 0, dp(16)); gravity = Gravity.CENTER
         })
-        for (c in chats.asReversed()) {
-            val app = appLookup?.invoke(c.pkg)
-            val row = android.widget.LinearLayout(ctx).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(4), dp(9), dp(4), dp(9))
-                background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33FFFFFF), null,
-                    android.graphics.drawable.ColorDrawable(Color.WHITE))
-                setOnClickListener {
-                    hideHistory()
-                    chat(app?.first, app?.second ?: "Messages", c) { openChat?.invoke(c) }
-                }
+        for ((pkg, convs) in groups) {
+            val app = appLookup?.invoke(pkg)
+            // App row: logo, name, how many chats
+            val appRow = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, dp(4))
             }
-            row.addView(android.widget.ImageView(ctx).apply {
-                app?.first?.let { setImageBitmap(it) }
-                outlineProvider = object : android.view.ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: android.graphics.Outline) =
-                        outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.26f)
-                }
-                clipToOutline = true
-            }, android.widget.LinearLayout.LayoutParams(dp(36), dp(36)))
-            val texts = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(dp(11), 0, 0, 0) }
-            texts.addView(android.widget.TextView(ctx).apply {
-                text = c.title; textSize = 14f; setTextColor(Color.WHITE); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            appRow.addView(roundIcon(app?.first, dp(34)), android.widget.LinearLayout.LayoutParams(dp(34), dp(34)))
+            appRow.addView(android.widget.TextView(ctx).apply {
+                text = app?.second ?: pkg; textSize = 16f; setTextColor(Color.WHITE)
+                typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(dp(10), 0, 0, 0)
+            }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            appRow.addView(android.widget.TextView(ctx).apply {
+                text = "${convs.size}"; textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setPadding(dp(8), dp(2), dp(8), dp(2))
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x33FFFFFF) }
             })
-            val last = c.messages.lastOrNull()
-            val lastMedia = c.media.lastOrNull()
-            texts.addView(android.widget.TextView(ctx).apply {
-                text = when {
-                    !last?.second.isNullOrBlank() -> last!!.second
-                    lastMedia != null -> "📎 ${lastMedia.label}"
-                    else -> ""
+            list.addView(appRow)
+            // That app's conversations, under its logo
+            for (c in convs.sortedByDescending { it.time }) {
+                val row = android.widget.LinearLayout(ctx).apply {
+                    orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(44), dp(8), dp(4), dp(8))
+                    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33FFFFFF), null,
+                        android.graphics.drawable.ColorDrawable(Color.WHITE))
+                    setOnClickListener {
+                        hideHistory()
+                        chat(app?.first, app?.second ?: "Messages", c) { openChat?.invoke(c) }
+                    }
                 }
-                textSize = 12.5f; setTextColor(0x99FFFFFF.toInt()); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-            })
-            row.addView(texts, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            row.addView(android.widget.TextView(ctx).apply {
-                text = ago(c.time); textSize = 11f; setTextColor(0x80FFFFFF.toInt()); setPadding(dp(6), 0, 0, 0)
-            })
-            list.addView(row)
+                val texts = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
+                texts.addView(android.widget.TextView(ctx).apply {
+                    text = c.title; textSize = 14f; setTextColor(Color.WHITE); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                })
+                val last = c.messages.lastOrNull()
+                val lm = c.media.lastOrNull()
+                texts.addView(android.widget.TextView(ctx).apply {
+                    text = when { !last?.second.isNullOrBlank() -> last!!.second; lm != null -> "${lm.emoji} ${lm.label}"; else -> "" }
+                    textSize = 12.5f; setTextColor(0x99FFFFFF.toInt()); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                })
+                row.addView(texts, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                row.addView(android.widget.TextView(ctx).apply { text = ago(c.time); textSize = 11f; setTextColor(0x80FFFFFF.toInt()); setPadding(dp(6), 0, 0, 0) })
+                list.addView(row)
+            }
+            list.addView(View(ctx).apply { setBackgroundColor(0x22FFFFFF) },
+                android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, maxOf(1, dp(1) / 2)).apply { topMargin = dp(6) })
         }
         scroll.addView(list)
         root.addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-        root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(dp(420), View.MeasureSpec.AT_MOST))
-        val btnY = hudLp.y + dp(HALF) + dp(75) - dp(27)
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+        // Counter: how many apps are in the history
+        root.addView(android.widget.TextView(ctx).apply {
+            val n = groups.size
+            text = if (n == 1) "1 app" else "$n apps"; textSize = 12f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, 0)
+        }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+
         val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
-            gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-            x = dp(58)
-            y = (btnY + dp(27) - root.measuredHeight / 2).coerceIn(dp(30), act.resources.displayMetrics.heightPixels - root.measuredHeight - dp(30))
+            gravity = Gravity.CENTER
             token = hudLp.token
         }
-        root.setOnTouchListener { _, e -> if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) hideHistory(); false }
         if (runCatching { w.addView(root, l) }.isFailure) return
         histPanel = root
         dragBy(head, root, l)
-        root.pivotX = if (isRight) width.toFloat() else 0f
-        root.pivotY = root.measuredHeight / 2f
-        root.alpha = 0f; root.scaleX = 0.6f; root.scaleY = 0.8f
-        root.animate().alpha(1f).setDuration(180).start()
+        root.alpha = 0f; root.scaleX = 0.85f; root.scaleY = 0.85f
+        root.animate().alpha(1f).setDuration(200).start()
         Motion.scaleTo(root, 1f, Motion.BOUNCY)
-        // Refresh the badge on the button.
-        if (histBtn != null) { hideHistoryButton(); root.postDelayed({ if (histPanel === root) showHistoryButton() }, 180) }
-        root.postDelayed({ if (histPanel === root) hideHistory() }, 45_000)
+        root.postDelayed({ if (histPanel === root) hideHistory() }, 90_000)
     }
 
     private fun hideHistory() {
         val p = histPanel ?: return
         histPanel = null
         view?.let { v -> if (v.kind == Kind.VOLUME) { v.removeCallbacks(backToRest); v.postDelayed(backToRest, 2200) } }
-        p.animate().alpha(0f).scaleX(0.7f).scaleY(0.85f).setDuration(170).withEndAction { runCatching { wm?.removeViewImmediate(p) } }.start()
+        p.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(170).withEndAction { runCatching { wm?.removeViewImmediate(p) } }.start()
     }
 
     private fun ago(t: Long): String {
@@ -923,8 +636,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
 
     fun dismiss() {
         runCatching { histPanel?.let { wm?.removeViewImmediate(it) } }; histPanel = null
-        runCatching { histBtn?.let { wm?.removeViewImmediate(it) } }; histBtn = null
-        hideCard(immediate = true)
+        hideAllCards(immediate = true)
         val v = view ?: return
         view = null; lp = null; createdRight = null
         runCatching { wm?.removeViewImmediate(v) }

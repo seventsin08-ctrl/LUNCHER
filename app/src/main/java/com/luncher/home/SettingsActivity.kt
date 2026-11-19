@@ -182,12 +182,6 @@ class SettingsActivity : Activity() {
 
     /** A live side island on this screen while you edit it. */
     private var sidePreview: SideHud? = null
-    private fun previewViewer() {
-        ThemeEngine.resolve(this, s)
-        val p = sidePreview ?: SideHud(this, s, preview = true).also { sidePreview = it }
-        p.previewViewer()
-    }
-
     private fun previewSide() {
         ThemeEngine.resolve(this, s)
         val p = sidePreview ?: SideHud(this, s, preview = true).also { sidePreview = it }
@@ -578,26 +572,13 @@ class SettingsActivity : Activity() {
 
         // ---------------- Chat window: photos, replies and the photo viewer
         val chatSec = section("CHAT WINDOW")
-        toggle(chatSec, "Photos & Attachments", "See photos right in the chat; videos, voice messages and files show as a tap-to-open chip",
+        toggle(chatSec, "Attachments", "Photos, videos, voice messages and files show as chips — Download saves them " +
+            "(when the app shares the file), otherwise they open in the app",
             s.sideMedia) { s.sideMedia = it }
         toggle(chatSec, "Chat Button in Side Island", "Under the volume slider: the latest app's logo and a red count — " +
-            "tap it for Recent Chats, tap a chat to open it again", s.sideHistory) { s.sideHistory = it }
+            "tap it for Message History (every app's chats under its logo), tap a chat to open its window", s.sideHistory) { s.sideHistory = it }
         toggle(chatSec, "Reply Box", "Answer from the chat window — works with any app that has Reply in its notifications " +
             "(Messenger, WhatsApp, Telegram, Instagram, SMS, Discord…)", s.sideReply) { s.sideReply = it }
-        info(chatSec, "Photo viewer — tap a photo in the chat to open it. A preview shows while you change these.")
-        segment(chatSec, "Opens", listOf("below" to "Under Chat", "center" to "Center", "full" to "Full Screen"), s.viewerPos) {
-            s.viewerPos = it; previewViewer()
-        }
-        segment(chatSec, "Animation", listOf("zoom" to "Zoom", "slide" to "Slide", "fade" to "Fade", "flip" to "3D Flip"), s.viewerAnim) {
-            s.viewerAnim = it; previewViewer()
-        }
-        segment(chatSec, "Shape", listOf("rounded" to "Rounded", "squircle" to "Squircle", "circle" to "Circle", "square" to "Square"),
-            s.viewerShape) { s.viewerShape = it; previewViewer() }
-        segment(chatSec, "Background", listOf("dark" to "Dark", "glass" to "Glass", "theme" to "Theme", "custom" to "Custom"), s.viewerBg) {
-            s.viewerBg = it; previewViewer(); rebuild()
-        }
-        if (s.viewerBg == "custom") swatches(chatSec, "Viewer Color", s.viewerColor) { s.viewerColor = it; previewViewer() }
-        button(chatSec, "Preview Photo Viewer", 0xFF0A84FF.toInt()) { previewViewer() }
 
         // What may appear in the island
         val content = section("ISLAND CONTENT")
