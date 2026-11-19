@@ -91,6 +91,7 @@ class NotificationService : NotificationListenerService() {
             if (lines != null) for (l in lines) msgs += "" to l.toString()
         }
         while (media.size < msgs.size) media += null
+        for (i in msgs.indices) if (media[i] == null) guessAttachment(msgs[i].second)?.let { media[i] = ChatMedia(null, it, null) }
         // A big picture (photo notification) goes with the last message.
         @Suppress("DEPRECATION")
         val pic = ex.getParcelable<android.graphics.Bitmap>(Notification.EXTRA_PICTURE)
@@ -105,6 +106,19 @@ class NotificationService : NotificationListenerService() {
         return ChatInfo(sbn.packageName, convo?.takeIf { it.isNotBlank() } ?: title, msgs.takeLast(keep),
             sbn.notification.contentIntent, sbn.postTime, media.takeLast(keep),
             replyAction?.actionIntent, replyAction?.remoteInputs)
+    }
+
+    /** "Sent a photo", "📷 Photo", "sent a video"… → the kind of attachment (the app kept the file). */
+    private fun guessAttachment(t: String): String? {
+        val x = t.lowercase()
+        return when {
+            x.contains("sent a photo") || x.contains("sent photos") || x.startsWith("📷") || x == "photo" || x.contains("sent an image") -> "image/*"
+            x.contains("sent a video") || x.startsWith("🎥") || x.startsWith("🎬") || x == "video" -> "video/*"
+            x.contains("voice message") || x.contains("sent an audio") || x.startsWith("🎤") || x == "audio" -> "audio/*"
+            x.contains("sent a sticker") || x == "sticker" -> "sticker/*"
+            x.contains("sent an attachment") || x.contains("sent a file") || x.startsWith("📄") || x.contains("document") -> "application/document"
+            else -> null
+        }
     }
 
     /** Decode a chat photo the app shared with notifications (small, to save memory). */
@@ -185,6 +199,14 @@ class ChatInfo(
 
 /** A photo or file attached to a chat message. */
 class ChatMedia(val image: android.graphics.Bitmap?, val mime: String, val uri: android.net.Uri?) {
+    val emoji get() = when {
+        mime.startsWith("image/") -> "📷"
+        mime.startsWith("video/") -> "🎬"
+        mime.startsWith("audio/") -> "🎤"
+        mime.contains("sticker") -> "😊"
+        mime.contains("pdf") || mime.contains("document") -> "📄"
+        else -> "📎"
+    }
     val label get() = when {
         mime.startsWith("image/") -> "Photo"
         mime.startsWith("video/") -> "Video"

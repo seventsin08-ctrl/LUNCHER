@@ -213,18 +213,18 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                             outline.setRoundRect(0, 0, view.width, view.height, dp(12).toFloat())
                     }
                     clipToOutline = true
-                    setOnClickListener { showViewer(med.image, open) }
+                    setOnClickListener { showViewer(med.image, open, med) }
                 }, android.widget.LinearLayout.LayoutParams(dp(176), android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     topMargin = dp(2); bottomMargin = if (msg.isNotBlank()) dp(5) else 0
                 })
             } else if (med != null) {
                 // Video, voice message, PDF…: a chip that opens it in the app.
                 bubble.addView(android.widget.TextView(ctx).apply {
-                    text = "📎  ${med.label}"; textSize = 13f; setTextColor(Color.WHITE)
+                    text = "${med.emoji}  ${med.label} · View"; textSize = 13f; setTextColor(Color.WHITE)
                     typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                     setPadding(dp(10), dp(7), dp(10), dp(7))
                     background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x33FFFFFF) }
-                    setOnClickListener { retract(); open() }
+                    setOnClickListener { showViewer(null, open, med) }
                 })
             }
             if (msg.isNotBlank()) bubble.addView(android.widget.TextView(ctx).apply { text = msg; textSize = 14f; setTextColor(Color.WHITE) })
@@ -270,6 +270,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     input.setText("")
                     scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
                     root.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                    if (centered) root.postDelayed({ returnCardHome() }, 1400)
                 } else android.widget.Toast.makeText(act, "This app doesn't allow replies here", android.widget.Toast.LENGTH_SHORT).show()
             }
             send.setOnClickListener { doSend() }
@@ -299,6 +300,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
         card = root; cardLp = l
+        cardHomeX = l.x; cardHomeY = l.y; centered = false
         // Grows out of the side island.
         root.pivotX = if (isRight) width.toFloat() else 0f
         root.pivotY = root.measuredHeight / 2f
@@ -332,7 +334,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private var viewer: View? = null
 
     /** Opens a photo in a window under the chat (or centred / full screen — Settings › Chat Window). */
-    fun showViewer(bmp: Bitmap, open: (() -> Unit)?) {
+    fun showViewer(bmp: Bitmap?, open: (() -> Unit)?, media: ChatMedia? = null) {
         hideViewer(immediate = true)
         val hudLp = lp ?: return
         val w = wm ?: return
@@ -340,9 +342,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val m = ctx.resources.displayMetrics
         holding = true
         view?.removeCallbacks(backToRest)
-        val pos = settings.viewerPos
+        // With a chat open, the photo/attachment window takes the middle and the chat slides under it.
+        val stacked = card != null
+        val pos = if (stacked) "center" else settings.viewerPos
         val full = pos == "full"
-        val width = when (pos) { "below" -> dp(268); "center" -> (m.widthPixels * 0.88f).toInt(); else -> m.widthPixels }
+        val width = when { stacked -> (m.widthPixels * 0.86f).toInt(); pos == "below" -> dp(268); pos == "center" -> (m.widthPixels * 0.88f).toInt(); else -> m.widthPixels }
         val bg = when (settings.viewerBg) {
             "glass" -> Color.argb(205, 44, 44, 48)
             "theme" -> IconFactory.blend(Color.BLACK, ThemeEngine.accent, 0.35f) or 0xF0000000.toInt()
@@ -359,8 +363,32 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             elevation = dp(12).toFloat()
         }
         val shape = settings.viewerShape
+        // Top bar: what it is + ✕
+        val top = FrameLayout(ctx)
+        top.addView(android.widget.TextView(ctx).apply {
+            text = media?.let { "${it.emoji}  ${it.label}" } ?: "📷  Photo"; textSize = 13f; setTextColor(0xCCFFFFFF.toInt())
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(dp(6), 0, 0, 0)
+        }, FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.START or Gravity.CENTER_VERTICAL))
+        top.addView(android.widget.TextView(ctx).apply {
+            text = "✕"; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0x40FFFFFF) }
+            setOnClickListener { hideViewer(toMiddle = true) }
+        }, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.END or Gravity.CENTER_VERTICAL))
+        root.addView(top, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { bottomMargin = dp(8) })
+        if (bmp == null) {
+            // The app didn't share the file itself (e.g. Messenger's "Sent a photo"): a card to open it there.
+            root.addView(android.widget.TextView(ctx).apply {
+                text = media?.emoji ?: "📎"; textSize = 54f; gravity = Gravity.CENTER
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(0x1FFFFFFF) }
+            }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(170)))
+            root.addView(android.widget.TextView(ctx).apply {
+                text = "This app keeps the ${media?.label?.lowercase() ?: "file"} inside the app — open it there to see it."
+                textSize = 13f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), 0)
+            })
+        }
         val img = android.widget.ImageView(ctx).apply {
-            setImageBitmap(bmp)
+            if (bmp != null) setImageBitmap(bmp)
             adjustViewBounds = shape != "circle"
             scaleType = if (shape == "circle") android.widget.ImageView.ScaleType.CENTER_CROP else android.widget.ImageView.ScaleType.FIT_CENTER
             outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -377,7 +405,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             setOnClickListener { hideViewer() }
         }
         val maxH = if (full) (m.heightPixels * 0.75f).toInt() else dp(if (pos == "below") 260 else 420)
-        if (shape == "circle") root.addView(img, android.widget.LinearLayout.LayoutParams(minOf(width - dp(20), maxH), minOf(width - dp(20), maxH)))
+        if (bmp == null) Unit
+        else if (shape == "circle") root.addView(img, android.widget.LinearLayout.LayoutParams(minOf(width - dp(20), maxH), minOf(width - dp(20), maxH)))
         else { img.maxHeight = maxH; root.addView(img, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)) }
         val bar = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         fun pill(t: String, fn: () -> Unit) = android.widget.TextView(ctx).apply {
@@ -389,8 +418,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }.also { bar.addView(it, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(5), dp(10), dp(5), 0) }) }
         if (open != null) pill("Open in App") { hideViewer(); retract(); open() }
-        pill("Close") { hideViewer() }
         root.addView(bar)
+        root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec((m.heightPixels * 0.62f).toInt(), View.MeasureSpec.AT_MOST))
 
         val cl = cardLp
         val c = card
@@ -401,6 +431,14 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             PixelFormat.TRANSLUCENT).apply {
             token = hudLp.token
             when {
+                stacked && cl != null && c != null -> {
+                    // Middle of the screen; the chat window goes right under it.
+                    gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
+                    val total = root.measuredHeight + dp(12) + c.height
+                    val topY = ((m.heightPixels - total) / 2).coerceAtLeast(dp(40))
+                    x = (m.widthPixels - width) / 2; y = topY
+                    moveCard((m.widthPixels - c.width) / 2, topY + root.measuredHeight + dp(12))
+                }
                 full || pos == "center" -> gravity = Gravity.CENTER
                 cl != null && c != null -> {
                     gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
@@ -413,7 +451,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         viewer = root
         // Opening animation (Settings › Chat Window › Photo Animation).
         root.cameraDistance = 9000f * m.density
-        root.pivotX = if (pos == "below") (if (isRight) width.toFloat() else 0f) else width / 2f
+        root.pivotX = if (pos == "below" && !stacked) (if (isRight) width.toFloat() else 0f) else width / 2f
         root.pivotY = 0f
         when (settings.viewerAnim) {
             "slide" -> { root.alpha = 0f; root.translationY = -dp(40).toFloat()
@@ -427,11 +465,55 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         root.postDelayed({ if (viewer === root) hideViewer() }, 30_000)
     }
 
-    fun hideViewer(immediate: Boolean = false) {
+    /** Where the chat window normally sits (next to the side island). */
+    private var cardHomeX = 0
+    private var cardHomeY = 0
+    /** The chat window is in the middle of the screen (after viewing a photo). */
+    private var centered = false
+
+    /** Glide the chat window to a new spot. */
+    private fun moveCard(toX: Int, toY: Int) {
+        val c = card ?: return
+        val l = cardLp ?: return
+        val fx = l.x; val fy = l.y
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 380; interpolator = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                l.x = (fx + (toX - fx) * f).toInt(); l.y = (fy + (toY - fy) * f).toInt()
+                if (c.isAttachedToWindow) runCatching { wm?.updateViewLayout(c, l) }
+            }
+            start()
+        }
+    }
+
+    /** After replying from the middle, the chat window goes back beside the side island. */
+    private fun returnCardHome() {
+        if (!centered) return
+        centered = false
+        holding = false
+        moveCard(cardHomeX, cardHomeY)
+        view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000)
+    }
+
+    fun hideViewer(immediate: Boolean = false, toMiddle: Boolean = false) {
         val v = viewer ?: return
         viewer = null
         holding = false
-        if (card != null) { view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000) }
+        val c = card
+        if (c != null && toMiddle) {
+            // ✕ on the photo: the chat window moves to the middle so you can answer.
+            val m = act.resources.displayMetrics
+            centered = true
+            holding = true
+            moveCard((m.widthPixels - c.width) / 2, ((m.heightPixels - c.height) / 2).coerceAtLeast(dp(40)))
+            view?.removeCallbacks(backToRest)
+            // If you don't reply, it goes back to the side after a while.
+            view?.postDelayed({ if (centered && viewer == null) returnCardHome() }, 12_000)
+        } else if (c != null && !immediate) {
+            if (centered || cardLp?.x != cardHomeX) { centered = true; returnCardHome() }
+            else { view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000) }
+        }
         if (immediate) { runCatching { wm?.removeViewImmediate(v) }; return }
         v.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(180).withEndAction { runCatching { wm?.removeViewImmediate(v) } }.start()
     }
@@ -445,7 +527,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             intArrayOf(0xFF2E3A59.toInt(), 0xFF8E5CF2.toInt(), 0xFFFF8A5C.toInt()), null, android.graphics.Shader.TileMode.CLAMP) }
         c.drawRect(0f, 0f, 600f, 420f, p)
         p.shader = null; p.color = 0x55FFFFFF; c.drawCircle(440f, 120f, 60f, p)
-        showViewer(b, null)
+        showViewer(b, null, null)
     }
 
     private fun hideCard(immediate: Boolean = false) {
