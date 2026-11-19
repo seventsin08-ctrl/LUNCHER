@@ -111,6 +111,17 @@ class Settings(ctx: Context) {
     var sidebarY: Int
         get() = p.getInt("s_sidebar_y", 260)
         set(v) { p.edit().putInt("s_sidebar_y", v).apply() }
+    /** 60..140 % — panel width and app size. Saved without refreshing the Home Screen. */
+    var sidebarScale: Int
+        get() = p.getInt("s_sidebar_scale", 85)
+        set(v) { p.edit().putInt("s_sidebar_scale", v).apply() }
+    /** Panel height as % of the screen, 35..90. */
+    var sidebarHeight: Int
+        get() = p.getInt("s_sidebar_height", 72)
+        set(v) { p.edit().putInt("s_sidebar_height", v).apply() }
+    var sidebarLabels: Boolean
+        get() = p.getBoolean("s_sidebar_labels", true)
+        set(v) { p.edit().putBoolean("s_sidebar_labels", v).apply() }
     var sidebarApps: List<String>
         get() = (p.getString("s_sidebar_apps", "") ?: "").split('|').filter { it.isNotEmpty() }
         set(v) = put("s_sidebar_apps", v.joinToString("|"))

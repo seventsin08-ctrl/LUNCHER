@@ -40,6 +40,9 @@ class Sidebar(
     private val launch: (AppInfo) -> Unit
 ) {
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
+    /** Size of the panel and its apps (Settings › Sidebar › Size, or pinch the open panel). */
+    private val k get() = settings.sidebarScale / 100f
+    private fun sp(v: Int) = (v * k * act.resources.displayMetrics.density).roundToInt()
 
     private var wm: WindowManager? = null
     private var handle: View? = null
@@ -96,7 +99,16 @@ class Sidebar(
         if (panelRoot != null) return
         val w = wm ?: return
         val right = settings.sidebarRight
-        val root = FrameLayout(act).apply { clipChildren = false; clipToPadding = false; setPadding(dp(10), 0, dp(10), 0) }
+        var pinchRef: android.view.ScaleGestureDetector? = null
+        // Sees every touch first, so a two-finger pinch works even on top of the app icons.
+        val root = object : FrameLayout(act) {
+            override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+                val p = pinchRef
+                if (p != null && e.pointerCount > 1) { p.onTouchEvent(e); return true }
+                if (p != null && p.isInProgress) { p.onTouchEvent(e); return true }
+                return super.dispatchTouchEvent(e)
+            }
+        }.apply { clipChildren = false; clipToPadding = false; setPadding(dp(10), 0, dp(10), 0) }
         val card = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -117,7 +129,7 @@ class Sidebar(
                 background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(0x66FFFFFF) }
             }, LinearLayout.LayoutParams(dp(28), dp(3)).apply { setMargins(0, dp(4), 0, dp(12)) })
             val item = appItem(a.label, a) { launch(a); close() }
-            col.addView(item, LinearLayout.LayoutParams(dp(78), WRAP_CONTENT).apply { bottomMargin = dp(10) })
+            col.addView(item, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT).apply { bottomMargin = sp(10) })
             items += item
         }
         // Edit: opens the Sidebar page in Settings to add, remove or reorder apps.
@@ -128,7 +140,7 @@ class Sidebar(
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
-        col.addView(edit, LinearLayout.LayoutParams(dp(78), WRAP_CONTENT))
+        col.addView(edit, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT))
         items += edit
         card.addView(scroll, LinearLayout.LayoutParams(WRAP_CONTENT, 0, 1f))
         val back = TextView(act).apply {
@@ -136,9 +148,26 @@ class Sidebar(
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x33FFFFFF) }
             setOnClickListener { close() }
         }
-        card.addView(back, LinearLayout.LayoutParams(dp(44), dp(44)).apply { topMargin = dp(8) })
+        card.addView(back, LinearLayout.LayoutParams(sp(44), sp(44)).apply { topMargin = dp(8) })
         val screenH = act.resources.displayMetrics.heightPixels
-        root.addView(card, FrameLayout.LayoutParams(dp(100), (screenH * 0.72f).toInt(), Gravity.CENTER_VERTICAL))
+        root.addView(card, FrameLayout.LayoutParams(sp(100), (screenH * settings.sidebarHeight / 100f).toInt(), Gravity.CENTER_VERTICAL))
+        // Pinch the open panel to make it (and its apps) bigger or smaller.
+        val pinch = android.view.ScaleGestureDetector(act, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            var start = 0f
+            override fun onScaleBegin(d: android.view.ScaleGestureDetector): Boolean { start = settings.sidebarScale.toFloat(); return true }
+            override fun onScale(d: android.view.ScaleGestureDetector): Boolean {
+                start *= d.scaleFactor
+                val v = start.toInt().coerceIn(60, 140)
+                card.scaleX = v / settings.sidebarScale.toFloat(); card.scaleY = card.scaleX
+                return true
+            }
+            override fun onScaleEnd(d: android.view.ScaleGestureDetector) {
+                settings.sidebarScale = start.toInt().coerceIn(60, 140)
+                card.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                close(immediate = true); open()
+            }
+        })
+        pinchRef = pinch
         root.setOnTouchListener { _, e -> if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) close(); false }
 
         val lp = WindowManager.LayoutParams(
@@ -214,13 +243,13 @@ class Sidebar(
             clipToOutline = true
         }
         val box = FrameLayout(act)
-        box.addView(icon, FrameLayout.LayoutParams(dp(54), dp(54)))
+        box.addView(icon, FrameLayout.LayoutParams(sp(54), sp(54)))
         if (app == null) box.addView(TextView(act).apply {
             text = "+"; textSize = 28f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-        }, FrameLayout.LayoutParams(dp(54), dp(54)))
-        v.addView(box, LinearLayout.LayoutParams(dp(54), dp(54)))
+        }, FrameLayout.LayoutParams(sp(54), sp(54)))
+        v.addView(box, LinearLayout.LayoutParams(sp(54), sp(54)))
         v.addView(TextView(act).apply {
-            text = label; textSize = 12f; setTextColor(Color.WHITE); maxLines = 2; gravity = Gravity.CENTER
+            text = label; textSize = 12f * k.coerceIn(0.8f, 1.2f); visibility = if (settings.sidebarLabels) View.VISIBLE else View.GONE; setTextColor(Color.WHITE); maxLines = 2; gravity = Gravity.CENTER
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(5) })
         return v

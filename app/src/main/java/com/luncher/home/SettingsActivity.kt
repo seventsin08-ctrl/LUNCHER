@@ -560,6 +560,9 @@ class SettingsActivity : Activity() {
                 }
             }
             if (s.sidebarApps.size > 1) button(side, "Change Order…", 0xFF0A84FF.toInt()) { reorderSidebar() }
+            slider(side, "Size", 60, 140, s.sidebarScale, { "$it%" }) { s.sidebarScale = it }
+            slider(side, "Height", 35, 90, s.sidebarHeight, { "$it%" }) { s.sidebarHeight = it }
+            toggle(side, "App Names", "Show names under the icons", s.sidebarLabels) { s.sidebarLabels = it }
             segment(side, "Side", listOf("left" to "Left Edge", "right" to "Right Edge"),
                 if (s.sidebarRight) "right" else "left") { s.sidebarRight = it == "right" }
             toggle(side, "Show Over Other Apps", "Use the sidebar inside any app, not only on the Home Screen",
@@ -569,7 +572,8 @@ class SettingsActivity : Activity() {
                     runCatching { startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
                 }
             }
-            info(side, "Tip: tap or swipe the handle inward to open. Long-press the handle and drag to move it up or down.")
+            info(side, "Tip: tap or swipe the handle inward to open. Pinch the open sidebar to resize it. " +
+                "Long-press the handle and drag to move it up or down.")
         }
 
         // ---------------- Reset (starts again with the "hello" setup screen)
