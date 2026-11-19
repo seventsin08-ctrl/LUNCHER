@@ -699,7 +699,7 @@ class SettingsActivity : Activity() {
         segment(content, "Pop-up Length", listOf("2500" to "Short", "4500" to "Normal", "8000" to "Long"),
             s.islandPopupMs.toString()) { s.islandPopupMs = it.toInt() }
 
-        toggle(isl, "Always Show Island", "A small island stays at the top; pull it down (or tap it) for quick controls",
+        toggle(isl, "Always Show Island", "A small island stays at the top",
             s.islandAlways) { s.islandAlways = it; previewChanged() }
 
         // ---------------- Island tools bar (shown when nothing is playing)

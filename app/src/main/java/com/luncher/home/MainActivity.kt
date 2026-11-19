@@ -330,7 +330,7 @@ class MainActivity : Activity() {
         island.popupMs = settings.islandPopupMs.toLong()
         island.alwaysShow = settings.islandAlways
         island.idleTools = null // the tools bar is its own always-on window now (ToolsBar)
-        island.quickActions = { quickActions() }
+        island.quickActions = null // only one tools bar (ToolsBar) — none inside the island
         island.allow = { id ->
             settings.islandAllows(when {
                 id == "timerdone" -> "timer"
