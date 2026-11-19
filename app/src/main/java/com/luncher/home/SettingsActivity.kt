@@ -359,8 +359,6 @@ class SettingsActivity : Activity() {
 
         // ---------------- Appearance
         val look = section("APPEARANCE")
-        toggle(look, "Holographic Settings", "Settings look like a hologram in your theme colour (from the wallpaper, " +
-            "system theme or your own colour). Off = the classic dark style", s.holoSettings) { s.holoSettings = it; recreate() }
         previewRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER

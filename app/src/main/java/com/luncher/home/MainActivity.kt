@@ -852,8 +852,8 @@ class MainActivity : Activity() {
             lockScreen()
         }
         list += QuickAction(R.drawable.ic_set_gear, "Settings", { false }) {
-            // The launcher's own settings, as a hologram (gear spins, apps fade, panels pop in).
-            root.postDelayed({ holo.open() }, 180)
+            // The launcher's own settings (classic design).
+            root.postDelayed({ runCatching { startActivity(Intent(this, SettingsActivity::class.java)) } }, 180)
         }
         return list
     }

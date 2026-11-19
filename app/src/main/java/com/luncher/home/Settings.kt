@@ -277,7 +277,7 @@ class Settings(ctx: Context) {
         set(v) { p.edit().putBoolean("s_game_mode", v).apply() }
     /** Settings pages drawn as a hologram in the theme colour. */
     var holoSettings: Boolean
-        get() = p.getBoolean("s_holo_settings", true)
+        get() = false // hologram look removed: classic Settings design
         set(v) = put("s_holo_settings", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
