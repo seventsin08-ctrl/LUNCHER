@@ -91,9 +91,144 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         onOpen = open
     }
 
+    // ---------------------------------------------------------------- chat window
+
+    private var card: View? = null
+    private var cardLp: WindowManager.LayoutParams? = null
+
+    /**
+     * A chat came in: the side island shows the app icon and a small window slides out beside it
+     * with the app's logo, the chat name and the latest messages (scroll to read more).
+     * Tap a message to open that chat; ✕ or wait to close it.
+     */
+    fun chat(icon: Bitmap?, appLabel: String, chat: ChatInfo, open: () -> Unit) {
+        message(icon, chat.title, chat.messages.lastOrNull()?.second ?: "", open)
+        val v = view ?: return
+        v.cardShown = true
+        v.invalidate()
+        showCard(icon, appLabel, chat, open)
+        v.removeCallbacks(backToRest)
+        v.postDelayed(backToRest, 9000)
+    }
+
+    private fun showCard(icon: Bitmap?, appLabel: String, chat: ChatInfo, open: () -> Unit) {
+        hideCard(immediate = true)
+        val hudLp = lp ?: return
+        val w = wm ?: return
+        val ctx = act
+        val width = dp(268)
+        val root = object : android.widget.LinearLayout(ctx) {
+            // Touching the window keeps it open; letting go starts the timer again.
+            override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+                val hv = view
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> hv?.removeCallbacks(backToRest)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> hv?.postDelayed(backToRest, 6000)
+                }
+                return super.dispatchTouchEvent(e)
+            }
+        }.apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(24).toFloat()
+                setColor(Color.argb(236, 20, 20, 22)); setStroke(maxOf(1, dp(1)), Color.argb(45, 255, 255, 255))
+            }
+            elevation = dp(10).toFloat()
+        }
+        // Header: platform logo + app name, close button
+        val head = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(android.widget.ImageView(ctx).apply {
+            if (icon != null) setImageBitmap(icon)
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.26f)
+            }
+            clipToOutline = true
+        }, android.widget.LinearLayout.LayoutParams(dp(18), dp(18)))
+        head.addView(android.widget.TextView(ctx).apply {
+            text = "${appLabel.uppercase()} · now"; textSize = 11f; setTextColor(0x99FFFFFF.toInt())
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(dp(7), 0, 0, 0)
+        }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(android.widget.TextView(ctx).apply {
+            text = "✕"; textSize = 12f; setTextColor(0xCCFFFFFF.toInt()); gravity = Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0x33FFFFFF) }
+            setOnClickListener { retract() }
+        }, android.widget.LinearLayout.LayoutParams(dp(24), dp(24)))
+        root.addView(head)
+        root.addView(android.widget.TextView(ctx).apply {
+            text = chat.title; textSize = 15f; setTextColor(Color.WHITE); maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            typeface = Typeface.create("sans-serif", Typeface.BOLD); setPadding(0, dp(8), 0, dp(6))
+            setOnClickListener { retract(); open() }
+        })
+        // Scrollable list of the latest messages (newest at the bottom).
+        val scroll = object : android.widget.ScrollView(ctx) {
+            override fun onMeasure(wSpec: Int, hSpec: Int) =
+                super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec(dp(190), View.MeasureSpec.AT_MOST))
+        }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        val showNames = chat.messages.map { it.first }.filter { it.isNotBlank() }.toSet().size > 1
+        for ((who, msg) in chat.messages) {
+            val mine = who == "You" || who.equals("me", true)
+            val bubble = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(dp(11), dp(7), dp(11), dp(8))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(16).toFloat(); setColor(if (mine) 0xFF0A84FF.toInt() else 0x2EFFFFFF)
+                }
+                setOnClickListener { retract(); open() }
+            }
+            if (showNames && who.isNotBlank() && !mine) bubble.addView(android.widget.TextView(ctx).apply {
+                text = who; textSize = 11f; setTextColor(0xB3FFFFFF.toInt())
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            })
+            bubble.addView(android.widget.TextView(ctx).apply { text = msg; textSize = 14f; setTextColor(Color.WHITE) })
+            list.addView(bubble, android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(5); gravity = if (mine) Gravity.END else Gravity.START
+            })
+        }
+        scroll.addView(list)
+        root.addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+
+        root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(dp(320), View.MeasureSpec.AT_MOST))
+        val center = hudLp.y + dp(125)
+        val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT).apply {
+            gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
+            x = dp(66)
+            y = (center - root.measuredHeight / 2).coerceAtLeast(dp(30))
+            token = hudLp.token
+        }
+        if (runCatching { w.addView(root, l) }.isFailure) return
+        card = root; cardLp = l
+        // Grows out of the side island.
+        root.pivotX = if (isRight) width.toFloat() else 0f
+        root.pivotY = root.measuredHeight / 2f
+        root.alpha = 0f; root.scaleX = 0.5f; root.scaleY = 0.7f
+        root.animate().alpha(1f).setDuration(180).start()
+        Motion.scaleTo(root, 1f, Motion.BOUNCY)
+    }
+
+    private fun hideCard(immediate: Boolean = false) {
+        val c = card ?: return
+        card = null; cardLp = null
+        view?.cardShown = false
+        if (immediate) { runCatching { wm?.removeViewImmediate(c) }; return }
+        c.animate().alpha(0f).scaleX(0.6f).scaleY(0.8f).setDuration(180)
+            .withEndAction { runCatching { wm?.removeViewImmediate(c) } }.start()
+    }
+
     private fun show(kind: Kind, fill: (HudView) -> Unit) {
         val v = view ?: create() ?: return
         val wasRest = v.kind == Kind.REST
+        if (kind != Kind.MESSAGE) hideCard()
         v.kind = kind
         fill(v)
         size(kind)
@@ -145,6 +280,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
 
     /** Shrink back to the resting bump (or away if resting is off). */
     private fun retract() {
+        hideCard()
         val v = view ?: return
         onOpen = null
         v.growTo(0f) {
@@ -162,6 +298,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     fun dismiss() {
+        hideCard(immediate = true)
         val v = view ?: return
         view = null; lp = null; createdRight = null
         runCatching { wm?.removeViewImmediate(v) }
@@ -175,6 +312,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         var appIcon: Bitmap? = null
         var icons: List<Drawable> = emptyList()
         var grown = 0f
+        var cardShown = false
         private var spring: SpringAnimation? = null
         private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
         private val mirror = android.graphics.Matrix()
@@ -304,6 +442,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                         r.set(ix, iy, ix + s, iy + s); c.drawBitmap(bmp, null, r, p)
                         c.restore()
                     }
+                    if (cardShown) return
                     val tx = bodyW + dp(12); val maxW = (width - tx - dp(8)).coerceAtLeast(dp(40).toFloat())
                     text.alpha = (255 * a).toInt(); small.alpha = (240 * a).toInt()
                     val t = TextUtils.ellipsize(label ?: "", text, maxW, TextUtils.TruncateAt.END).toString()

@@ -486,6 +486,8 @@ class SettingsActivity : Activity() {
             toggle(side2, "Messages", "New messages slide out with the app icon, sender and text (tap to open, swipe left to dismiss)",
                 s.sideMessages) { s.sideMessages = it; rebuild() }
             if (s.sideMessages) {
+                toggle(side2, "Chat Window", "A small window beside the side island with the app's logo and the latest " +
+                    "messages — scroll to read, tap to open the chat", s.sideChatCard) { s.sideChatCard = it }
                 segment(side2, "Messages From", listOf("all" to "All Apps", "chosen" to "Chosen Apps"), s.sideMsgMode) {
                     s.sideMsgMode = it
                 }

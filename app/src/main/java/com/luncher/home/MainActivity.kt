@@ -5278,12 +5278,21 @@ class MainActivity : Activity() {
         // Messages come out of the side island; the top island stays for music, timers and calls.
         if (settings.sideHud && settings.sideMessages && ::sideHud.isInitialized &&
             (settings.sideMsgMode == "all" || pkg in settings.sideMsgApps)) {
-            sideHud.message(app?.icon, title.ifBlank { app?.label ?: "Message" }, text) {
+            val openApp = {
                 if (app != null) runCatching {
                     startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(app.component)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
                 }
+                Unit
             }
+            val chat = NotificationService.lastChat[pkg]
+            if (settings.sideChatCard && chat != null) {
+                // Small chat window: platform logo, chat name and the latest messages; tap opens that chat.
+                sideHud.chat(app?.icon, app?.label ?: "Messages", chat) {
+                    val pi = chat.open
+                    if (pi != null) IslandServices.send(this, pi) else openApp()
+                }
+            } else sideHud.message(app?.icon, title.ifBlank { app?.label ?: "Message" }, text) { openApp() }
             return
         }
         // Top island (when messages aren't going to the side island): its own app filter applies.

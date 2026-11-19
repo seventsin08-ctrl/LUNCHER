@@ -168,6 +168,10 @@ class Settings(ctx: Context) {
     var sideY: Int
         get() = p.getInt("s_side_y", 30)
         set(v) { p.edit().putInt("s_side_y", v).apply() }
+    /** Show a small scrollable chat window beside the side island for new messages. */
+    var sideChatCard: Boolean
+        get() = p.getBoolean("s_side_chat", true)
+        set(v) = put("s_side_chat", v)
     /** Which edge: false = left, true = right. */
     var sideRight: Boolean
         get() = p.getBoolean("s_side_right", false)
