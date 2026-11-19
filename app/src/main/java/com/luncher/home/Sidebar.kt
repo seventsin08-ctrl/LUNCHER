@@ -65,6 +65,23 @@ class Sidebar(
         }
     }
 
+    /**
+     * Keep the handle out of the side island's area when both are on the same edge
+     * (the side island, its volume slider and the chat button below it).
+     */
+    private fun clearOfSideIsland(y: Int): Int {
+        if (!settings.sideHud || settings.sidebarRight != settings.sideRight) return y
+        val h = act.resources.displayMetrics.heightPixels
+        val center = (h * settings.sideY / 100f).toInt()
+        val zoneTop = center - dp(115)
+        val zoneBottom = center + dp(150)
+        val handleH = dp(96)
+        if (y + handleH < zoneTop || y > zoneBottom) return y
+        val below = zoneBottom + dp(12)
+        val above = zoneTop - handleH - dp(12)
+        return if (below + handleH < h - dp(80)) below else above.coerceAtLeast(dp(40))
+    }
+
     /** Show (or refresh) the edge handle. */
     fun attach() {
         detach()
@@ -84,7 +101,7 @@ class Sidebar(
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = (if (right) Gravity.END else Gravity.START) or Gravity.TOP
-            y = dp(settings.sidebarY)
+            y = clearOfSideIsland(dp(settings.sidebarY))
             if (!overApps) token = host?.window?.decorView?.windowToken
             // Stay put over full-screen games and videos (including in the notch area).
             if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =

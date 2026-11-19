@@ -45,6 +45,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private var onOpen: (() -> Unit)? = null
     /** Set by the launcher: play / pause the current music (for "Tap the Sliver For → Play / Pause"). */
     var onPlayPause: (() -> Unit)? = null
+    /** Called after you drag the side island somewhere new (the sidebar handle moves out of its way). */
+    var onMoved: (() -> Unit)? = null
 
     private val audio get() = act.getSystemService(AudioManager::class.java)
     private val isRight get() = settings.sideRight
@@ -985,6 +987,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                         moving = false
                         val h = act.resources.displayMetrics.heightPixels.toFloat()
                         settings.sideY = (((lp?.y ?: 0) + dp(125)) / h * 100f).roundToInt().coerceIn(5, 90)
+                        onMoved?.invoke()
                         performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                         postDelayed(backToRest, 1200)
                         return true

@@ -381,6 +381,7 @@ class MainActivity : Activity() {
         startPrivacyWatch()
         sideHud = SideHud(this, settings)
         sideHud.onPlayPause = { togglePlay() }
+        sideHud.onMoved = { setupSidebar() }
         sideHud.historyProvider = { NotificationService.chatHistory.values.toList() }
         sideHud.appLookup = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } }
         sideHud.openChat = { c ->

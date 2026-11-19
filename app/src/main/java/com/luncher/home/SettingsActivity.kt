@@ -569,7 +569,7 @@ class SettingsActivity : Activity() {
             slider(side2, "Visibility", 30, 100, s.sideOpacity, { "$it%" },
                 live = { s.sideOpacity = it; sidePreview?.rest() }) { s.sideOpacity = it; previewSide() }
             slider(side2, "Position on Edge", 10, 80, s.sideY, { "$it%" },
-                live = { s.sideY = it; sidePreview?.rest() }) { s.sideY = it; previewSide() }
+                live = { s.sideY = it; sidePreview?.rest() }) { s.sideY = it; previewSide(); runCatching { SidebarService.sync(this) } }
             button(side2, "Preview Side Island", 0xFF0A84FF.toInt()) { previewSide() }
             segment(side2, "Stays For", listOf("1200" to "Short", "1800" to "Normal", "3500" to "Long"), s.sideMs.toString()) {
                 s.sideMs = it.toInt()
