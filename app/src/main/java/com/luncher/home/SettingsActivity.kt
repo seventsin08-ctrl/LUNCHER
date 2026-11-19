@@ -60,6 +60,22 @@ class SettingsActivity : Activity() {
     private lateinit var navBar: FrameLayout
     private var largeTitle: View? = null
 
+    /** Hologram entrance: each card tilts in and flickers as it locks into place. */
+    private fun holoIn() {
+        val ease = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
+        for (i in 0 until minOf(list.childCount, 14)) {
+            val v = list.getChildAt(i)
+            v.cameraDistance = 9000f * resources.displayMetrics.density
+            v.alpha = 0f; v.rotationX = -22f; v.translationY = dp(14).toFloat()
+            v.animate().alpha(1f).rotationX(0f).translationY(0f).setStartDelay(40L + i * 35L).setDuration(380)
+                .setInterpolator(ease).withEndAction {
+                    android.animation.ValueAnimator.ofFloat(1f, 0.6f, 1f, 0.8f, 1f).apply {
+                        duration = 220; addUpdateListener { a -> v.alpha = a.animatedValue as Float }; start()
+                    }
+                }.start()
+        }
+    }
+
     private fun open(id: String?, forward: Boolean) {
         page = id
         build()
@@ -70,6 +86,7 @@ class SettingsActivity : Activity() {
         list.alpha = 0f
         list.animate().translationX(0f).alpha(1f).setDuration(260)
             .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+        if (holo) holoIn()
         updateNav()
         list.post { updatePreviewVisibility() }
     }
@@ -88,12 +105,25 @@ class SettingsActivity : Activity() {
         val shown = t == null || scrollY > t.bottom - dp(10)
         navTitle.alpha = if (shown) 1f else 0f
         navBar.background = if (shown) GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(0xF2000000.toInt(), 0xCC000000.toInt(), 0x00000000)) else null
+            if (holo) intArrayOf(0xF2020A12.toInt(), 0xCC020A12.toInt(), 0x00000000)
+            else intArrayOf(0xF2000000.toInt(), 0xCC000000.toInt(), 0x00000000)) else null
     }
 
+    private val holo get() = s.holoSettings
+    private var hc = 0xFF64D2FF.toInt()
+    /** Card background: glass panel with a glowing rim (hologram) or the plain dark card. */
+    private fun cardBg(r: Float = dp(26).toFloat()): GradientDrawable = if (holo) GradientDrawable(
+        GradientDrawable.Orientation.TL_BR, intArrayOf(Holo.alpha(hc, 0x2A), Holo.alpha(hc, 0x0C), Holo.alpha(hc, 0x1E))
+    ).apply { cornerRadius = r; setStroke(maxOf(1, dp(1)), Holo.alpha(hc, 0x77)) }
+        else GradientDrawable().apply { cornerRadius = r; setColor(0xFF1C1C1E.toInt()) }
+    private fun sepColor() = if (holo) Holo.alpha(hc, 0x33) else 0xFF38383A.toInt()
+    private fun chevColor() = if (holo) Holo.alpha(hc, 0xAA) else 0xFF5A5A5F.toInt()
+
     private fun iconSquare(res: Int, color: Int, size: Int = dp(30)) = FrameLayout(this).apply {
-        background = GradientDrawable().apply { cornerRadius = size * 0.26f; setColor(color) }
-        addView(ImageView(this@SettingsActivity).apply { setImageResource(res); setColorFilter(Color.WHITE) },
+        background = if (holo) GradientDrawable().apply {
+            cornerRadius = size * 0.26f; setColor(Holo.alpha(hc, 0x22)); setStroke(maxOf(1, dp(1)), Holo.alpha(hc, 0xAA))
+        } else GradientDrawable().apply { cornerRadius = size * 0.26f; setColor(color) }
+        addView(ImageView(this@SettingsActivity).apply { setImageResource(res); setColorFilter(if (holo) hc else Color.WHITE) },
             FrameLayout.LayoutParams((size * 0.62f).toInt(), (size * 0.62f).toInt(), Gravity.CENTER))
     }
 
@@ -102,7 +132,7 @@ class SettingsActivity : Activity() {
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(14))
-            background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFF1C1C1E.toInt()) }
+            background = cardBg()
         }
         head.addView(ImageView(this).apply {
             setImageDrawable(runCatching { packageManager.getApplicationIcon(packageName) }.getOrNull())
@@ -119,7 +149,7 @@ class SettingsActivity : Activity() {
             val fin = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(18), dp(14), dp(14), dp(14))
-                background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFF1C1C1E.toInt()) }
+                background = cardBg()
                 setOnClickListener { open("setup", forward = true) }
             }
             fin.addView(title("Finish Setting Up"), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
@@ -129,14 +159,14 @@ class SettingsActivity : Activity() {
                 background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFFF3B30.toInt()) }
             }, LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(8) })
             fin.addView(ImageView(this).apply {
-                setImageResource(R.drawable.ic_set_chevron); setColorFilter(0xFF5A5A5F.toInt()); rotation = 180f
+                setImageResource(R.drawable.ic_set_chevron); setColorFilter(chevColor()); rotation = 180f
             }, LinearLayout.LayoutParams(dp(16), dp(16)))
             list.addView(fin, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(22) })
         }
         for (g in groups) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFF1C1C1E.toInt()) }
+                background = cardBg()
                 clipToOutline = true
                 outlineProvider = object : android.view.ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: android.graphics.Outline) =
@@ -145,7 +175,7 @@ class SettingsActivity : Activity() {
             }
             for ((i, id) in g.withIndex()) {
                 val c = categories.first { it.id == id }
-                if (i > 0) card.addView(View(this).apply { setBackgroundColor(0xFF38383A.toInt()) },
+                if (i > 0) card.addView(View(this).apply { setBackgroundColor(sepColor()) },
                     LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(0.5f))).apply { marginStart = dp(60) })
                 val row = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -155,11 +185,11 @@ class SettingsActivity : Activity() {
                     setOnClickListener { open(c.id, forward = true) }
                 }
                 row.addView(iconSquare(c.icon, c.color).apply {
-                    if (c.color == 0xFF1C1C1E.toInt()) (background as GradientDrawable).setStroke(dp(1), 0x55FFFFFF)
+                    if (!holo && c.color == 0xFF1C1C1E.toInt()) (background as GradientDrawable).setStroke(dp(1), 0x55FFFFFF)
                 }, LinearLayout.LayoutParams(dp(30), dp(30)))
                 row.addView(title(c.title), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(14) })
                 row.addView(ImageView(this).apply {
-                    setImageResource(R.drawable.ic_set_chevron); setColorFilter(0xFF5A5A5F.toInt()); rotation = 180f
+                    setImageResource(R.drawable.ic_set_chevron); setColorFilter(chevColor()); rotation = 180f
                 }, LinearLayout.LayoutParams(dp(16), dp(16)))
                 card.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             }
@@ -206,13 +236,20 @@ class SettingsActivity : Activity() {
         scroll.addView(list, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         // The live island preview floats above the settings list.
         val frame = FrameLayout(this)
+        ThemeEngine.resolve(this, s)
+        hc = Holo.color()
+        if (holo) {
+            // Hologram backdrop (theme colour grid + scan line) behind the pages.
+            frame.addView(HoloBackdropView(this, hc), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            scroll.setBackgroundColor(Color.TRANSPARENT)
+        }
         frame.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         scrollView = scroll
         // iOS 26-style top bar: round glass back button and a small centred title.
         navBar = FrameLayout(this)
         navBack = FrameLayout(this).apply {
             background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL; setColor(0xCC2C2C2E.toInt()); setStroke(maxOf(1, dp(1)), 0x33FFFFFF)
+                shape = GradientDrawable.OVAL; setColor(0xCC2C2C2E.toInt()); setStroke(maxOf(1, dp(1)), if (holo) Holo.alpha(hc, 0xAA) else 0x33FFFFFF)
             }
             addView(ImageView(this@SettingsActivity).apply { setImageResource(R.drawable.ic_set_chevron); setColorFilter(Color.WHITE) },
                 FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
@@ -291,6 +328,11 @@ class SettingsActivity : Activity() {
             textSize = 34f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             setPadding(dp(4), dp(52), 0, dp(14))
+            if (holo) {
+                text = text.toString().uppercase(); textSize = 26f; letterSpacing = 0.14f
+                typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                setShadowLayer(dp(10).toFloat(), 0f, 0f, hc)
+            }
         }
         list.addView(largeTitle)
         if (page == null) { buildHome(); updateNav(); return }
@@ -317,6 +359,8 @@ class SettingsActivity : Activity() {
 
         // ---------------- Appearance
         val look = section("APPEARANCE")
+        toggle(look, "Holographic Settings", "Settings look like a hologram in your theme colour (from the wallpaper, " +
+            "system theme or your own colour). Off = the classic dark style", s.holoSettings) { s.holoSettings = it; recreate() }
         previewRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -991,18 +1035,16 @@ class SettingsActivity : Activity() {
     private fun section(title: String): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply {
-                cornerRadius = dp(26).toFloat()
-                setColor(0xFF1C1C1E.toInt())
-            }
+            background = cardBg()
         }
         // Sections that belong to another page are built but never shown.
         val cat = categories.firstOrNull { it.id == page } ?: return card
         if (title !in cat.sections) return card
         list.addView(TextView(this).apply {
             text = title
-            setTextColor(0xFF8E8E93.toInt())
+            setTextColor(if (holo) Holo.alpha(hc, 0xCC) else 0xFF8E8E93.toInt())
             textSize = 13f
+            if (holo) { typeface = Typeface.create("monospace", Typeface.NORMAL); letterSpacing = 0.16f }
             setPadding(dp(18), dp(20), 0, dp(8))
         })
         list.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
@@ -1011,7 +1053,7 @@ class SettingsActivity : Activity() {
 
     private fun addRow(card: LinearLayout, v: View, pad: Boolean = false) {
         if (card.childCount > 0) {
-            card.addView(View(this).apply { setBackgroundColor(0xFF38383A.toInt()) },
+            card.addView(View(this).apply { setBackgroundColor(sepColor()) },
                 LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(0.5f))).apply { marginStart = dp(16) })
         }
         if (pad) {
@@ -1051,7 +1093,7 @@ class SettingsActivity : Activity() {
             thumbTintList = ColorStateList.valueOf(Color.WHITE)
             trackTintList = ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(0xFF30D158.toInt(), 0xFF39393D.toInt())
+                intArrayOf(if (holo) hc else 0xFF30D158.toInt(), if (holo) Holo.alpha(hc, 0x40) else 0xFF39393D.toInt())
             )
             setOnCheckedChangeListener { _, checked -> onChange(checked) }
         }

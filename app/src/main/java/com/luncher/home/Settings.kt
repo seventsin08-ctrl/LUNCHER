@@ -275,6 +275,10 @@ class Settings(ctx: Context) {
     var gameMode: Boolean
         get() = p.getBoolean("s_game_mode", false)
         set(v) { p.edit().putBoolean("s_game_mode", v).apply() }
+    /** Settings pages drawn as a hologram in the theme colour. */
+    var holoSettings: Boolean
+        get() = p.getBoolean("s_holo_settings", true)
+        set(v) = put("s_holo_settings", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

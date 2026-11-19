@@ -55,7 +55,9 @@ class HoloSettings(
     )
 
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
-    private val CYAN = 0xFF64D2FF.toInt()
+    /** The hologram colour: your theme's accent (wallpaper / system / custom), or cyan for Mono. */
+    private var CYAN = Holo.color()
+    private fun a(alpha: Int) = Holo.alpha(CYAN, alpha)
     private val ease = PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
     private var layer: FrameLayout? = null
     private val faded = ArrayList<View>()
@@ -63,6 +65,7 @@ class HoloSettings(
 
     fun open() {
         if (layer != null) return
+        CYAN = Holo.color()
         val l = FrameLayout(act).apply { isClickable = true; isFocusable = true }
         val bg = HoloBackdrop(act)
         l.addView(bg, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -84,10 +87,11 @@ class HoloSettings(
             setShadowLayer(dp(10).toFloat(), 0f, 0f, CYAN)
         }
         val subtitle = TextView(act).apply {
-            text = "APPLE LAUNCHER · SYSTEM CONFIGURATION"; textSize = 10.5f; setTextColor(0xAA64D2FF.toInt()); letterSpacing = 0.22f
+            text = "APPLE LAUNCHER · SYSTEM CONFIGURATION"; textSize = 10.5f; setTextColor(a(0xAA)); letterSpacing = 0.22f
             typeface = Typeface.create("monospace", Typeface.NORMAL)
         }
-        head.addView(title); head.addView(subtitle, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(4) })
+        title.gravity = Gravity.CENTER
+        head.addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)); head.addView(subtitle, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(4) })
         content.addView(head)
 
         val scroll = ScrollView(act).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
@@ -115,7 +119,7 @@ class HoloSettings(
             typeface = Typeface.create("monospace", Typeface.BOLD)
             setShadowLayer(dp(8).toFloat(), 0f, 0f, CYAN)
             background = GradientDrawable().apply {
-                cornerRadius = dp(26).toFloat(); setColor(0x2264D2FF); setStroke(dp(1), 0xAA64D2FF.toInt())
+                cornerRadius = dp(26).toFloat(); setColor(a(0x22)); setStroke(dp(1), a(0xAA))
             }
             alpha = 0f
             setOnClickListener { performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); close() }
@@ -190,10 +194,10 @@ class HoloSettings(
         inner.addView(TextView(act).apply {
             text = c.title.uppercase(); textSize = 13f; setTextColor(Color.WHITE); letterSpacing = 0.08f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); maxLines = 1
-            setShadowLayer(dp(6).toFloat(), 0f, 0f, 0x8864D2FF.toInt())
+            setShadowLayer(dp(6).toFloat(), 0f, 0f, a(0x88))
         })
         inner.addView(TextView(act).apply {
-            text = c.sub; textSize = 10.5f; setTextColor(0xAA9FE6FF.toInt()); maxLines = 1
+            text = c.sub; textSize = 10.5f; setTextColor(Holo.alpha(Holo.light(CYAN), 0xAA)); maxLines = 1
             typeface = Typeface.create("monospace", Typeface.NORMAL)
         })
         p.addView(inner, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -223,30 +227,7 @@ class HoloSettings(
     // ================================================================ drawing
 
     /** Dark blue-black backdrop with a faint grid, a soft glow and a scan line sweeping down. */
-    private inner class HoloBackdrop(ctx: Activity) : View(ctx) {
-        private val fill = Paint()
-        private val grid = Paint().apply { color = 0x1464D2FF; strokeWidth = 1f }
-        private val scan = Paint()
-        private var t = 0f
-        private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 3200; repeatCount = ValueAnimator.INFINITE; interpolator = LinearInterpolator()
-            addUpdateListener { t = it.animatedValue as Float; invalidate() }
-        }
-        override fun onAttachedToWindow() { super.onAttachedToWindow(); anim.start() }
-        override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
-        override fun onDraw(c: Canvas) {
-            val w = width.toFloat(); val h = height.toFloat()
-            fill.shader = RadialGradient(w / 2, h * 0.38f, h * 0.7f, intArrayOf(0xF0061826.toInt(), 0xF5020A12.toInt(), 0xFA000204.toInt()),
-                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
-            c.drawRect(0f, 0f, w, h, fill)
-            val step = dp(28).toFloat()
-            var x = (w % step) / 2; while (x < w) { c.drawLine(x, 0f, x, h, grid); x += step }
-            var y = 0f; while (y < h) { c.drawLine(0f, y, w, y, grid); y += step }
-            val sy = h * t
-            scan.shader = LinearGradient(0f, sy - dp(80), 0f, sy, intArrayOf(0x0064D2FF, 0x2264D2FF), null, Shader.TileMode.CLAMP)
-            c.drawRect(0f, sy - dp(80), w, sy, scan)
-        }
-    }
+    private inner class HoloBackdrop(ctx: Activity) : HoloBackdropView(ctx, CYAN)
 
     /** Arc-reactor ring: rotating dashed arcs around a gear. */
     private inner class ReactorView(ctx: Activity) : View(ctx) {
@@ -262,14 +243,14 @@ class HoloSettings(
         override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
         override fun onDraw(c: Canvas) {
             val cx = width / 2f; val cy = height / 2f; val r = minOf(cx, cy)
-            glow.shader = RadialGradient(cx, cy, r, intArrayOf(0x6664D2FF, 0x1864D2FF, 0x0064D2FF), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
+            glow.shader = RadialGradient(cx, cy, r, intArrayOf(a(0x66), a(0x18), a(0x00)), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
             c.drawCircle(cx, cy, r, glow)
             val rects = listOf(0.92f, 0.74f, 0.56f)
             for ((i, k) in rects.withIndex()) {
                 val rr = r * k
                 val box = RectF(cx - rr, cy - rr, cx + rr, cy + rr)
                 ring.strokeWidth = dp(if (i == 1) 4 else 2).toFloat()
-                ring.color = if (i == 1) CYAN else 0xAA64D2FF.toInt()
+                ring.color = if (i == 1) CYAN else a(0xAA)
                 val dir = if (i % 2 == 0) 1 else -1
                 val segs = 3 + i * 2
                 val sweep = 360f / segs
@@ -285,13 +266,13 @@ class HoloSettings(
     /** Glass panel with a cyan rim and corner brackets. */
     private inner class HoloPanel(ctx: Activity) : FrameLayout(ctx) {
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat(); color = 0x7764D2FF }
+        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(1).toFloat(); color = a(0x77) }
         private val corner = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat(); color = CYAN; strokeCap = Paint.Cap.ROUND }
         private val path = Path()
         init { setWillNotDraw(false); isClickable = true }
         override fun onDraw(c: Canvas) {
             val w = width.toFloat(); val h = height.toFloat(); val r = dp(14).toFloat()
-            fill.shader = LinearGradient(0f, 0f, w, h, intArrayOf(0x3364D2FF, 0x0E64D2FF, 0x2264D2FF), null, Shader.TileMode.CLAMP)
+            fill.shader = LinearGradient(0f, 0f, w, h, intArrayOf(a(0x33), a(0x0E), a(0x22)), null, Shader.TileMode.CLAMP)
             val box = RectF(1f, 1f, w - 1, h - 1)
             c.drawRoundRect(box, r, r, fill)
             c.drawRoundRect(box, r, r, rim)
@@ -301,5 +282,51 @@ class HoloSettings(
             path.moveTo(w - i - L, h - i); path.lineTo(w - i, h - i); path.lineTo(w - i, h - i - L)
             c.drawPath(path, corner)
         }
+    }
+}
+
+/** Hologram colours, from the phone's theme (ThemeEngine accent). */
+object Holo {
+    fun color(): Int = if (ThemeEngine.colorful) brighten(ThemeEngine.accent) else 0xFF64D2FF.toInt()
+    fun alpha(c: Int, a: Int) = (c and 0x00FFFFFF) or (a shl 24)
+    /** A paler version for secondary text. */
+    fun light(c: Int): Int {
+        val r = (Color.red(c) + 255) / 2; val g = (Color.green(c) + 255) / 2; val b = (Color.blue(c) + 255) / 2
+        return Color.rgb(r, g, b)
+    }
+    /** Make sure the glow is bright enough on the dark backdrop. */
+    private fun brighten(c: Int): Int {
+        val hsv = FloatArray(3); Color.colorToHSV(c, hsv)
+        hsv[2] = maxOf(hsv[2], 0.9f); hsv[1] = hsv[1].coerceIn(0.35f, 0.85f)
+        return Color.HSVToColor(hsv)
+    }
+}
+
+/** Dark backdrop with a faint grid, a soft glow and a scan line sweeping down, in [color]. */
+open class HoloBackdropView(ctx: android.content.Context, private val color: Int) : View(ctx) {
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
+    private val fill = Paint()
+    private val grid = Paint().apply { this.color = Holo.alpha(color, 0x14); strokeWidth = 1f }
+    private val scan = Paint()
+    private var t = 0f
+    private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 3200; repeatCount = ValueAnimator.INFINITE; interpolator = LinearInterpolator()
+        addUpdateListener { t = it.animatedValue as Float; invalidate() }
+    }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); anim.start() }
+    override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        // Deep backdrop tinted with the theme colour.
+        val tint = { a: Int, k: Float -> Color.argb(a, (Color.red(color) * k).toInt(), (Color.green(color) * k).toInt(), (Color.blue(color) * k).toInt()) }
+        fill.shader = RadialGradient(w / 2, h * 0.38f, h * 0.7f, intArrayOf(tint(0xF0, 0.12f), tint(0xF5, 0.05f), tint(0xFA, 0.01f)),
+            floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, w, h, fill)
+        val step = dp(28).toFloat()
+        var x = (w % step) / 2; while (x < w) { c.drawLine(x, 0f, x, h, grid); x += step }
+        var y = 0f; while (y < h) { c.drawLine(0f, y, w, y, grid); y += step }
+        val sy = h * t
+        scan.shader = LinearGradient(0f, sy - dp(80), 0f, sy, intArrayOf(Holo.alpha(color, 0), Holo.alpha(color, 0x22)), null, Shader.TileMode.CLAMP)
+        c.drawRect(0f, sy - dp(80), w, sy, scan)
     }
 }
