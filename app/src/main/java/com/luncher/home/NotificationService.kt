@@ -20,6 +20,8 @@ class NotificationService : NotificationListenerService() {
         var onPosted: ((String, String, String) -> Unit)? = null
         /** Latest chat from each app (conversation + recent messages) for the side island's chat window. */
         val lastChat = HashMap<String, ChatInfo>()
+        /** Recent conversations from every app, newest last (for the side island's history). */
+        val chatHistory = LinkedHashMap<String, ChatInfo>()
         private val main = Handler(Looper.getMainLooper())
         /** Ongoing activities (navigation, clock, calls…) for the island, keyed by notification key. */
         val ongoing = LinkedHashMap<String, OngoingInfo>()
@@ -52,7 +54,12 @@ class NotificationService : NotificationListenerService() {
         if (title.isBlank() && text.isBlank()) return
         val chat = runCatching { readChat(sbn, title, text) }.getOrNull()
         main.post {
-            if (chat != null) lastChat[sbn.packageName] = chat
+            if (chat != null) {
+                lastChat[sbn.packageName] = chat
+                val key = sbn.packageName + "|" + chat.title
+                chatHistory.remove(key); chatHistory[key] = chat
+                while (chatHistory.size > 25) chatHistory.remove(chatHistory.keys.first())
+            }
             onPosted?.invoke(sbn.packageName, title, text)
         }
     }

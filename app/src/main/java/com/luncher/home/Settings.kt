@@ -176,6 +176,10 @@ class Settings(ctx: Context) {
     var sideMedia: Boolean
         get() = p.getBoolean("s_side_media", true)
         set(v) = put("s_side_media", v)
+    /** Small button with the latest app's logo that opens recent chats. */
+    var sideHistory: Boolean
+        get() = p.getBoolean("s_side_history", true)
+        set(v) = put("s_side_history", v)
     /** Reply box in the chat window. */
     var sideReply: Boolean
         get() = p.getBoolean("s_side_reply", true)

@@ -381,6 +381,13 @@ class MainActivity : Activity() {
         startPrivacyWatch()
         sideHud = SideHud(this, settings)
         sideHud.onPlayPause = { togglePlay() }
+        sideHud.historyProvider = { NotificationService.chatHistory.values.toList() }
+        sideHud.appLookup = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } }
+        sideHud.openChat = { c ->
+            val pi = c.open
+            if (pi != null) IslandServices.send(this, pi)
+            else packageManager.getLaunchIntentForPackage(c.pkg)?.let { runCatching { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+        }
         root.post { runCatching { sideHud.rest() } }
         setupSidebar()
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
@@ -5288,6 +5295,7 @@ class MainActivity : Activity() {
                 Unit
             }
             val chat = NotificationService.lastChat[pkg]
+            sideHud.countNew()
             if (settings.sideChatCard && chat != null) {
                 // Small chat window: platform logo, chat name and the latest messages; tap opens that chat.
                 sideHud.chat(app?.icon, app?.label ?: "Messages", chat) {
