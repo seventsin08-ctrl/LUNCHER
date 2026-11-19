@@ -30,7 +30,8 @@ class SidebarService : Service() {
         fun sync(ctx: Context): Boolean {
             val s = Settings(ctx)
             val allowed = LuncherAccessibility.instance != null || android.provider.Settings.canDrawOverlays(ctx)
-            val want = s.sidebarOn && s.sidebarOverApps && allowed
+            // Also keeps the launcher alive so the island (music, timers…) stays on top of other apps.
+            val want = allowed && ((s.sidebarOn && s.sidebarOverApps) || (s.island && s.islandOverApps))
             val i = Intent(ctx, SidebarService::class.java).setAction(ACTION_REFRESH)
             if (want) runCatching { ctx.startForegroundService(i) }
             else runCatching { ctx.stopService(Intent(ctx, SidebarService::class.java)) }
@@ -88,8 +89,8 @@ class SidebarService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_set_sidebar)
-            .setContentTitle("Sidebar is on")
-            .setContentText("Swipe the edge handle to open your apps")
+            .setContentTitle("Apple Launcher is running")
+            .setContentText("Keeps the island and sidebar on top of your apps")
             .setContentIntent(open)
             .setOngoing(true)
             .build()

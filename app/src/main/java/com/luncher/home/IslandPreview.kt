@@ -119,6 +119,7 @@ class IslandPreview(ctx: Context) : FrameLayout(ctx) {
         pill.animate().cancel()
         pill.translationX = dp(x).toFloat()
         pill.translationY = 0f
+        pill.rotationX = 0f
         pill.alpha = 0f
         when (anim) {
             "fade" -> { pill.scaleX = sc; pill.scaleY = sc; pill.animate().alpha(1f).setDuration((320 * Motion.scale).toLong()).start() }
@@ -126,6 +127,14 @@ class IslandPreview(ctx: Context) : FrameLayout(ctx) {
                 pill.scaleX = sc; pill.scaleY = sc
                 Motion.spring(pill, DynamicAnimation.TRANSLATION_Y, 0f, Motion.BOUNCY, start = -dp(60).toFloat())
                 Motion.alphaTo(pill, 1f, Motion.SNAPPY)
+            }
+            "3d" -> {
+                pill.cameraDistance = 9000f * resources.displayMetrics.density
+                pill.scaleX = sc * 0.9f; pill.scaleY = sc * 0.9f
+                pill.rotationX = -85f
+                pill.animate().rotationX(0f).scaleX(sc).scaleY(sc).alpha(1f)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(1.4f))
+                    .setDuration((520 * Motion.scale).toLong()).start()
             }
             "zoom" -> {
                 pill.scaleX = 0f; pill.scaleY = 0f
@@ -146,6 +155,7 @@ class IslandPreview(ctx: Context) : FrameLayout(ctx) {
         when (anim) {
             "fade" -> {}
             "slide" -> a.translationY(-dp(60).toFloat())
+            "3d" -> a.rotationX(-85f).scaleX(0.85f * sc).scaleY(0.85f * sc)
             else -> a.scaleX(0.6f * sc).scaleY(0.6f * sc)
         }
         a.withEndAction(end).start()

@@ -125,6 +125,8 @@ class DynamicIsland(
         }
         clipToOutline = true
         elevation = dp(6).toFloat()
+        // Real perspective for the 3D flips and tilts.
+        cameraDistance = 9000f * act.resources.displayMetrics.density
         visibility = View.GONE
     }
     private val compact = LinearLayout(act).apply {
@@ -379,6 +381,34 @@ class DynamicIsland(
         }
         buzz()
         refresh()
+        // Flip like a card turning to the next live activity.
+        compact.cameraDistance = 8000f * act.resources.displayMetrics.density
+        spin(compact, DynamicAnimation.ROTATION_Y, 75f * dir, 420f, 0.7f)
+    }
+
+    /** Spring a rotation (3D) like the rest of the island's motion. */
+    private fun spin(v: View, prop: DynamicAnimation.ViewProperty, from: Float, stiff: Float = 320f, damp: Float = 0.62f) {
+        if (Motion.scale <= 0f) { prop.setValue(v, 0f); return }
+        prop.setValue(v, from)
+        SpringAnimation(v, prop, 0f).apply {
+            spring.stiffness = (stiff / (Motion.scale * Motion.scale)).coerceIn(30f, 5000f)
+            spring.dampingRatio = damp
+            start()
+        }
+    }
+
+    /** Contents of the big island cascade in, each tipping forward in 3D. */
+    private fun cascade(group: android.view.ViewGroup) {
+        if (Motion.scale <= 0f) return
+        for (i in 0 until group.childCount) {
+            val ch = group.getChildAt(i)
+            ch.cameraDistance = 8000f * act.resources.displayMetrics.density
+            ch.alpha = 0f; ch.translationY = -dp(10).toFloat(); ch.rotationX = -45f
+            ch.animate().alpha(1f).translationY(0f).rotationX(0f)
+                .setStartDelay(((70 + i * 55) * Motion.scale).toLong())
+                .setDuration((340 * Motion.scale).toLong())
+                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+        }
     }
 
     private fun buzz() {
@@ -401,6 +431,7 @@ class DynamicIsland(
                 when (anim) {
                     "fade" -> {}
                     "slide" -> a.translationY(-dp(60).toFloat())
+                    "3d" -> a.rotationX(-85f).scaleX(0.85f * sizeScale).scaleY(0.85f * sizeScale)
                     else -> a.scaleX(0.6f * sizeScale).scaleY(0.6f * sizeScale)
                 }
                 a.withEndAction { pill.visibility = View.GONE; pill.translationY = 0f; onShownChanged?.invoke(false) }.start()
@@ -422,6 +453,13 @@ class DynamicIsland(
                     pill.scaleX = sizeScale; pill.scaleY = sizeScale
                     Motion.spring(pill, DynamicAnimation.TRANSLATION_Y, 0f, Motion.BOUNCY, start = -dp(60).toFloat())
                     Motion.alphaTo(pill, 1f, Motion.SNAPPY)
+                }
+                "3d" -> {
+                    // Swings down from the top edge in 3D, then settles with a soft bounce.
+                    pill.scaleX = sizeScale * 0.9f; pill.scaleY = sizeScale * 0.9f
+                    spin(pill, DynamicAnimation.ROTATION_X, -85f, 260f, 0.55f)
+                    Motion.scaleTo(pill, sizeScale, Motion.BOUNCY)
+                    pill.animate().alpha(1f).setDuration((220 * Motion.scale).toLong()).start()
                 }
                 "zoom" -> {
                     pill.scaleX = 0f; pill.scaleY = 0f
@@ -462,6 +500,8 @@ class DynamicIsland(
         Motion.scaleTo(pill, 1f, Motion.FLUID)
         pill.animate().translationX(0f).setDuration((260 * Motion.scale).toLong()).start()
         animateSize(expandedW(), expandedView.measuredHeight, dp(32).toFloat())
+        spin(pill, DynamicAnimation.ROTATION_X, -14f, 300f, 0.5f)
+        (expandedView.getChildAt(0) as? android.view.ViewGroup)?.let { cascade(it) }
         if (!overlayMode && catcher == null) {
             val c = View(act).apply { isClickable = true; setOnClickListener { collapse() } }
             root.addView(c, root.indexOfChild(pill), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -706,6 +746,9 @@ class DynamicIsland(
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
         animateSize(expandedW(), expandedView.measuredHeight, dp(if (a.media != null) 46 else 38).toFloat())
+        // A little 3D tilt as it opens, and the contents tip in one after another.
+        spin(pill, DynamicAnimation.ROTATION_X, -14f, 300f, 0.5f)
+        cascade(expandedView)
         // Tap anywhere else to fold it back.
         val c = View(act).apply { isClickable = true; setOnClickListener { collapse() } }
         if (!overlayMode) {
@@ -725,6 +768,7 @@ class DynamicIsland(
         expandedView.animate().cancel()
         expandedView.visibility = View.GONE
         compact.animate().alpha(1f).setDuration(if (animate) 180 else 0).start()
+        if (animate) spin(pill, DynamicAnimation.ROTATION_X, 10f, 380f, 0.6f)
         Motion.scaleTo(pill, sizeScale, Motion.FLUID)
         pill.animate().translationX(offsetX).setDuration((260 * Motion.scale).toLong()).start()
         val cur = current()

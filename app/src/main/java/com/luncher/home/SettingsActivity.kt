@@ -462,7 +462,7 @@ class SettingsActivity : Activity() {
             live = { pv?.scale = it; previewChanged() }) { s.islandScale = it; pv?.scale = it; previewChanged() }
         segment(isl, "Island Style", listOf("black" to "Black", "glass" to "Glass", "outline" to "Outline", "color" to "Color"),
             s.islandStyle) { s.islandStyle = it; pv?.style = it; previewChanged(replay = true) }
-        segment(isl, "Pop-up Animation", listOf("spring" to "Pop", "fade" to "Fade", "slide" to "Slide", "zoom" to "Zoom"),
+        segment(isl, "Pop-up Animation", listOf("3d" to "3D", "spring" to "Pop", "fade" to "Fade", "slide" to "Slide", "zoom" to "Zoom"),
             s.islandAnim) { s.islandAnim = it; pv?.anim = it; previewChanged(replay = true) }
         // What may appear in the island
         val content = section("ISLAND CONTENT")

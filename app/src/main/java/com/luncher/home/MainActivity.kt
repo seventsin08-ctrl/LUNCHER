@@ -686,6 +686,7 @@ class MainActivity : Activity() {
             }
         }, { settings.haptics })
         ov.overlayMode = true
+        ov.alwaysShow = island.alwaysShow
         ov.quickActions = island.quickActions
         ov.allow = island.allow
         ov.popupMs = island.popupMs

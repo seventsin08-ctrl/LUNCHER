@@ -168,7 +168,7 @@ class Settings(ctx: Context) {
         set(v) = put("s_isl_style", v)
     /** spring | fade | slide | zoom */
     var islandAnim: String
-        get() = p.getString("s_isl_anim", "spring") ?: "spring"
+        get() = p.getString("s_isl_anim", "3d") ?: "3d"
         set(v) = put("s_isl_anim", v)
     /** Keep showing the island on top of other apps. */
     var islandOverApps: Boolean
