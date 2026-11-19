@@ -71,6 +71,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         if (!preview && (!settings.sideHud || !settings.sideRest)) { dismiss(); return }
         // Switched edges: rebuild the window on the other side.
         if (createdRight != null && createdRight != isRight) dismiss()
+        // Moved along the edge: rebuild the chat button at the new place.
+        if (histBtn != null && lp != null && lp!!.y != windowY()) hideHistoryButton(keep = true, immediate = true)
         lp?.let { l ->
             val y = windowY()
             if (l.y != y) { l.y = y; view?.let { v -> runCatching { wm?.updateViewLayout(v, l) } } }
@@ -81,6 +83,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         v.kind = Kind.REST
         size(Kind.REST)
         v.growTo(1f)
+        // The chat button lives with the resting side island and stays until you swipe it away.
+        if (!preview && settings.sideHistory && histWanted) {
+            val b = histBtn
+            if (b == null || !b.isAttachedToWindow) { histBtn = null; v.postDelayed({ if (v.kind == Kind.REST && histBtn == null) showHistoryButton() }, 250) }
+        }
     }
 
     fun volume(level: Float) = show(Kind.VOLUME) { it.level = level }
@@ -541,11 +548,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private var histPanel: View? = null
 
     /** Called for every new message so the button's red number stays right. */
-    fun countNew() { unread++ }
+    fun countNew() { unread++; histWanted = true }
 
     /** Small round button (latest app's logo + red count) resting under the side island. */
     /** The chat button wants to be shown (a chat closed and you didn't swipe it away). */
-    private var histWanted = false
+    private var histWanted = true
 
     /**
      * The chat button: its own little liquid bump on the edge (separate from the volume / status
@@ -563,7 +570,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val bubble = LiquidBubble(ctx)
         val icon = android.widget.ImageView(ctx).apply {
             val ic = lastIcon
-            if (ic != null) setImageBitmap(ic) else { setImageResource(R.drawable.ic_cc_notes); setColorFilter(Color.WHITE) }
+            if (ic != null) setImageBitmap(ic) else { setImageResource(R.drawable.ic_chat); setColorFilter(Color.WHITE); setPadding(dp(4), dp(4), dp(4), dp(4)) }
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setOval(0, 0, view.width, view.height)
             }
