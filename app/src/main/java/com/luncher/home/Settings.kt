@@ -271,6 +271,36 @@ class Settings(ctx: Context) {
     var islandTools: Boolean
         get() = p.getBoolean("s_island_tools", true)
         set(v) = put("s_island_tools", v)
+    // ---- Island tools bar look (size %, colour, shape, angle, where you dragged it)
+    var toolsScale: Int
+        get() = p.getInt("s_tools_scale", 100)
+        set(v) = put("s_tools_scale", v)
+    /** "black", "glass", "theme", "white", "custom". */
+    var toolsColor: String
+        get() = p.getString("s_tools_color", "black") ?: "black"
+        set(v) = put("s_tools_color", v)
+    var toolsCustomColor: Int
+        get() = p.getInt("s_tools_custom", 0xFF0A84FF.toInt())
+        set(v) = put("s_tools_custom", v)
+    /** "pill", "rounded", "square", "leaf". */
+    var toolsShape: String
+        get() = p.getString("s_tools_shape", "pill") ?: "pill"
+        set(v) = put("s_tools_shape", v)
+    /** Tilt in degrees (-30…30). */
+    var toolsAngle: Int
+        get() = p.getInt("s_tools_angle", 0)
+        set(v) = put("s_tools_angle", v)
+    /** 60…100 % opacity of the bar. */
+    var toolsOpacity: Int
+        get() = p.getInt("s_tools_opacity", 100)
+        set(v) = put("s_tools_opacity", v)
+    /** Where you dragged the tools bar (dp from its normal spot). Saved without refreshing. */
+    var toolsDx: Int
+        get() = p.getInt("s_tools_dx", 0)
+        set(v) { p.edit().putInt("s_tools_dx", v).apply() }
+    var toolsDy: Int
+        get() = p.getInt("s_tools_dy", 0)
+        set(v) { p.edit().putInt("s_tools_dy", v).apply() }
     /** Game Mode (Do Not Disturb while playing), toggled from the island tools. */
     var gameMode: Boolean
         get() = p.getBoolean("s_game_mode", false)

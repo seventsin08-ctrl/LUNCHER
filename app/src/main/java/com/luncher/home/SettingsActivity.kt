@@ -43,7 +43,7 @@ class SettingsActivity : Activity() {
         Category("look", "Appearance", 0xFF0A84FF.toInt(), R.drawable.ic_cc_contrast, listOf("APPEARANCE", "THEME", "WALLPAPER")),
         Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "WIDGETS")),
         Category("island", "Dynamic Island", 0xFF1C1C1E.toInt(), R.drawable.ic_set_island,
-            listOf("DYNAMIC ISLAND", "SIDE ISLAND", "CHAT WINDOW", "ISLAND CONTENT", "ISLAND SERVICES")),
+            listOf("DYNAMIC ISLAND", "ISLAND TOOLS", "SIDE ISLAND", "CHAT WINDOW", "ISLAND CONTENT", "ISLAND SERVICES")),
         Category("sidebar", "Sidebar", 0xFFFF9F0A.toInt(), R.drawable.ic_set_sidebar, listOf("SIDEBAR")),
         Category("motion", "Animations & Gestures", 0xFFFF375F.toInt(), R.drawable.ic_set_hand, listOf("ANIMATIONS", "GESTURES")),
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
@@ -696,8 +696,27 @@ class SettingsActivity : Activity() {
 
         toggle(isl, "Always Show Island", "A small island stays at the top; pull it down (or tap it) for quick controls",
             s.islandAlways) { s.islandAlways = it; previewChanged() }
-        toggle(isl, "Island Tools", "When nothing is playing, the island stays at the top as an oblong row of tools: " +
-            "Flashlight, Brightness, Silent, Game Mode, Lock Screen and Settings", s.islandTools) { s.islandTools = it; previewChanged() }
+
+        // ---------------- Island tools bar (shown when nothing is playing)
+        val tools = section("ISLAND TOOLS")
+        toggle(tools, "Island Tools", "When nothing is playing, the island becomes a bar of tools: " +
+            "Flashlight, Brightness, Silent, Game Mode, Lock Screen and Settings", s.islandTools) { s.islandTools = it; rebuild() }
+        if (s.islandTools) {
+            slider(tools, "Size", 60, 150, s.toolsScale, { "$it%" }) { s.toolsScale = it }
+            segment(tools, "Color", listOf("black" to "Black", "glass" to "Glass", "theme" to "Theme", "white" to "White", "custom" to "Custom"),
+                s.toolsColor) { s.toolsColor = it; rebuild() }
+            if (s.toolsColor == "custom") swatches(tools, "Custom Color", s.toolsCustomColor) { s.toolsCustomColor = it }
+            slider(tools, "Opacity", 40, 100, s.toolsOpacity, { "$it%" }) { s.toolsOpacity = it }
+            segment(tools, "Shape", listOf("pill" to "Pill", "rounded" to "Rounded", "square" to "Square", "leaf" to "Leaf"),
+                s.toolsShape) { s.toolsShape = it }
+            slider(tools, "Angle", -30, 30, s.toolsAngle, { "$it°" }) { s.toolsAngle = it }
+            button(tools, "Reset Position", 0xFF0A84FF.toInt()) {
+                s.toolsDx = 0; s.toolsDy = 0
+                s.toolsScale = s.toolsScale // nudges the launcher to re-apply the look
+                android.widget.Toast.makeText(this, "The tools bar is back at the top", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            info(tools, "Move it: hold the tools bar for a moment, then drag it anywhere on the screen.")
+        }
 
         // ---------------- Sounds
         val snd = section("SOUNDS")

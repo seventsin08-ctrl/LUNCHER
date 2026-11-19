@@ -120,7 +120,9 @@ class DynamicIsland(
         background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = dp(20).toFloat() }
         outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {
-                outline.setRoundRect(0, 0, view.width, view.height, minOf(view.height / 2f, dp(40).toFloat()))
+                val r = if (toolsMode && toolsShape != "pill" && toolsShape != "leaf") toolsRadius(view.height.toFloat())
+                    else minOf(view.height / 2f, dp(40).toFloat())
+                outline.setRoundRect(0, 0, view.width, view.height, r)
             }
         }
         clipToOutline = true
@@ -154,7 +156,10 @@ class DynamicIsland(
         visibility = View.GONE
     }
     /** The oblong tool strip shown when idle. */
-    private val toolsRow = LinearLayout(act).apply {
+    private val toolsRow = object : LinearLayout(act) {
+        override fun onInterceptTouchEvent(e: MotionEvent) = toolsTouch(e)
+        override fun onTouchEvent(e: MotionEvent): Boolean { toolsTouch(e); return true }
+    }.apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
         setPadding(dp(8), 0, dp(8), 0)
         visibility = View.GONE
@@ -290,11 +295,12 @@ class DynamicIsland(
                 else -> setColor(Color.BLACK)
             }
         }
-        if (!expanded && !dragging) {
+        if (!expanded && !dragging && !toolsMode) {
             pill.pivotY = 0f
             pill.scaleX = sizeScale; pill.scaleY = sizeScale
             pill.translationX = offsetX
         }
+        if (toolsMode) applyToolsLook()
     }
 
     /** Drops anything that is no longer allowed. */
@@ -308,6 +314,18 @@ class DynamicIsland(
     var alwaysShow = false
     /** Tools shown in the oblong island when nothing is playing (null = off). */
     var idleTools: (() -> List<QuickAction>)? = null
+    // Tools bar look (set from Settings › Dynamic Island › Island Tools).
+    var toolsScale = 1f
+    var toolsColor = Color.BLACK
+    var toolsStroke = 0
+    var toolsIcon = Color.WHITE
+    var toolsShape = "pill"
+    var toolsAngle = 0f
+    var toolsDx = 0f
+    var toolsDy = 0f
+    /** Called after you drag the tools bar somewhere new (dx, dy in px from its normal spot). */
+    var onToolsMoved: ((Float, Float) -> Unit)? = null
+    private var toolsMode = false
     private val toolsOn get() = idleTools != null
     /** Buttons shown when you pull the island down (flashlight, silent, rotation…). */
     var quickActions: (() -> List<QuickAction>)? = null
@@ -508,13 +526,90 @@ class DynamicIsland(
     private fun idleW() = if (toolsOn) dp(16) + toolCount * dp(34) else dp(118)
     private var toolCount = 0
 
+    // ---- moving the tools bar: hold it, then drag anywhere
+    private var tDown = false; private var tDrag = false
+    private var tX = 0f; private var tY = 0f
+    private val tLift = Runnable {
+        tDrag = true
+        buzz()
+        pill.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        Motion.scaleTo(pill, sizeScale * toolsScale * 1.08f, Motion.SNAPPY)
+        // Let go of the button under the finger.
+        val now = android.os.SystemClock.uptimeMillis()
+        val c = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        for (i in 0 until toolsRow.childCount) toolsRow.getChildAt(i).dispatchTouchEvent(c)
+        c.recycle()
+    }
+    private fun toolsTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { tDown = true; tDrag = false; tX = e.rawX; tY = e.rawY; toolsRow.postDelayed(tLift, 420) }
+            MotionEvent.ACTION_MOVE -> {
+                if (!tDrag && abs(e.rawX - tX) + abs(e.rawY - tY) > dp(10)) toolsRow.removeCallbacks(tLift)
+                if (tDrag) {
+                    pill.translationX = offsetX + toolsDx + (e.rawX - tX)
+                    pill.translationY = toolsDy + (e.rawY - tY)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                toolsRow.removeCallbacks(tLift); tDown = false
+                if (tDrag) {
+                    tDrag = false
+                    toolsDx += e.rawX - tX; toolsDy += e.rawY - tY
+                    Motion.scaleTo(pill, sizeScale * toolsScale, Motion.BOUNCY)
+                    onToolsMoved?.invoke(toolsDx, toolsDy)
+                    buzz()
+                    return true
+                }
+            }
+        }
+        return tDrag
+    }
+
+    private fun toolsRadius(h: Float): Float = when (toolsShape) {
+        "square" -> dp(6).toFloat(); "rounded" -> dp(12).toFloat(); else -> h / 2f
+    }
+
+    /** Dress the island as the tools bar: colour, shape, size, tilt and position. */
+    fun applyToolsLook() {
+        if (!toolsMode) return
+        val h = dp(36).toFloat()
+        pill.background = GradientDrawable().apply {
+            setColor(toolsColor)
+            if (toolsStroke != 0) setStroke(maxOf(1, dp(1)), toolsStroke)
+            if (toolsShape == "leaf") cornerRadii = floatArrayOf(h / 2, h / 2, dp(4).toFloat(), dp(4).toFloat(), h / 2, h / 2, dp(4).toFloat(), dp(4).toFloat())
+            else cornerRadius = toolsRadius(h)
+        }
+        pill.invalidateOutline()
+        for (i in 0 until toolsRow.childCount) ((toolsRow.getChildAt(i) as? FrameLayout)?.getChildAt(0) as? ImageView)?.let { iv ->
+            if (iv.tag != "on") iv.setColorFilter(toolsIcon)
+        }
+        if (!tDrag) {
+            pill.animate().rotation(toolsAngle).translationX(offsetX + toolsDx).translationY(toolsDy)
+                .setDuration((320 * Motion.scale).toLong()).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+            Motion.scaleTo(pill, sizeScale * toolsScale, Motion.FLUID)
+        }
+    }
+
+    /** Back to the normal island look and spot. */
+    private fun leaveToolsLook() {
+        if (!toolsMode) return
+        toolsMode = false
+        applyLook()
+        pill.invalidateOutline()
+        pill.animate().rotation(0f).translationY(0f).setDuration((260 * Motion.scale).toLong()).start()
+        if (!expanded) { pill.animate().translationX(offsetX); Motion.scaleTo(pill, sizeScale, Motion.FLUID) }
+    }
+
     /** Fill / show the oblong tool row (only while idle and folded). */
     private fun showTools(show: Boolean) {
         if (!show) {
+            leaveToolsLook()
             if (toolsRow.visibility == View.VISIBLE) toolsRow.animate().alpha(0f).setDuration(120)
                 .withEndAction { toolsRow.visibility = View.GONE }.start()
             return
         }
+        toolsMode = true
         val list = idleTools?.invoke().orEmpty()
         toolCount = list.size
         toolsRow.removeAllViews()
@@ -534,10 +629,11 @@ class DynamicIsland(
                 }
             }
             b.addView(ImageView(act).apply {
-                setImageResource(q.iconRes); setColorFilter(if (on) 0xFF1C1C1E.toInt() else Color.WHITE)
+                setImageResource(q.iconRes); setColorFilter(if (on) 0xFF1C1C1E.toInt() else toolsIcon); tag = if (on) "on" else null
             }, FrameLayout.LayoutParams(dp(17), dp(17), Gravity.CENTER))
             toolsRow.addView(b, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(2); marginEnd = dp(2) })
         }
+        applyToolsLook()
         if (toolsRow.visibility != View.VISIBLE) {
             toolsRow.visibility = View.VISIBLE
             toolsRow.alpha = 0f
@@ -866,7 +962,7 @@ class DynamicIsland(
         val lp = pill.layoutParams as FrameLayout.LayoutParams
         val startW = if (pill.width > 0) pill.width else lp.width
         val startH = if (pill.height > 0) pill.height else lp.height
-        (pill.background as? GradientDrawable)?.cornerRadius = radius
+        if (!toolsMode) (pill.background as? GradientDrawable)?.cornerRadius = radius
         reportZone(h)
         if (Motion.scale <= 0f) {
             lp.width = w; lp.height = h; pill.layoutParams = lp; return

@@ -726,6 +726,7 @@ class MainActivity : Activity() {
         ov.alwaysShow = island.alwaysShow
         ov.quickActions = island.quickActions
         ov.idleTools = island.idleTools
+        applyToolsStyle(ov)
         ov.allow = island.allow
         ov.popupMs = island.popupMs
         ov.sizeScale = island.sizeScale; ov.style = island.style; ov.anim = island.anim
@@ -960,6 +961,37 @@ class MainActivity : Activity() {
         island.anim = settings.islandAnim
         island.offsetX = dp(settings.islandX).toFloat()
         island.applyLook()
+        applyToolsStyle(island)
+        overlayIsland?.let { applyToolsStyle(it) }
+    }
+
+    /** Island tools bar: size, colour, shape, angle and where you dragged it. */
+    private fun applyToolsStyle(isl: DynamicIsland) {
+        val op = (settings.toolsOpacity * 255 / 100).coerceIn(40, 255)
+        fun withA(c: Int, a: Int = op) = (c and 0x00FFFFFF) or (a shl 24)
+        isl.toolsScale = settings.toolsScale / 100f
+        val base = when (settings.toolsColor) {
+            "glass" -> withA(Color.rgb(28, 28, 32), (op * 0.72f).toInt())
+            "theme" -> withA(IconFactory.blend(Color.BLACK, ThemeEngine.accent, 0.5f))
+            "white" -> withA(Color.rgb(245, 245, 247))
+            "custom" -> withA(settings.toolsCustomColor)
+            else -> withA(Color.BLACK)
+        }
+        isl.toolsColor = base
+        isl.toolsStroke = if (settings.toolsColor == "glass") 0x55FFFFFF else 0
+        val lum = (0.299 * Color.red(base) + 0.587 * Color.green(base) + 0.114 * Color.blue(base)) / 255
+        isl.toolsIcon = if (lum > 0.62) 0xFF1C1C1E.toInt() else Color.WHITE
+        isl.toolsShape = settings.toolsShape
+        isl.toolsAngle = settings.toolsAngle.toFloat()
+        isl.toolsDx = dp(settings.toolsDx).toFloat()
+        isl.toolsDy = dp(settings.toolsDy).toFloat()
+        isl.onToolsMoved = { dx, dy ->
+            val d = resources.displayMetrics.density
+            settings.toolsDx = (dx / d).roundToInt(); settings.toolsDy = (dy / d).roundToInt()
+            // Keep the other copy (over apps) in the same spot.
+            for (o in listOfNotNull(island, overlayIsland)) if (o !== isl) { o.toolsDx = dx; o.toolsDy = dy; o.applyToolsLook() }
+        }
+        isl.applyToolsLook()
     }
 
     private fun restylePersistent() {
