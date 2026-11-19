@@ -153,6 +153,12 @@ class DynamicIsland(
         setPadding(dp(20), dp(18), dp(20), dp(16))
         visibility = View.GONE
     }
+    /** The oblong tool strip shown when idle. */
+    private val toolsRow = LinearLayout(act).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+        setPadding(dp(8), 0, dp(8), 0)
+        visibility = View.GONE
+    }
     private var topMargin = 0
     private var widthSpring: SpringAnimation? = null
     private var heightSpring: SpringAnimation? = null
@@ -170,6 +176,7 @@ class DynamicIsland(
         compact.addView(trailing, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(6) })
         pill.addView(compact, FrameLayout.LayoutParams(MATCH_PARENT, dp(36), Gravity.TOP))
         pill.addView(expandedView, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
+        pill.addView(toolsRow, FrameLayout.LayoutParams(MATCH_PARENT, dp(36), Gravity.TOP))
         root.addView(pill, FrameLayout.LayoutParams(dp(120), dp(36), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
 
         val detector = GestureDetector(act, object : GestureDetector.SimpleOnGestureListener() {
@@ -299,6 +306,9 @@ class DynamicIsland(
 
     /** Keep a small empty island at the top even when nothing is happening (like iPhone). */
     var alwaysShow = false
+    /** Tools shown in the oblong island when nothing is playing (null = off). */
+    var idleTools: (() -> List<QuickAction>)? = null
+    private val toolsOn get() = idleTools != null
     /** Buttons shown when you pull the island down (flashlight, silent, rotation…). */
     var quickActions: (() -> List<QuickAction>)? = null
     private var quickMode = false
@@ -424,7 +434,8 @@ class DynamicIsland(
 
     private fun refresh() {
         val a = current()
-        if (!enabled || (a == null && !alwaysShow)) {
+        if (!enabled || (a == null && !alwaysShow && !toolsOn)) {
+            toolsRow.visibility = View.GONE
             if (expanded) collapse(animate = false)
             if (pill.visibility == View.VISIBLE) {
                 val a = pill.animate().alpha(0f).setDuration((280 * Motion.scale).toLong())
@@ -478,11 +489,53 @@ class DynamicIsland(
             }
         }
         if (quickMode) return
+        showTools(a == null && !expanded && toolsOn)
         if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), dp(36), dp(18).toFloat())
         else if (a != null) bindExpanded(a) else collapse()
     }
 
-    private fun idleW() = dp(118)
+    private fun idleW() = if (toolsOn) dp(16) + toolCount * dp(34) else dp(118)
+    private var toolCount = 0
+
+    /** Fill / show the oblong tool row (only while idle and folded). */
+    private fun showTools(show: Boolean) {
+        if (!show) {
+            if (toolsRow.visibility == View.VISIBLE) toolsRow.animate().alpha(0f).setDuration(120)
+                .withEndAction { toolsRow.visibility = View.GONE }.start()
+            return
+        }
+        val list = idleTools?.invoke().orEmpty()
+        toolCount = list.size
+        toolsRow.removeAllViews()
+        for (q in list) {
+            val on = q.active()
+            val b = FrameLayout(act).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (on) Color.WHITE else 0x00000000) }
+                contentDescription = q.label
+                setOnClickListener { v ->
+                    buzz()
+                    v.animate().scaleX(0.8f).scaleY(0.8f).setDuration(80).withEndAction { Motion.scaleTo(v, 1f, Motion.BOUNCY) }.start()
+                    q.onTap()
+                    v.postDelayed({ if (toolsRow.visibility == View.VISIBLE && !expanded) showTools(true) }, 260)
+                }
+            }
+            b.addView(ImageView(act).apply {
+                setImageResource(q.iconRes); setColorFilter(if (on) 0xFF1C1C1E.toInt() else Color.WHITE)
+            }, FrameLayout.LayoutParams(dp(17), dp(17), Gravity.CENTER))
+            toolsRow.addView(b, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(2); marginEnd = dp(2) })
+        }
+        if (toolsRow.visibility != View.VISIBLE) {
+            toolsRow.visibility = View.VISIBLE
+            toolsRow.alpha = 0f
+            toolsRow.animate().alpha(1f).setStartDelay(80).setDuration(220).start()
+            for (i in 0 until toolsRow.childCount) {
+                val c = toolsRow.getChildAt(i)
+                c.scaleX = 0.5f; c.scaleY = 0.5f
+                c.animate().scaleX(1f).scaleY(1f).setStartDelay(100L + i * 30L).setDuration(260)
+                    .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+            }
+        }
+    }
 
     /** Pull-down quick controls: round buttons either side of a close chevron (iOS concept). */
     fun showQuick() {
@@ -491,6 +544,7 @@ class DynamicIsland(
         quickMode = true
         expanded = true
         buzz()
+        showTools(false)
         bindQuick(acts)
         compact.animate().alpha(0f).setDuration(160).start()
         expandedView.visibility = View.VISIBLE
@@ -737,6 +791,7 @@ class DynamicIsland(
         if (expanded) return
         expanded = true
         buzz()
+        showTools(false)
         bindExpanded(a)
         Motion.scaleTo(pill, 1f, Motion.FLUID)
         pill.animate().translationX(0f).setDuration((260 * Motion.scale).toLong()).start()
@@ -776,7 +831,11 @@ class DynamicIsland(
         pill.animate().translationX(offsetX).setDuration((260 * Motion.scale).toLong()).start()
         val cur = current()
         if (cur != null) animateSize(compactWidth(cur), dp(36), dp(18).toFloat())
-        else if (alwaysShow && enabled) { compact.visibility = View.INVISIBLE; animateSize(idleW(), dp(36), dp(18).toFloat()) }
+        else if ((alwaysShow || toolsOn) && enabled) {
+            compact.visibility = View.INVISIBLE
+            showTools(toolsOn)
+            animateSize(idleW(), dp(36), dp(18).toFloat())
+        }
         else refresh()
     }
 

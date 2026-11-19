@@ -261,12 +261,20 @@ class Settings(ctx: Context) {
 
     /** Now Playing widget keeps showing the last song after the music stops (and after a restart). */
     var musicKeepLast: Boolean
-        get() = p.getBoolean("s_music_keep", true)
+        get() = p.getBoolean("s_music_keep", false)
         set(v) = put("s_music_keep", v)
     /** Now Playing widget as an oblong (pill / stadium shape) instead of a rounded square. */
     var musicOblong: Boolean
-        get() = p.getBoolean("s_music_oblong", true)
+        get() = p.getBoolean("s_music_oblong", false)
         set(v) = put("s_music_oblong", v)
+    /** When nothing is playing, the island turns into an oblong row of tools (flashlight, brightness…). */
+    var islandTools: Boolean
+        get() = p.getBoolean("s_island_tools", true)
+        set(v) = put("s_island_tools", v)
+    /** Game Mode (Do Not Disturb while playing), toggled from the island tools. */
+    var gameMode: Boolean
+        get() = p.getBoolean("s_game_mode", false)
+        set(v) { p.edit().putBoolean("s_game_mode", v).apply() }
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

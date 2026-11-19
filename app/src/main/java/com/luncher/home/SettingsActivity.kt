@@ -654,6 +654,8 @@ class SettingsActivity : Activity() {
 
         toggle(isl, "Always Show Island", "A small island stays at the top; pull it down (or tap it) for quick controls",
             s.islandAlways) { s.islandAlways = it; previewChanged() }
+        toggle(isl, "Island Tools", "When nothing is playing, the island stays at the top as an oblong row of tools: " +
+            "Flashlight, Brightness, Silent, Game Mode, Lock Screen and Settings", s.islandTools) { s.islandTools = it; previewChanged() }
 
         // ---------------- Sounds
         val snd = section("SOUNDS")

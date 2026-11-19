@@ -329,6 +329,7 @@ class MainActivity : Activity() {
         island.enabled = settings.island
         island.popupMs = settings.islandPopupMs.toLong()
         island.alwaysShow = settings.islandAlways
+        island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
         island.quickActions = { quickActions() }
         island.allow = { id ->
             settings.islandAllows(when {
@@ -667,6 +668,8 @@ class MainActivity : Activity() {
             island.enabled = settings.island
             island.popupMs = settings.islandPopupMs.toLong()
             island.alwaysShow = settings.islandAlways
+            island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
+            overlayIsland?.idleTools = island.idleTools
             applyIslandLook()
             island.applyFilter()
             ViewCompat.requestApplyInsets(root)
@@ -717,6 +720,7 @@ class MainActivity : Activity() {
         ov.overlayMode = true
         ov.alwaysShow = island.alwaysShow
         ov.quickActions = island.quickActions
+        ov.idleTools = island.idleTools
         ov.allow = island.allow
         ov.popupMs = island.popupMs
         ov.sizeScale = island.sizeScale; ov.style = island.style; ov.anim = island.anim
@@ -824,6 +828,64 @@ class MainActivity : Activity() {
             cm.setTorchMode(id, on)
             torchOn = on
         }
+    }
+
+    /** The oblong island's tools when nothing is playing. */
+    private fun idleTools(): List<QuickAction> {
+        val am = getSystemService(android.media.AudioManager::class.java)
+        val list = ArrayList<QuickAction>()
+        list += QuickAction(R.drawable.ic_cc_flashlight, "Flashlight", { torchOn }) { setTorch(!torchOn) }
+        list += QuickAction(R.drawable.ic_cc_sun, "Brightness", { false }) { cycleBrightness() }
+        list += QuickAction(R.drawable.ic_cc_bell_off, "Silent", { am.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL }) {
+            runCatching {
+                am.ringerMode = if (am.ringerMode == android.media.AudioManager.RINGER_MODE_NORMAL)
+                    android.media.AudioManager.RINGER_MODE_VIBRATE else android.media.AudioManager.RINGER_MODE_NORMAL
+            }
+        }
+        list += QuickAction(R.drawable.ic_cc_game, "Game Mode", { settings.gameMode }) { toggleGameMode() }
+        list += QuickAction(R.drawable.ic_cc_lock, "Lock Screen", { false }) {
+            lockScreen()
+        }
+        list += QuickAction(R.drawable.ic_set_gear, "Settings", { false }) {
+            runCatching { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+        return list
+    }
+
+    /** Tap: 25 → 50 → 75 → 100 % → 25 %… (needs "Modify system settings"). */
+    private fun cycleBrightness() {
+        if (!android.provider.Settings.System.canWrite(this)) {
+            toast("Allow “Modify system settings” to change brightness")
+            runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))) }
+            return
+        }
+        runCatching {
+            val cr = contentResolver
+            android.provider.Settings.System.putInt(cr, android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+            val cur = android.provider.Settings.System.getInt(cr, android.provider.Settings.System.SCREEN_BRIGHTNESS, 128)
+            val steps = listOf(64, 128, 191, 255)
+            val next = steps.firstOrNull { it > cur + 8 } ?: steps.first()
+            android.provider.Settings.System.putInt(cr, android.provider.Settings.System.SCREEN_BRIGHTNESS, next)
+            toast("Brightness ${(next * 100f / 255).roundToInt()}%")
+        }
+    }
+
+    /** Game Mode: Do Not Disturb while you play (tap again to turn it off). */
+    private fun toggleGameMode() {
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        if (!nm.isNotificationPolicyAccessGranted) {
+            toast("Allow Do Not Disturb access for Game Mode")
+            runCatching { startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+            return
+        }
+        val on = !settings.gameMode
+        settings.gameMode = on
+        runCatching {
+            nm.setInterruptionFilter(if (on) android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY
+                else android.app.NotificationManager.INTERRUPTION_FILTER_ALL)
+        }
+        toast(if (on) "🎮 Game Mode on — notifications silenced" else "Game Mode off")
     }
 
     /** Pull-down island controls. */
