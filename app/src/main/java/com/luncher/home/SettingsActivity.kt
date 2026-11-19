@@ -717,6 +717,7 @@ class SettingsActivity : Activity() {
             segment(tools, "Shape", listOf("pill" to "Pill", "rounded" to "Rounded", "square" to "Square", "leaf" to "Leaf"),
                 s.toolsShape) { s.toolsShape = it }
             slider(tools, "Angle", -30, 30, s.toolsAngle, { "$it°" }) { s.toolsAngle = it }
+            segment(tools, "On the Side", listOf("circle" to "Half Circle", "panel" to "Panel"), s.toolsEdgeStyle) { s.toolsEdgeStyle = it }
             segment(tools, "Opening Animation", listOf("ripple" to "Ripple", "blossom" to "Blossom", "spin" to "Spin", "fade" to "Fade"),
                 s.toolsAnim) { s.toolsAnim = it }
             button(tools, "Reset Position", 0xFF0A84FF.toInt()) {

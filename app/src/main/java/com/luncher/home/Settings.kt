@@ -298,6 +298,10 @@ class Settings(ctx: Context) {
     var toolsEdge: String
         get() = p.getString("s_tools_edge", "none") ?: "none"
         set(v) { p.edit().putString("s_tools_edge", v).apply() }
+    /** Look of the tools when docked to a side: "circle" (half circle) or "panel" (like the Sidebar). */
+    var toolsEdgeStyle: String
+        get() = p.getString("s_tools_edge_style", "circle") ?: "circle"
+        set(v) = put("s_tools_edge_style", v)
     /** How the tools circle opens: "blossom", "ripple", "spin" or "fade". */
     var toolsAnim: String
         get() = p.getString("s_tools_anim", "ripple") ?: "ripple"

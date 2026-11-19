@@ -219,11 +219,16 @@ class ToolsBar(private val ctx: Context) {
         r.removeAllViews()
         ThemeEngine.resolve(ctx, settings)
         // Pushed against a side: a half circle that blossoms out of the edge, ✕ in the middle.
-        val edge = settings.toolsEdge
+        var edge = settings.toolsEdge
+        // Never on the Sidebar's side: move to the other edge.
+        if ((edge == "left" || edge == "right") && settings.sidebarOn && (edge == "right") == settings.sidebarRight) {
+            edge = if (edge == "right") "left" else "right"; settings.toolsEdge = edge
+        }
         if (edge == "left" || edge == "right") {
             l.gravity = Gravity.TOP or (if (edge == "left") Gravity.LEFT else Gravity.RIGHT)
             l.x = 0
-            rebuildEdge(r, l, edge == "right", animateIn)
+            if (settings.toolsEdgeStyle == "panel") rebuildPanel(r, l, edge == "right", animateIn)
+            else rebuildEdge(r, l, edge == "right", animateIn)
             return
         }
         l.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -478,6 +483,114 @@ class ToolsBar(private val ctx: Context) {
             override fun onAnimationEnd(animation: android.animation.Animator) = fn()
         })
 
+    /**
+     * Docked to a side as a panel, like the Sidebar: tool tiles with labels in a tall rounded
+     * card, and a round arrow button at the bottom that folds it into a small tab.
+     */
+    private fun rebuildPanel(r: FrameLayout, l: WindowManager.LayoutParams, right: Boolean, animateIn: Boolean) {
+        val k = settings.toolsScale / 100f
+        val exit = exitAction
+        val folded = settings.toolsCollapsed || exit != null
+        val (bg, stroke, iconCol) = colors()
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            if (folded) setPadding(0, 0, 0, 0) else setPadding(dp(10 * k), dp(16 * k), dp(10 * k), dp(12 * k))
+            background = GradientDrawable().apply {
+                setColor(bg); setStroke(maxOf(1, dp(1)), stroke)
+                if (folded) cornerRadii = if (right) floatArrayOf(dp(18).toFloat(), dp(18).toFloat(), 0f, 0f, 0f, 0f, dp(18).toFloat(), dp(18).toFloat())
+                    else floatArrayOf(0f, 0f, dp(18).toFloat(), dp(18).toFloat(), dp(18).toFloat(), dp(18).toFloat(), 0f, 0f)
+                else cornerRadius = dp(32 * k).toFloat()
+            }
+            elevation = dp(10).toFloat()
+        }
+        val items = ArrayList<View>()
+        if (folded) {
+            // Small tab on the edge: ‹ / › opens it (or ✕ closes Settings).
+            val tab = android.widget.TextView(ctx).apply {
+                text = when { exit != null -> "✕"; right -> "‹"; else -> "›" }
+                textSize = (if (exit != null) 15f else 22f) * k; setTextColor(iconCol); gravity = Gravity.CENTER
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                contentDescription = if (exit != null) "Close Settings" else "Show tools"
+                setOnClickListener { v ->
+                    v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    if (exit != null) exit() else { settings.toolsCollapsed = false; rebuild(animateIn = true) }
+                }
+            }
+            col.addView(tab, LinearLayout.LayoutParams(dp(26 * k), dp(70 * k)))
+        } else {
+            for (t in tools()) {
+                val on = t.on()
+                val item = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                    contentDescription = t.label
+                    setOnTouchListener { v, e ->
+                        when (e.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(90).start()
+                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> Motion.scaleTo(v, 1f, Motion.BOUNCY)
+                        }
+                        false
+                    }
+                }
+                val tile = FrameLayout(ctx).apply {
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(14 * k).toFloat(); setColor(if (on) Color.WHITE else Color.argb(40, 255, 255, 255))
+                    }
+                }
+                tile.addView(ImageView(ctx).apply { setImageResource(t.icon); setColorFilter(if (on) 0xFF1C1C1E.toInt() else iconCol) },
+                    FrameLayout.LayoutParams(dp(24 * k), dp(24 * k), Gravity.CENTER))
+                item.addView(tile, LinearLayout.LayoutParams(dp(52 * k), dp(52 * k)))
+                item.addView(android.widget.TextView(ctx).apply {
+                    text = t.label; textSize = 11.5f * k.coerceIn(0.8f, 1.2f); setTextColor(iconCol); gravity = Gravity.CENTER; maxLines = 1
+                }, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(4) })
+                item.setOnClickListener { v ->
+                    v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    t.tap(tile)
+                    main.postDelayed({ rebuild() }, 600)
+                }
+                col.addView(item, LinearLayout.LayoutParams(dp(76 * k), WRAP).apply { bottomMargin = dp(9 * k) })
+                items += item
+            }
+            // Round arrow button at the bottom (like the Sidebar's): folds the panel away.
+            val close = android.widget.TextView(ctx).apply {
+                text = if (right) "›" else "‹"; textSize = 24f * k; setTextColor(iconCol); gravity = Gravity.CENTER
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(46, 255, 255, 255)) }
+                contentDescription = "Hide tools"
+                setOnClickListener { v ->
+                    v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    val off = dp(120).toFloat() * (if (right) 1 else -1)
+                    col.animate().translationX(off).alpha(0f).setDuration(200).withEndAction {
+                        settings.toolsCollapsed = true; rebuild(animateIn = true)
+                    }.start()
+                }
+            }
+            col.addView(close, LinearLayout.LayoutParams(dp(42 * k), dp(42 * k)).apply { topMargin = dp(2) })
+            items += close
+        }
+        val frame = DragFrame().apply { clipChildren = false; setPadding(0, dp(6), 0, dp(6)) }
+        frame.addView(col, FrameLayout.LayoutParams(WRAP, WRAP))
+        r.addView(frame, FrameLayout.LayoutParams(WRAP, WRAP))
+        r.alpha = if (searching || yielding) 0f else 1f
+        l.x = if (folded) 0 else dp(8)
+        l.y = l.y.coerceIn(0, ctx.resources.displayMetrics.heightPixels - dp(200))
+        runCatching { wm?.updateViewLayout(r, l) }
+        r.post { fitZones() }
+        if (animateIn) {
+            // Slides in from the edge like the Sidebar; the tiles follow one after another.
+            val off = dp(110).toFloat() * (if (right) 1 else -1)
+            col.post {
+                col.pivotX = if (right) col.width.toFloat() else 0f; col.pivotY = col.height / 2f
+                Motion.spring(col, androidx.dynamicanimation.animation.DynamicAnimation.TRANSLATION_X, 0f, Motion.Spec(340f, 0.78f), start = off)
+                col.alpha = 0f; col.animate().alpha(1f).setDuration(200).start()
+                for ((i, v) in items.withIndex()) {
+                    v.alpha = 0f; v.translationX = off * 0.35f; v.scaleX = 0.8f; v.scaleY = 0.8f
+                    v.animate().alpha(1f).translationX(0f).scaleX(1f).scaleY(1f).setStartDelay(70L + i * 28L).setDuration(320)
+                        .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+                }
+            }
+        }
+    }
+    private val WRAP = android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+
     /** Tools fly back into the centre, then [done]. */
     private fun foldEdge(fan: FrameLayout, done: () -> Unit) {
         var last = 0L
@@ -537,7 +650,18 @@ class ToolsBar(private val ctx: Context) {
                         }
                         // Even a little of it past a side (10%… half) → it becomes the circle on that edge.
                         val left = cx - wv / 2; val rightEdge = cx + wv / 2
-                        val newEdge = when { left < 0 -> "left"; rightEdge > sw -> "right"; else -> "none" }
+                        var newEdge = when { left < dp(14) -> "left"; rightEdge > sw - dp(14) -> "right"; else -> "none" }
+                        // That side belongs to the Sidebar: the tools can't dock there.
+                        if (newEdge != "none" && settings.sidebarOn && (newEdge == "right") == settings.sidebarRight) {
+                            toast("That side is the Sidebar's — the tools stay on the screen")
+                            settings.toolsDx = ((if (newEdge == "right") sw / 2 - dp(140) else -(sw / 2 - dp(140))) / d).roundToInt()
+                            newEdge = "none"
+                            settings.toolsEdge = "none"
+                            main.post { rebuild(animateIn = true) }
+                            performHapticFeedback(HapticFeedbackConstants.REJECT)
+                            settings.toolsDy = ((l.y - push - dp(64)) / d).roundToInt()
+                            return true
+                        }
                         if (newEdge == "none") settings.toolsDx = ((cx - sw / 2) / d).roundToInt()
                         settings.toolsDy = ((l.y - push - dp(64)) / d).roundToInt()
                         val changed = newEdge != settings.toolsEdge

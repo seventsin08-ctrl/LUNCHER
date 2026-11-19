@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        88 to listOf("Tools on the side can look like the Sidebar: a panel with labelled tiles (Settings › Island Tools › On the Side)",
+            "The tools can't dock on the Sidebar's side"),
         87 to listOf("Only one tools bar: the island no longer has its own pull-down controls"),
         86 to listOf("Tools bar never covers anything: it steps aside for the Sidebar and the open side island, and slides below the open Dynamic Island"),
         85 to listOf("What's New: every update's changes show once after updating (and any time in Settings › General)",
