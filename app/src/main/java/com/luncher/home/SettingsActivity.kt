@@ -549,6 +549,11 @@ class SettingsActivity : Activity() {
             }
             toggle(side2, "Recent Apps", "An extension under the chat button: your recently used apps — scroll it and tap one " +
                 "to switch apps quickly", s.sideRecents) { s.sideRecents = it }
+            segment(side2, "Recent Apps Shown", listOf("1" to "1", "2" to "2", "3" to "3", "4" to "4", "5" to "5"),
+                s.sideRecentsShown.toString()) { s.sideRecentsShown = it.toInt() }
+            segment(side2, "Recent App Size", listOf("s" to "Small", "m" to "Medium", "l" to "Large"), s.sideRecentsSize) {
+                s.sideRecentsSize = it
+            }
             toggle(side2, "Always Show on Edge", "A slim sliver stays on the edge when nothing is showing", s.sideRest) {
                 s.sideRest = it; rebuild()
             }

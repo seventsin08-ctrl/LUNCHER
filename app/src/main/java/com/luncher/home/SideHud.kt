@@ -707,10 +707,12 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         var recents: List<Pair<Bitmap?, () -> Unit>> = emptyList()
         var recentScroll = 0f
         var recentArea = RectF()
-        private val rowH get() = dp(48).toFloat()
+        private val iconS get() = dp(when (settings.sideRecentsSize) { "s" -> 28; "l" -> 40; else -> 34 }).toFloat()
+        private val rowH get() = iconS + dp(8)
         private val divider = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF; strokeWidth = maxOf(1f, dp(1) * 0.8f) }
 
-        fun recentsHeight(): Float = if (recents.isEmpty()) 0f else minOf(recents.size, 4) * rowH + dp(12)
+        fun recentsHeight(): Float = if (recents.isEmpty()) 0f
+            else minOf(recents.size, settings.sideRecentsShown.coerceIn(1, 5)) * rowH + dp(12)
         private fun maxScroll() = (recents.size * rowH + dp(12) - recentsHeight()).coerceAtLeast(0f)
 
         fun drawRecents(c: Canvas, bodyW: Float, areaTop: Float, areaH: Float, a: Float) {
@@ -720,7 +722,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             c.drawLine(mx(dp(12).toFloat()), areaTop + 1, mx(bodyW - dp(12)), areaTop + 1, divider)
             c.save()
             c.clipRect(recentArea)
-            val s = dp(38).toFloat()
+            val s = iconS
             val cx = mx(bodyW / 2f)
             val pp = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
             for ((i, item) in recents.withIndex()) {

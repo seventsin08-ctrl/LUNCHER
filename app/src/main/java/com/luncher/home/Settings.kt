@@ -184,6 +184,14 @@ class Settings(ctx: Context) {
     var sideRecents: Boolean
         get() = p.getBoolean("s_side_recents", true)
         set(v) = put("s_side_recents", v)
+    /** How many recent apps are visible at once (the rest scroll). */
+    var sideRecentsShown: Int
+        get() = p.getInt("s_side_recents_shown", 3)
+        set(v) = put("s_side_recents_shown", v)
+    /** Recent app icon size: "s", "m" or "l". */
+    var sideRecentsSize: String
+        get() = p.getString("s_side_recents_size", "m") ?: "m"
+        set(v) = put("s_side_recents_size", v)
     /** Reply box in the chat window. */
     var sideReply: Boolean
         get() = p.getBoolean("s_side_reply", true)
