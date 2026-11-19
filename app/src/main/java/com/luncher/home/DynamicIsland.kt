@@ -383,7 +383,7 @@ class DynamicIsland(
         refresh()
         // Flip like a card turning to the next live activity.
         compact.cameraDistance = 8000f * act.resources.displayMetrics.density
-        spin(compact, DynamicAnimation.ROTATION_Y, 75f * dir, 420f, 0.7f)
+        spin(compact, DynamicAnimation.ROTATION_Y, 55f * dir, 320f, 0.82f)
     }
 
     /** Spring a rotation (3D) like the rest of the island's motion. */
@@ -403,10 +403,10 @@ class DynamicIsland(
         for (i in 0 until group.childCount) {
             val ch = group.getChildAt(i)
             ch.cameraDistance = 8000f * act.resources.displayMetrics.density
-            ch.alpha = 0f; ch.translationY = -dp(10).toFloat(); ch.rotationX = -45f
+            ch.alpha = 0f; ch.translationY = -dp(8).toFloat(); ch.rotationX = -25f
             ch.animate().alpha(1f).translationY(0f).rotationX(0f)
-                .setStartDelay(((70 + i * 55) * Motion.scale).toLong())
-                .setDuration((340 * Motion.scale).toLong())
+                .setStartDelay(((90 + i * 45) * Motion.scale).toLong())
+                .setDuration((400 * Motion.scale).toLong())
                 .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
         }
     }
@@ -427,12 +427,13 @@ class DynamicIsland(
         if (!enabled || (a == null && !alwaysShow)) {
             if (expanded) collapse(animate = false)
             if (pill.visibility == View.VISIBLE) {
-                val a = pill.animate().alpha(0f).setDuration((200 * Motion.scale).toLong())
+                val a = pill.animate().alpha(0f).setDuration((280 * Motion.scale).toLong())
+                    .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f))
                 when (anim) {
                     "fade" -> {}
-                    "slide" -> a.translationY(-dp(60).toFloat())
-                    "3d" -> a.rotationX(-85f).scaleX(0.85f * sizeScale).scaleY(0.85f * sizeScale)
-                    else -> a.scaleX(0.6f * sizeScale).scaleY(0.6f * sizeScale)
+                    "slide" -> a.translationY(-dp(50).toFloat())
+                    "3d" -> a.rotationX(-55f).scaleX(0.88f * sizeScale).scaleY(0.88f * sizeScale)
+                    else -> a.scaleX(0.7f * sizeScale).scaleY(0.7f * sizeScale)
                 }
                 a.withEndAction { pill.visibility = View.GONE; pill.translationY = 0f; OverlayZones.setIsland(0); onShownChanged?.invoke(false) }.start()
             }
@@ -447,29 +448,31 @@ class DynamicIsland(
             when (anim) {
                 "fade" -> {
                     pill.scaleX = sizeScale; pill.scaleY = sizeScale
-                    pill.animate().alpha(1f).setDuration((320 * Motion.scale).toLong()).start()
+                    pill.animate().alpha(1f).setDuration((360 * Motion.scale).toLong())
+                        .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
                 }
                 "slide" -> {
                     pill.scaleX = sizeScale; pill.scaleY = sizeScale
-                    Motion.spring(pill, DynamicAnimation.TRANSLATION_Y, 0f, Motion.BOUNCY, start = -dp(60).toFloat())
+                    Motion.spring(pill, DynamicAnimation.TRANSLATION_Y, 0f, Motion.FLUID, start = -dp(50).toFloat())
                     Motion.alphaTo(pill, 1f, Motion.SNAPPY)
                 }
                 "3d" -> {
                     // Swings down from the top edge in 3D, then settles with a soft bounce.
-                    pill.scaleX = sizeScale * 0.9f; pill.scaleY = sizeScale * 0.9f
-                    spin(pill, DynamicAnimation.ROTATION_X, -85f, 260f, 0.55f)
-                    Motion.scaleTo(pill, sizeScale, Motion.BOUNCY)
-                    pill.animate().alpha(1f).setDuration((220 * Motion.scale).toLong()).start()
+                    pill.scaleX = sizeScale * 0.92f; pill.scaleY = sizeScale * 0.92f
+                    spin(pill, DynamicAnimation.ROTATION_X, -60f, 220f, 0.74f)
+                    Motion.scaleTo(pill, sizeScale, Motion.FLUID)
+                    pill.animate().alpha(1f).setDuration((300 * Motion.scale).toLong())
+                        .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
                 }
                 "zoom" -> {
                     pill.scaleX = 0f; pill.scaleY = 0f
                     pill.animate().scaleX(sizeScale).scaleY(sizeScale).alpha(1f)
-                        .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
-                        .setDuration((280 * Motion.scale).toLong()).start()
+                        .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f))
+                        .setDuration((380 * Motion.scale).toLong()).start()
                 }
                 else -> {
-                    pill.scaleX = 0.5f * sizeScale; pill.scaleY = 0.5f * sizeScale
-                    Motion.scaleTo(pill, sizeScale, Motion.BOUNCY)
+                    pill.scaleX = 0.6f * sizeScale; pill.scaleY = 0.6f * sizeScale
+                    Motion.scaleTo(pill, sizeScale, Motion.FLUID)
                     Motion.alphaTo(pill, 1f, Motion.SNAPPY)
                 }
             }
@@ -489,7 +492,7 @@ class DynamicIsland(
         expanded = true
         buzz()
         bindQuick(acts)
-        compact.animate().alpha(0f).setDuration(120).start()
+        compact.animate().alpha(0f).setDuration(160).start()
         expandedView.visibility = View.VISIBLE
         expandedView.alpha = 0f
         expandedView.animate().alpha(1f).setStartDelay(90).setDuration(220).start()
@@ -500,7 +503,7 @@ class DynamicIsland(
         Motion.scaleTo(pill, 1f, Motion.FLUID)
         pill.animate().translationX(0f).setDuration((260 * Motion.scale).toLong()).start()
         animateSize(expandedW(), expandedView.measuredHeight, dp(32).toFloat())
-        spin(pill, DynamicAnimation.ROTATION_X, -14f, 300f, 0.5f)
+        spin(pill, DynamicAnimation.ROTATION_X, -8f, 260f, 0.76f)
         (expandedView.getChildAt(0) as? android.view.ViewGroup)?.let { cascade(it) }
         if (!overlayMode && catcher == null) {
             val c = View(act).apply { isClickable = true; setOnClickListener { collapse() } }
@@ -737,17 +740,17 @@ class DynamicIsland(
         bindExpanded(a)
         Motion.scaleTo(pill, 1f, Motion.FLUID)
         pill.animate().translationX(0f).setDuration((260 * Motion.scale).toLong()).start()
-        compact.animate().alpha(0f).setDuration(120).start()
+        compact.animate().alpha(0f).setDuration(160).start()
         expandedView.visibility = View.VISIBLE
         expandedView.alpha = 0f
-        expandedView.animate().alpha(1f).setStartDelay(80).setDuration(200).start()
+        expandedView.animate().alpha(1f).setStartDelay(90).setDuration(260).start()
         expandedView.measure(
             View.MeasureSpec.makeMeasureSpec(expandedW(), View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
         animateSize(expandedW(), expandedView.measuredHeight, dp(if (a.media != null) 46 else 38).toFloat())
         // A little 3D tilt as it opens, and the contents tip in one after another.
-        spin(pill, DynamicAnimation.ROTATION_X, -14f, 300f, 0.5f)
+        spin(pill, DynamicAnimation.ROTATION_X, -8f, 260f, 0.76f)
         cascade(expandedView)
         // Tap anywhere else to fold it back.
         val c = View(act).apply { isClickable = true; setOnClickListener { collapse() } }
@@ -768,7 +771,7 @@ class DynamicIsland(
         expandedView.animate().cancel()
         expandedView.visibility = View.GONE
         compact.animate().alpha(1f).setDuration(if (animate) 180 else 0).start()
-        if (animate) spin(pill, DynamicAnimation.ROTATION_X, 10f, 380f, 0.6f)
+        if (animate) spin(pill, DynamicAnimation.ROTATION_X, 6f, 300f, 0.8f)
         Motion.scaleTo(pill, sizeScale, Motion.FLUID)
         pill.animate().translationX(offsetX).setDuration((260 * Motion.scale).toLong()).start()
         val cur = current()
@@ -804,8 +807,9 @@ class DynamicIsland(
         val holder = FloatValueHolder(from.toFloat())
         return SpringAnimation(holder).apply {
             spring = SpringForce(to.toFloat()).apply {
-                stiffness = (500f / (Motion.scale * Motion.scale)).coerceIn(30f, 10000f)
-                dampingRatio = 0.72f
+                // Softer, nearly bounce-free morph so growing/shrinking feels fluid.
+                stiffness = (340f / (Motion.scale * Motion.scale)).coerceIn(30f, 10000f)
+                dampingRatio = 0.84f
             }
             setMinimumVisibleChange(1f)
             addUpdateListener { _, value, _ -> apply(value.toInt()) }

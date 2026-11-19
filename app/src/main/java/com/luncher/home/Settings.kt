@@ -111,6 +111,10 @@ class Settings(ctx: Context) {
     var sidebarY: Int
         get() = p.getInt("s_sidebar_y", 260)
         set(v) { p.edit().putInt("s_sidebar_y", v).apply() }
+    /** Where the open Sidebar panel's centre sits, in dp from the top (-1 = middle of the screen). */
+    var sidebarPanelY: Int
+        get() = p.getInt("s_sidebar_panel_y", -1)
+        set(v) { p.edit().putInt("s_sidebar_panel_y", v).apply() }
     /** 60..140 % — panel width and app size. Saved without refreshing the Home Screen. */
     var sidebarScale: Int
         get() = p.getInt("s_sidebar_scale", 85)

@@ -130,9 +130,11 @@ class Sidebar(
         val w = wm ?: return
         val right = settings.sidebarRight
         var pinchRef: android.view.ScaleGestureDetector? = null
+        var dragHook: ((MotionEvent) -> Boolean)? = null
         // Sees every touch first, so a two-finger pinch works even on top of the app icons.
         val root = object : FrameLayout(act) {
             override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+                if (e.pointerCount == 1 && dragHook?.invoke(e) == true) return true
                 val p = pinchRef
                 if (p != null && e.pointerCount > 1) { p.onTouchEvent(e); return true }
                 if (p != null && p.isInProgress) { p.onTouchEvent(e); return true }
@@ -222,7 +224,7 @@ class Sidebar(
         ).apply {
             // No dim / blur behind: it would darken and smear the island and side island too.
             gravity = (if (right) Gravity.END else Gravity.START) or Gravity.TOP
-            y = (screenH - cardH) / 2
+            y = panelTop(screenH, cardH)
             if (!overApps) token = host?.window?.decorView?.windowToken
             // Stay put over full-screen games and videos (including in the notch area).
             if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
@@ -233,7 +235,7 @@ class Sidebar(
         // Make room for the island: when it opens at the top, the panel's top slides down
         // (its bottom stays put); when it closes, the panel grows back.
         val baseH = cardH
-        val normalTop = (screenH - baseH) / 2
+        var normalTop = panelTop(screenH, cardH)
         var curTop = normalTop
         var slide: android.animation.ValueAnimator? = null
         val place = { top: Int ->
@@ -252,6 +254,52 @@ class Sidebar(
                     duration = 280; interpolator = android.view.animation.DecelerateInterpolator(1.8f)
                     addUpdateListener { curTop = it.animatedValue as Int; if (panelRoot === root) place(curTop) }
                     start()
+                }
+            }
+        }
+        // Long-press the open panel, then drag it up or down to move it (like the side island).
+        run {
+            var downY = 0f; var startTop = 0; var dragging = false; var downTime = 0L
+            val slop = android.view.ViewConfiguration.get(act).scaledTouchSlop
+            val lift = Runnable {
+                dragging = true
+                startTop = lp.y
+                card.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                Motion.scaleTo(card, 1.04f, Motion.SNAPPY)
+                // Let go of whatever the finger was pressing (an app, the scroll list).
+                val cancel = MotionEvent.obtain(downTime, android.os.SystemClock.uptimeMillis(), MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+                card.dispatchTouchEvent(cancel); cancel.recycle()
+            }
+            dragHook = { e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downY = e.rawY; dragging = false; downTime = e.downTime
+                        root.postDelayed(lift, 420)
+                        false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (!dragging && kotlin.math.abs(e.rawY - downY) > slop) root.removeCallbacks(lift)
+                        if (dragging) {
+                            val minTop = maxOf(dp(24), if (OverlayZones.islandBottom > 0) OverlayZones.islandBottom + dp(10) else 0)
+                            lp.y = (startTop + (e.rawY - downY)).toInt().coerceIn(minTop, screenH - card.height - dp(24))
+                            runCatching { w.updateViewLayout(root, lp) }
+                            true
+                        } else false
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        root.removeCallbacks(lift)
+                        if (dragging) {
+                            dragging = false
+                            Motion.scaleTo(card, 1f, Motion.BOUNCY)
+                            card.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            // Remember it: the centre of the panel, in dp.
+                            val center = lp.y + card.height / 2
+                            settings.sidebarPanelY = (center / act.resources.displayMetrics.density).roundToInt()
+                            normalTop = lp.y; curTop = lp.y
+                            true
+                        } else false
+                    }
+                    else -> dragging
                 }
             }
         }
@@ -312,7 +360,14 @@ class Sidebar(
         root.postDelayed({ if (root.isAttachedToWindow) remove() }, 700)
     }
 
-    private fun chosenApps(): List<AppInfo> {
+    /** Top of the open panel: where you last dragged it, or the middle of the screen. */
+    private fun panelTop(screenH: Int, cardH: Int): Int {
+        val c = settings.sidebarPanelY
+        val top = if (c >= 0) dp(c) - cardH / 2 else (screenH - cardH) / 2
+        return top.coerceIn(dp(24), (screenH - cardH - dp(24)).coerceAtLeast(dp(24)))
+    }
+
+        private fun chosenApps(): List<AppInfo> {
         val all = apps()
         val picked = settings.sidebarApps.mapNotNull { pkg -> all.firstOrNull { it.packageName == pkg } }
         return picked.ifEmpty { all.take(8) }
