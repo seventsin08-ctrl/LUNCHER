@@ -43,7 +43,7 @@ class SettingsActivity : Activity() {
         Category("look", "Appearance", 0xFF0A84FF.toInt(), R.drawable.ic_cc_contrast, listOf("APPEARANCE", "THEME", "WALLPAPER")),
         Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "WIDGETS")),
         Category("island", "Dynamic Island", 0xFF1C1C1E.toInt(), R.drawable.ic_set_island,
-            listOf("DYNAMIC ISLAND & ASSISTANT", "SIDE ISLAND", "CHAT WINDOW", "ISLAND CONTENT", "ISLAND SERVICES")),
+            listOf("DYNAMIC ISLAND", "SIDE ISLAND", "CHAT WINDOW", "ISLAND CONTENT", "ISLAND SERVICES")),
         Category("sidebar", "Sidebar", 0xFFFF9F0A.toInt(), R.drawable.ic_set_sidebar, listOf("SIDEBAR")),
         Category("motion", "Animations & Gestures", 0xFFFF375F.toInt(), R.drawable.ic_set_hand, listOf("ANIMATIONS", "GESTURES")),
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
@@ -491,8 +491,8 @@ class SettingsActivity : Activity() {
         }
         toggle(wall, "3D Depth Effect", null, s.wallpaperDepth) { s.wallpaperDepth = it }
 
-        // ---------------- Island & Assistant
-        val isl = section("DYNAMIC ISLAND & ASSISTANT")
+        // ---------------- Island
+        val isl = section("DYNAMIC ISLAND")
         islandCard = isl
         islandPreview?.load(s)
         val pv = islandPreview
@@ -650,13 +650,6 @@ class SettingsActivity : Activity() {
 
         toggle(isl, "Always Show Island", "A small island stays at the top; pull it down (or tap it) for quick controls",
             s.islandAlways) { s.islandAlways = it; previewChanged() }
-        toggle(isl, "Assistant Button", "Show an AI assistant button in the island's pull-down controls",
-            s.assistant != "off") { on ->
-            s.assistant = if (on) (getSharedPreferences("luncher", MODE_PRIVATE).getString("last_assistant", "gemini") ?: "gemini") else "off"
-            rebuild()
-        }
-        if (s.assistant != "off") segment(isl, "Assistant", listOf("system" to "Google", "gemini" to "Gemini", "chatgpt" to "ChatGPT"),
-            s.assistant) { s.assistant = it; getSharedPreferences("luncher", MODE_PRIVATE).edit().putString("last_assistant", it).apply() }
 
         // ---------------- Sounds
         val snd = section("SOUNDS")
@@ -761,24 +754,6 @@ class SettingsActivity : Activity() {
 
         // ---------------- About
         val about = section("GENERAL")
-        toggle(about, "Assistant Button in Sidebar", "Tap the ✦ orb at the top of the Sidebar and talk: set timers, open apps, " +
-            "send messages, call, take notes, or say “give me the report”", s.sidebarAssistant) { s.sidebarAssistant = it }
-        toggle(about, "Assistant Speaks Answers", "Reads replies and your report out loud", s.assistantVoice) { s.assistantVoice = it }
-        button(about, "Try the Assistant", 0xFF0A84FF.toInt()) { AssistantActivity.open(this) }
-        toggle(about, "Wake Word (“voice activation”)", "Off by default. When on, the phone listens for “voice activation” and opens the assistant hands-free",
-            s.voiceOn) { on ->
-            s.voiceOn = on
-            if (on && !VoiceService.hasMic(this)) requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC)
-            else VoiceService.sync(this)
-            rebuild()
-        }
-        if (s.voiceOn) {
-            if (!HeadsetPopup.canShowOverApps(this)) button(about, "Allow Showing Over Other Apps…", 0xFF0A84FF.toInt()) {
-                runCatching { startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
-            }
-            info(about, "The phone listens quietly and only wakes the speech recogniser when it hears talking. " +
-                "Android shows the green microphone dot and a small notification while it's on, and it uses some battery.")
-        }
         button(about, "Default Home App…", 0xFF0A84FF.toInt()) {
             runCatching { startActivity(Intent(SysSettings.ACTION_HOME_SETTINGS)) }
         }

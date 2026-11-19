@@ -91,13 +91,7 @@ object Setup {
         list += Item("dnd", "Do Not Disturb Access", "Lets Focus modes silence notifications",
             { it.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted },
             open = { a -> go(a, Intent(SysSettings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) })
-        list += Item("mic", "Microphone", "Voice activation (“open Messenger”)",
-            { granted(it, Manifest.permission.RECORD_AUDIO) }, runtime = Manifest.permission.RECORD_AUDIO)
-        list += Item("call", "Phone Calls", "“Call Mom” from the assistant",
-            { granted(it, Manifest.permission.CALL_PHONE) }, runtime = Manifest.permission.CALL_PHONE)
-        list += Item("answer", "Answer Calls", "“Answer the call” / “hang up” from the assistant",
-            { granted(it, Manifest.permission.ANSWER_PHONE_CALLS) }, runtime = Manifest.permission.ANSWER_PHONE_CALLS)
-        list += Item("contacts", "Contacts", "Find people in Search, and message or call them from the assistant",
+        list += Item("contacts", "Contacts", "Find people in Search",
             { granted(it, Manifest.permission.READ_CONTACTS) }, runtime = Manifest.permission.READ_CONTACTS)
         if (Build.VERSION.SDK_INT >= 31) list += Item("bt", "Nearby Devices", "Headphone battery in the AirPods-style pop-up",
             { granted(it, Manifest.permission.BLUETOOTH_CONNECT) }, runtime = Manifest.permission.BLUETOOTH_CONNECT)

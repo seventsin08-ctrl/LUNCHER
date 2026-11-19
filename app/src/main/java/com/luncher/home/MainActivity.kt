@@ -831,7 +831,6 @@ class MainActivity : Activity() {
         val list = ArrayList<QuickAction>()
         list += QuickAction(R.drawable.ic_cc_flashlight, "Flashlight", { torchOn }) { setTorch(!torchOn) }
         list += QuickAction(R.drawable.ic_cc_moon, "Focus", { focusId != null }) { island.collapse(); showFocusSheet() }
-        if (settings.assistant != "off") list += QuickAction(R.drawable.ic_set_ai, "Assistant", { false }) { island.collapse(); openAssistant() }
         list += QuickAction(R.drawable.ic_cc_bell_off, "Silent", { am.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL }) {
             runCatching {
                 am.ringerMode = if (am.ringerMode == android.media.AudioManager.RINGER_MODE_NORMAL)
@@ -4755,22 +4754,8 @@ class MainActivity : Activity() {
     }
 
     /** "Siri": swipe down on the island opens the chosen assistant (Google, Gemini or ChatGPT). */
-    private fun openAssistant() {
-        if (settings.assistant == "off") return
-        val pkg = when (settings.assistant) {
-            "chatgpt" -> "com.openai.chatgpt"
-            "gemini" -> "com.google.android.apps.bard"
-            else -> null
-        }
-        if (pkg != null) {
-            val launch = packageManager.getLaunchIntentForPackage(pkg)
-            if (launch != null) { openIntent(launch, null); return }
-            toast("Install ${if (pkg.contains("openai")) "ChatGPT" else "Gemini"} to use it here")
-        }
-        val tried = runCatching { startActivity(Intent(Intent.ACTION_VOICE_COMMAND).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        if (tried.isFailure) runCatching { startActivity(Intent(Intent.ACTION_ASSIST).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            .onFailure { toast("No assistant installed") }
-    }
+    /** AI removed: swiping or holding the island no longer opens an assistant. */
+    private fun openAssistant() {}
 
     /** Point the camera at something to search it (Google Lens), like Visual Intelligence. */
     private fun visualLookUp() {

@@ -144,17 +144,16 @@ class Sidebar(
             }
             elevation = dp(16).toFloat()
         }
-        val scroll = ScrollView(act).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        // Only as tall as its apps: grows as you add more, scrolls once it reaches the size limit.
+        val scroll = object : ScrollView(act) {
+            var maxH = Int.MAX_VALUE
+            override fun onMeasure(w: Int, h: Int) = super.onMeasure(w, View.MeasureSpec.makeMeasureSpec(maxH, View.MeasureSpec.AT_MOST))
+        }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS }
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
         scroll.addView(col)
         val chosen = chosenApps()
         val items = ArrayList<View>()
-        // The assistant: tap to talk (timer, message, call, notes, report…).
-        if (settings.sidebarAssistant) {
-            val ai = assistantItem { close(immediate = true); AssistantActivity.open(act) }
-            col.addView(ai, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT).apply { bottomMargin = sp(10) })
-            items += ai
-        }
+
         for ((i, a) in chosen.withIndex()) {
             if (i == 2 && chosen.size > 3) col.addView(View(act).apply {
                 background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(0x66FFFFFF) }
@@ -173,7 +172,7 @@ class Sidebar(
         }
         col.addView(edit, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT))
         items += edit
-        card.addView(scroll, LinearLayout.LayoutParams(WRAP_CONTENT, 0, 1f))
+        card.addView(scroll, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         val back = TextView(act).apply {
             text = if (right) "›" else "‹"; textSize = 26f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x33FFFFFF) }
@@ -181,7 +180,14 @@ class Sidebar(
         }
         card.addView(back, LinearLayout.LayoutParams(sp(44), sp(44)).apply { topMargin = dp(8) })
         val screenH = act.resources.displayMetrics.heightPixels
-        root.addView(card, FrameLayout.LayoutParams(sp(100), (screenH * settings.sidebarHeight / 100f).toInt(), Gravity.CENTER_VERTICAL))
+        root.addView(card, FrameLayout.LayoutParams(sp(100), WRAP_CONTENT, Gravity.CENTER_VERTICAL))
+        // Size limit (Settings › Sidebar › Height); below it the panel just hugs the apps.
+        val maxCard = (screenH * settings.sidebarHeight / 100f).toInt()
+        val chrome = dp(16) + dp(12) + sp(44) + dp(8)
+        scroll.maxH = (maxCard - chrome).coerceAtLeast(sp(80))
+        card.measure(View.MeasureSpec.makeMeasureSpec(sp(100), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val cardH = card.measuredHeight.coerceAtMost(maxCard)
         // Pinch the open panel to make it (and its apps) bigger or smaller.
         val pinch = android.view.ScaleGestureDetector(act, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
             var start = 0f
@@ -211,7 +217,7 @@ class Sidebar(
         ).apply {
             // No dim / blur behind: it would darken and smear the island and side island too.
             gravity = (if (right) Gravity.END else Gravity.START) or Gravity.TOP
-            y = (screenH - (screenH * settings.sidebarHeight / 100f).toInt()) / 2
+            y = (screenH - cardH) / 2
             if (!overApps) token = host?.window?.decorView?.windowToken
             // Stay put over full-screen games and videos (including in the notch area).
             if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
@@ -221,20 +227,20 @@ class Sidebar(
         panelRoot = root; panel = card
         // Make room for the island: when it opens at the top, the panel's top slides down
         // (its bottom stays put); when it closes, the panel grows back.
-        val baseH = (screenH * settings.sidebarHeight / 100f).toInt()
+        val baseH = cardH
         val normalTop = (screenH - baseH) / 2
         var curTop = normalTop
         var slide: android.animation.ValueAnimator? = null
         val place = { top: Int ->
-            val h = (normalTop + baseH - top).coerceAtLeast(dp(220))
-            (card.layoutParams as FrameLayout.LayoutParams).height = h
-            card.requestLayout()
+            val h = (normalTop + baseH - top).coerceAtLeast(sp(80) + chrome)
+            scroll.maxH = minOf(maxCard, h) - chrome
+            scroll.requestLayout()
             lp.y = top
             runCatching { w.updateViewLayout(root, lp) }
         }
         val fit = {
             val ib = OverlayZones.islandBottom
-            val target = maxOf(normalTop, if (ib > 0) ib + dp(10) else 0).coerceAtMost(screenH - dp(240))
+            val target = maxOf(normalTop, if (ib > 0) ib + dp(10) else 0).coerceAtMost(normalTop + baseH - sp(80) - chrome)
             if (target != curTop && panelRoot === root) {
                 slide?.cancel()
                 slide = android.animation.ValueAnimator.ofInt(curTop, target).apply {
@@ -247,7 +253,7 @@ class Sidebar(
         zoneListener?.let { OverlayZones.unlisten(it) }
         zoneListener = fit
         OverlayZones.listen(fit)
-        if (OverlayZones.islandBottom > 0) { curTop = maxOf(normalTop, OverlayZones.islandBottom + dp(10)).coerceAtMost(screenH - dp(240)); place(curTop) }
+        if (OverlayZones.islandBottom > 0) { curTop = maxOf(normalTop, OverlayZones.islandBottom + dp(10)).coerceAtMost(normalTop + baseH - sp(80) - chrome); place(curTop) }
         OverlayZones.setSidebar(sp(100) + dp(20), right)
         handle?.animate()?.alpha(0f)?.setDuration(120)?.start()
         root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
