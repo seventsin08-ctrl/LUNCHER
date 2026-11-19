@@ -51,6 +51,7 @@ class Sidebar(
     private var handle: View? = null
     private var handleLp: WindowManager.LayoutParams? = null
     private var panelRoot: FrameLayout? = null
+    private var zoneListener: (() -> Unit)? = null
     private var panel: View? = null
     private var overApps = false
 
@@ -198,21 +199,50 @@ class Sidebar(
             WRAP_CONTENT, WRAP_CONTENT,
             handleLp?.type ?: WindowManager.LayoutParams.TYPE_APPLICATION,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or WindowManager.LayoutParams.FLAG_DIM_BEHIND or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = (if (right) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
-            dimAmount = 0.32f
+            // No dim / blur behind: it would darken and smear the island and side island too.
+            gravity = (if (right) Gravity.END else Gravity.START) or Gravity.TOP
+            y = (screenH - (screenH * settings.sidebarHeight / 100f).toInt()) / 2
             if (!overApps) token = host?.window?.decorView?.windowToken
             // Stay put over full-screen games and videos (including in the notch area).
             if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            if (Build.VERSION.SDK_INT >= 31) blurBehindRadius = dp(18)
-            if (Build.VERSION.SDK_INT >= 31) flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
         }
         if (runCatching { w.addView(root, lp) }.isFailure) return
         panelRoot = root; panel = card
+        // Make room for the island: when it opens at the top, the panel's top slides down
+        // (its bottom stays put); when it closes, the panel grows back.
+        val baseH = (screenH * settings.sidebarHeight / 100f).toInt()
+        val normalTop = (screenH - baseH) / 2
+        var curTop = normalTop
+        var slide: android.animation.ValueAnimator? = null
+        val place = { top: Int ->
+            val h = (normalTop + baseH - top).coerceAtLeast(dp(220))
+            (card.layoutParams as FrameLayout.LayoutParams).height = h
+            card.requestLayout()
+            lp.y = top
+            runCatching { w.updateViewLayout(root, lp) }
+        }
+        val fit = {
+            val ib = OverlayZones.islandBottom
+            val target = maxOf(normalTop, if (ib > 0) ib + dp(10) else 0).coerceAtMost(screenH - dp(240))
+            if (target != curTop && panelRoot === root) {
+                slide?.cancel()
+                slide = android.animation.ValueAnimator.ofInt(curTop, target).apply {
+                    duration = 280; interpolator = android.view.animation.DecelerateInterpolator(1.8f)
+                    addUpdateListener { curTop = it.animatedValue as Int; if (panelRoot === root) place(curTop) }
+                    start()
+                }
+            }
+        }
+        zoneListener?.let { OverlayZones.unlisten(it) }
+        zoneListener = fit
+        OverlayZones.listen(fit)
+        if (OverlayZones.islandBottom > 0) { curTop = maxOf(normalTop, OverlayZones.islandBottom + dp(10)).coerceAtMost(screenH - dp(240)); place(curTop) }
+        OverlayZones.setSidebar(sp(100) + dp(20), right)
         handle?.animate()?.alpha(0f)?.setDuration(120)?.start()
         root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
         // Slide in from the edge, the icons following one after another.
@@ -231,6 +261,8 @@ class Sidebar(
         val root = panelRoot ?: return
         val card = panel
         panelRoot = null; panel = null
+        zoneListener?.let { OverlayZones.unlisten(it) }; zoneListener = null
+        OverlayZones.setSidebar(0, settings.sidebarRight)
         handle?.animate()?.alpha(1f)?.setDuration(200)?.start()
         val remove = { runCatching { wm?.removeViewImmediate(root) }; Unit }
         if (immediate || card == null) { remove(); return }

@@ -118,6 +118,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     /** One chat window. Each app (Messenger, Telegram, WhatsApp…) gets its own, open side by side. */
     private inner class Card(val pkg: String, val root: android.widget.LinearLayout, val lp: WindowManager.LayoutParams) {
         var holding = false
+        /** The width you want (the window gets narrower only while the sidebar needs the room). */
+        var wantW = lp.width
         val close = Runnable { if (!holding) hideCard(pkg) }
         fun restartTimer(ms: Long = 12_000) { root.removeCallbacks(close); root.postDelayed(close, ms) }
     }
@@ -236,16 +238,19 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 if (y < dp(40)) { y = dp(60) + cards.size * dp(34); x = dp(66) + cards.size * dp(14) }
             }
         }
-        val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
+        // Keep clear of the open island (above) and the sidebar (beside).
+        y = maxOf(y, topLimit())
+        val (fx, maxW) = roomFor(x)
+        val l = WindowManager.LayoutParams(width.coerceAtMost(maxW).coerceAtLeast(dp(180)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
-            this.x = x; this.y = y
+            this.x = fx; this.y = y
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
-        me = Card(chat.pkg, root, l)
+        me = Card(chat.pkg, root, l).also { it.wantW = width }
         cards[chat.pkg] = me
         cardOf[root] = me
         dragBy(head, root, l, onStart = { root.removeCallbacks(me.close) }, onEnd = { if (!me.holding) me.restartTimer(9000) })
@@ -260,6 +265,54 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     private val cardOf = HashMap<View, Card>()
+
+    // ---------------------------------------------------------------- making room for each other
+    private var zoneAnim: android.animation.ValueAnimator? = null
+    private val zoneFit: () -> Unit = { avoidZones(); fitWindows() }
+
+    /** Top edge the side island / chat windows must stay under (the open island + a gap). */
+    private fun topLimit() = OverlayZones.islandBottom.let { if (it > 0) it + dp(10) else 0 }
+
+    /** Slide the side island down while the island above is open; back when it closes. */
+    private fun avoidZones() {
+        val l = lp ?: return
+        val v = view ?: return
+        if (v.moving()) return
+        val natural = windowY()
+        val shapeTop = natural + (l.height - v.shapeHeight()) / 2
+        val lim = topLimit()
+        val target = if (lim > 0 && shapeTop < lim) natural + (lim - shapeTop) else natural
+        if (target == l.y) return
+        zoneAnim?.cancel()
+        zoneAnim = android.animation.ValueAnimator.ofInt(l.y, target).apply {
+            duration = 300; interpolator = android.view.animation.DecelerateInterpolator(1.8f)
+            addUpdateListener { a -> if (lp === l && view === v) { l.y = a.animatedValue as Int; runCatching { wm?.updateViewLayout(v, l) } } }
+            start()
+        }
+    }
+
+    /** Free horizontal room for a window anchored on the side island's edge, at offset [x]. */
+    private fun roomFor(x: Int): Pair<Int, Int> {
+        val sw = act.resources.displayMetrics.widthPixels
+        val sb = OverlayZones.sidebarWidth
+        val sameEdge = sb > 0 && OverlayZones.sidebarRight == isRight
+        val nx = if (sameEdge) maxOf(x, sb + dp(8)) else x
+        val maxW = sw - nx - dp(8) - (if (sb > 0 && !sameEdge) sb else 0)
+        return nx to maxW
+    }
+
+    /** Chat windows and Message History step aside for the sidebar and the island. */
+    private fun fitWindows() {
+        for (c in cards.values.toList()) {
+            val (nx, maxW) = roomFor(c.lp.x)
+            val nw = c.wantW.coerceAtMost(maxW).coerceAtLeast(dp(180))
+            val ny = maxOf(c.lp.y, topLimit())
+            if (nw != c.lp.width || nx != c.lp.x || ny != c.lp.y) {
+                c.lp.width = nw; c.lp.x = nx; c.lp.y = ny
+                runCatching { wm?.updateViewLayout(c.root, c.lp) }
+            }
+        }
+    }
 
     /** A ScrollView whose height limit can change (window resizing). */
     private class MaxScroll(ctx: Context, var maxH: Int) : android.widget.ScrollView(ctx) {
@@ -323,6 +376,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (resizing) {
                     val d = m.density
                     settings.setWinSize(key, (l.width / d).toInt(), (scroll.maxH / d).toInt())
+                    cardOf[win]?.wantW = l.width
                     grip.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                 }
             }
@@ -528,6 +582,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         // Grow/shrink the height around the same centre (taller only for volume + recent apps).
         val newH = dp(if (kind == Kind.VOLUME && v.recents.isNotEmpty()) TALL_HALF * 2 else HALF * 2)
         if (newH != l.height) { val c = l.y + l.height / 2; l.height = newH; l.y = c - newH / 2 }
+        v.post { avoidZones() }
         l.flags = if (kind == Kind.STATUS) l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             else l.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         runCatching { wm?.updateViewLayout(v, l) }
@@ -557,6 +612,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
         if (runCatching { w.addView(v, l) }.isFailure) return null
         wm = w; lp = l; view = v; createdRight = isRight
+        OverlayZones.listen(zoneFit)
         recentsAt = 0L
         return v
     }
@@ -706,6 +762,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.CENTER
+            // Island open at the top: start just under it instead of in the middle.
+            if (topLimit() > 0) { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = topLimit() }
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
@@ -731,6 +789,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     fun dismiss() {
+        OverlayZones.unlisten(zoneFit); zoneAnim?.cancel()
         runCatching { histPanel?.let { wm?.removeViewImmediate(it) } }; histPanel = null
         hideAllCards(immediate = true)
         val v = view ?: return
@@ -784,6 +843,14 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         private val rowH get() = iconS + dp(8)
         private val divider = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF; strokeWidth = maxOf(1f, dp(1) * 0.8f) }
 
+        fun moving() = moving
+        /** Height of the visible shape (including its soft flares), for making room. */
+        fun shapeHeight(): Int = when (kind) {
+            Kind.VOLUME -> (dp(150) + (if (settings.sideHistory && !preview) dp(60) else 0) + recentsHeight() + dp(40)).toInt()
+            Kind.REST -> dp(120)
+            else -> (height * 0.6f).toInt()
+        }
+
         fun recentsHeight(): Float = if (recents.isEmpty()) 0f
             else minOf(recents.size, settings.sideRecentsShown.coerceIn(1, 5)) * rowH + dp(12)
         private fun maxScroll() = (recents.size * rowH + dp(12) - recentsHeight()).coerceAtLeast(0f)
@@ -823,7 +890,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     intArrayOf(0x40FFFFFF, 0x10FFFFFF, 0x24FFFFFF), floatArrayOf(0f, 0.55f, 1f), android.graphics.Shader.TileMode.CLAMP)
                 c.drawPath(path, glassFill)
                 glassRim.shader = android.graphics.LinearGradient(b.left, b.top, b.left, b.bottom,
-                    intArrayOf(0x88FFFFFF.toInt(), 0x22FFFFFF, 0x55FFFFFF), null, android.graphics.Shader.TileMode.CLAMP)
+                    intArrayOf(0x55FFFFFF, 0x10FFFFFF, 0x30FFFFFF), null, android.graphics.Shader.TileMode.CLAMP)
                 c.drawPath(path, glassRim)
             } else c.drawPath(path, black)
         }

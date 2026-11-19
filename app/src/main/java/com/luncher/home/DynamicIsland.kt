@@ -434,7 +434,7 @@ class DynamicIsland(
                     "3d" -> a.rotationX(-85f).scaleX(0.85f * sizeScale).scaleY(0.85f * sizeScale)
                     else -> a.scaleX(0.6f * sizeScale).scaleY(0.6f * sizeScale)
                 }
-                a.withEndAction { pill.visibility = View.GONE; pill.translationY = 0f; onShownChanged?.invoke(false) }.start()
+                a.withEndAction { pill.visibility = View.GONE; pill.translationY = 0f; OverlayZones.setIsland(0); onShownChanged?.invoke(false) }.start()
             }
             return
         }
@@ -777,12 +777,21 @@ class DynamicIsland(
         else refresh()
     }
 
+    /** Tell the side island / sidebar / chat windows how far down the open island reaches. */
+    private fun reportZone(h: Int) {
+        if (h <= dp(44) || !pill.isAttachedToWindow || !pill.isShown) { OverlayZones.setIsland(0); return }
+        val loc = IntArray(2); pill.getLocationOnScreen(loc)
+        val top = (loc[1] - pill.translationY).toInt().coerceAtLeast(0)
+        OverlayZones.setIsland(top + h)
+    }
+
     /** Spring the pill's size like the island morphing. */
     private fun animateSize(w: Int, h: Int, radius: Float) {
         val lp = pill.layoutParams as FrameLayout.LayoutParams
         val startW = if (pill.width > 0) pill.width else lp.width
         val startH = if (pill.height > 0) pill.height else lp.height
         (pill.background as? GradientDrawable)?.cornerRadius = radius
+        reportZone(h)
         if (Motion.scale <= 0f) {
             lp.width = w; lp.height = h; pill.layoutParams = lp; return
         }
