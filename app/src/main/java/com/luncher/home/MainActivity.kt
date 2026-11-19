@@ -421,7 +421,8 @@ class MainActivity : Activity() {
         if (fresh || (cur > 0 && cur != seen)) {
             prefs.edit().putBoolean("hello_done", true).putInt("seen_launcher_version", cur).apply()
             val from = if (seen in 1 until cur) seen else cur - 1
-            root.postDelayed({ showHello { if (cur > 0) WhatsNew.show(this, root, from, cur) } }, 300)
+            // hello → a short tour of the features → what changed in this update
+            root.postDelayed({ showHello { WhatsNew.showTour(this, root) { if (cur > 0) WhatsNew.show(this, root, from, cur) } } }, 300)
         }
         registerReceivers()
         appliedVersion = settings.version

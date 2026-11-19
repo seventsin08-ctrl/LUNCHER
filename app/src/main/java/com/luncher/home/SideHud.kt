@@ -210,7 +210,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             })
             if (med != null) bubble.addView(attachmentChip(med, open))
-            if (msg.isNotBlank()) bubble.addView(android.widget.TextView(ctx).apply { text = msg; textSize = 14f; setTextColor(Color.WHITE) })
+            if (msg.isNotBlank()) bubble.addView(android.widget.TextView(ctx).apply {
+                text = msg; textSize = 14f; setTextColor(Color.WHITE)
+                // Links are tappable: they open right away (and the chat window steps aside).
+                linkify(this) { hideCard(chat.pkg) }
+            })
             list.addView(bubble, android.widget.LinearLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = dp(5); gravity = if (mine) Gravity.END else Gravity.START
@@ -272,6 +276,37 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     private val cardOf = HashMap<View, Card>()
+
+    /** Make every web link in [tv] tappable: it opens in the browser / its app, then [after]. */
+    private fun linkify(tv: android.widget.TextView, after: () -> Unit = {}) {
+        val src = tv.text?.toString() ?: return
+        val span = android.text.SpannableString(src)
+        val m = android.util.Patterns.WEB_URL.matcher(src)
+        var any = false
+        while (m.find()) {
+            val raw = m.group() ?: continue
+            val url = if (raw.startsWith("http://", true) || raw.startsWith("https://", true)) raw else "https://$raw"
+            span.setSpan(object : android.text.style.ClickableSpan() {
+                override fun onClick(w: View) {
+                    w.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    val ok = runCatching {
+                        act.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.isSuccess
+                    if (ok) after()
+                }
+                override fun updateDrawState(ds: android.text.TextPaint) {
+                    ds.color = 0xFF64D2FF.toInt(); ds.isUnderlineText = true
+                }
+            }, m.start(), m.end(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            any = true
+        }
+        if (any) {
+            tv.text = span
+            tv.movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            tv.highlightColor = Color.TRANSPARENT
+        }
+    }
 
     // ---------------------------------------------------------------- making room for each other
     private var zoneAnim: android.animation.ValueAnimator? = null
@@ -983,6 +1018,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
         private var spring: SpringAnimation? = null
         private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+        private val msgBg = Paint(Paint.ANTI_ALIAS_FLAG)
         private val mirror = android.graphics.Matrix()
         private var restColor = 0
         /** x for something of width [w] placed at [x] from the edge, flipped on the right edge. */
@@ -1277,6 +1313,12 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     text.alpha = (255 * a).toInt(); small.alpha = (240 * a).toInt()
                     val t = TextUtils.ellipsize(label ?: "", text, maxW, TextUtils.TruncateAt.END).toString()
                     val b = TextUtils.ellipsize(body ?: "", small, maxW, TextUtils.TruncateAt.END).toString()
+                    // A solid bubble behind the text, so it never mixes with what's on screen underneath.
+                    val tw = maxOf(text.measureText(t), small.measureText(b))
+                    msgBg.color = bodyColor() or 0xFF000000.toInt()
+                    msgBg.alpha = (245 * a).toInt()
+                    r.set(bodyW - dp(4), top + dp(2), tx + tw + dp(16), bottom - dp(2)); flipRect()
+                    c.drawRoundRect(r, (h - dp(4)) / 2f, (h - dp(4)) / 2f, msgBg)
                     c.drawText(t, mx(tx, text.measureText(t)), (top + bottom) / 2f - dp(3), text)
                     c.drawText(b, mx(tx, small.measureText(b)), (top + bottom) / 2f + dp(15), small)
                 }

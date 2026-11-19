@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        92 to listOf("After “hello”, a short tour shows everything the launcher can do",
+            "Links in chat windows are tappable and open right away",
+            "Side island message text sits on its own bubble — no more mixing with the app underneath"),
         91 to listOf("Easier to open the island tools: bigger tap area around and below the camera"),
         90 to listOf("Gaming: the islands, chat windows and pop-ups hide while a game is on screen — the Sidebar stays",
             "Apps opened from the Sidebar during a game open in a small floating window"),
@@ -115,6 +118,98 @@ object WhatsNew {
             card.animate().alpha(0f).scaleX(0.92f).scaleY(0.92f).setDuration(200).start()
             layer.animate().alpha(0f).setDuration(240).withEndAction { root.removeView(layer); onDone?.invoke() }.start()
         }
+        root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        layer.alpha = 0f; layer.animate().alpha(1f).setDuration(260).start()
+        card.scaleX = 0.88f; card.scaleY = 0.88f; card.alpha = 0f; card.translationY = dp(30).toFloat()
+        card.animate().alpha(1f).translationY(0f).setDuration(280).start()
+        Motion.scaleTo(card, 1f, Motion.BOUNCY)
+    }
+
+    /** Everything the launcher can do — shown as a short tour right after "hello". */
+    private val features = listOf(
+        Triple("🏝️", "Dynamic Island", "Music, timers, calls and notifications live at the top. With nothing playing it hides around your camera — tap there for your tools: Flashlight, Brightness, Camera, Silent, Game Mode, Lock and Settings."),
+        Triple("💬", "Side Island & Chats", "Messages pop out of the side of the screen. Reply right from the chat window, open links, download attachments, and see every message in Notifications."),
+        Triple("🔊", "Smart Side Panel", "Swipe the side island for volume, your recent apps, connected headphones (with battery) and the phone's temperature."),
+        Triple("📱", "Sidebar", "Your favourite apps on the edge of the screen — even over games. While gaming, apps open in a small window."),
+        Triple("🎮", "Made for Gaming", "When a game is on screen the islands and pop-ups step away, so nothing covers your game."),
+        Triple("🧩", "Widgets & Home Screen", "Photos, calendar, clocks, Now Playing, iPod and more — plus folders, an iPhone-style dock and a widget gallery with previews."),
+        Triple("🎨", "Make It Yours", "Colours follow your wallpaper. Change the island, side island, sidebar and tools: size, colour, shape and animations in Settings."),
+        Triple("💾", "Backup & Transfer", "Export your whole setup and bring it back on any phone — layout, folders, widgets and settings.")
+    )
+
+    /** The feature tour: swipe-free pages with Next / Skip, then [onDone]. */
+    fun showTour(act: Activity, root: FrameLayout, onDone: (() -> Unit)? = null) {
+        fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
+        var page = 0
+        val layer = FrameLayout(act).apply { setBackgroundColor(Color.argb(170, 0, 0, 0)); isClickable = true }
+        val card = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(28), dp(24), dp(18))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(32).toFloat(); setColor(0xF21C1C1E.toInt()); setStroke(maxOf(1, dp(1)), 0x33FFFFFF)
+            }
+            elevation = dp(16).toFloat()
+        }
+        val head = TextView(act).apply {
+            text = "What you can do"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); letterSpacing = 0.08f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        val emoji = TextView(act).apply { textSize = 54f; gravity = Gravity.CENTER }
+        val title = TextView(act).apply {
+            textSize = 24f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        }
+        val body = TextView(act).apply {
+            textSize = 15.5f; setTextColor(0xD9FFFFFF.toInt()); gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f)
+        }
+        val dots = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        val next = TextView(act).apply {
+            textSize = 17f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF0A84FF.toInt()) }
+        }
+        val skip = TextView(act).apply {
+            text = "Skip"; textSize = 15f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER; setPadding(0, dp(12), 0, dp(2))
+        }
+        card.addView(head)
+        card.addView(emoji, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+        card.addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
+        card.addView(body, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
+        card.addView(dots, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(20) })
+        card.addView(next, LinearLayout.LayoutParams(MATCH_PARENT, dp(52)).apply { topMargin = dp(18) })
+        card.addView(skip, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        fun bind(animate: Boolean) {
+            val (e, t, b) = features[page]
+            val apply = {
+                emoji.text = e; title.text = t; body.text = b
+                next.text = if (page == features.lastIndex) "Get Started" else "Next"
+                dots.removeAllViews()
+                for (i in features.indices) dots.addView(View(act).apply {
+                    background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(if (i == page) Color.WHITE else 0x44FFFFFF) }
+                }, LinearLayout.LayoutParams(if (i == page) dp(18) else dp(7), dp(7)).apply { marginStart = dp(3); marginEnd = dp(3) })
+            }
+            if (!animate) { apply(); return }
+            for (v in listOf(emoji, title, body)) v.animate().alpha(0f).translationX(-dp(24).toFloat()).setDuration(130).start()
+            emoji.postDelayed({
+                apply()
+                for ((i, v) in listOf(emoji, title, body).withIndex()) {
+                    v.translationX = dp(28).toFloat()
+                    v.animate().alpha(1f).translationX(0f).setStartDelay(i * 40L).setDuration(260).start()
+                }
+                emoji.scaleX = 0.6f; emoji.scaleY = 0.6f; Motion.scaleTo(emoji, 1f, Motion.BOUNCY)
+            }, 140)
+        }
+        lateinit var close: () -> Unit
+        next.setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+            if (page < features.lastIndex) { page++; bind(true) } else close()
+        }
+        skip.setOnClickListener { close() }
+        layer.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.CENTER).apply { leftMargin = dp(20); rightMargin = dp(20) })
+        close = {
+            card.animate().alpha(0f).scaleX(0.92f).scaleY(0.92f).setDuration(200).start()
+            layer.animate().alpha(0f).setDuration(240).withEndAction { root.removeView(layer); onDone?.invoke() }.start()
+        }
+        bind(false)
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         layer.alpha = 0f; layer.animate().alpha(1f).setDuration(260).start()
         card.scaleX = 0.88f; card.scaleY = 0.88f; card.alpha = 0f; card.translationY = dp(30).toFloat()
