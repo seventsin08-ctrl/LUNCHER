@@ -294,6 +294,10 @@ class Settings(ctx: Context) {
     var toolsOpacity: Int
         get() = p.getInt("s_tools_opacity", 100)
         set(v) = put("s_tools_opacity", v)
+    /** Tools bar docked to a screen edge as a half circle: "none", "left" or "right". */
+    var toolsEdge: String
+        get() = p.getString("s_tools_edge", "none") ?: "none"
+        set(v) { p.edit().putString("s_tools_edge", v).apply() }
     /** Tools bar folded into its small arrow tab. Saved without refreshing. */
     var toolsCollapsed: Boolean
         get() = p.getBoolean("s_tools_collapsed", false)

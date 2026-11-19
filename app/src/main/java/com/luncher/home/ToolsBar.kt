@@ -157,6 +157,16 @@ class ToolsBar(private val ctx: Context) {
         val l = lp ?: return
         r.removeAllViews()
         ThemeEngine.resolve(ctx, settings)
+        // Pushed against a side: a half circle that blossoms out of the edge, ✕ in the middle.
+        val edge = settings.toolsEdge
+        if (edge == "left" || edge == "right") {
+            l.gravity = Gravity.TOP or (if (edge == "left") Gravity.LEFT else Gravity.RIGHT)
+            l.x = 0
+            rebuildEdge(r, l, edge == "right", animateIn)
+            return
+        }
+        l.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        l.x = dp(settings.toolsDx)
         val k = settings.toolsScale / 100f
         val exit = exitAction
         val collapsed = settings.toolsCollapsed || exit != null
@@ -250,6 +260,124 @@ class ToolsBar(private val ctx: Context) {
         }
     }
 
+    /**
+     * Docked to a side: the tools fan out in a half circle from the edge with ✕ in the middle
+     * (✕ folds it into a small half-moon tab; tap the tab and it blossoms out again).
+     */
+    private fun rebuildEdge(r: FrameLayout, l: WindowManager.LayoutParams, right: Boolean, animateIn: Boolean) {
+        val k = settings.toolsScale / 100f
+        val exit = exitAction
+        val folded = settings.toolsCollapsed || exit != null
+        val (bg, stroke, iconCol) = colors()
+        val btn = dp(34 * k)
+        val ring = dp(88 * k)                       // where the tools sit
+        val disc = if (folded) dp(30 * k) else ring + btn / 2 + dp(10 * k)
+        val W = disc + dp(2); val H = disc * 2
+        val fan = object : FrameLayout(ctx) {
+            private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = bg }
+            private val rim = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                style = android.graphics.Paint.Style.STROKE; strokeWidth = maxOf(1, dp(1)).toFloat(); color = stroke
+            }
+            init { setWillNotDraw(false); clipChildren = false }
+            override fun onDraw(c: android.graphics.Canvas) {
+                val cx = if (right) width.toFloat() else 0f
+                c.drawCircle(cx, height / 2f, disc.toFloat() - 1, fill)
+                c.drawCircle(cx, height / 2f, disc.toFloat() - 1, rim)
+            }
+        }
+        // Centre button: ✕ (fold, or close Settings) — or the arrow tab when folded.
+        val centre = android.widget.TextView(ctx).apply {
+            gravity = Gravity.CENTER; setTextColor(iconCol); typeface = android.graphics.Typeface.DEFAULT_BOLD
+            text = when { exit != null -> "✕"; folded -> if (right) "‹" else "›"; else -> "✕" }
+            textSize = (if (folded && exit == null) 22f else 16f) * k
+            contentDescription = when { exit != null -> "Close Settings"; folded -> "Show tools"; else -> "Hide tools" }
+            background = if (!folded) GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(46, 255, 255, 255)) } else null
+            setOnClickListener { v ->
+                v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                v.animate().rotationBy(if (right) -90f else 90f).setDuration(180).start()
+                when {
+                    exit != null -> v.postDelayed({ exit() }, 150)
+                    folded -> { settings.toolsCollapsed = false; rebuild(animateIn = true) }
+                    else -> foldEdge(fan) { settings.toolsCollapsed = true; rebuild(animateIn = true) }
+                }
+            }
+        }
+        val cs = if (folded) dp(28 * k) else btn
+        val ccx = if (folded) dp(14 * k) else dp(22 * k)       // centre button's distance from the edge
+        fan.addView(centre, FrameLayout.LayoutParams(cs, cs).apply {
+            gravity = Gravity.TOP or (if (right) Gravity.RIGHT else Gravity.LEFT)
+            topMargin = H / 2 - cs / 2
+            if (right) rightMargin = ccx - cs / 2 else leftMargin = ccx - cs / 2
+        })
+        val toolViews = ArrayList<View>()
+        if (!folded) {
+            val list = tools()
+            val n = list.size
+            for ((i, t) in list.withIndex()) {
+                // Spread from -78° to +78° around the edge point.
+                val a = Math.toRadians(-78.0 + 156.0 * i / maxOf(1, n - 1))
+                val px = (ring * cos(a)).toInt()            // distance from the edge
+                val py = (ring * sin(a)).toInt()
+                val on = t.on()
+                val b = FrameLayout(ctx).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (on) Color.WHITE else Color.argb(30, 255, 255, 255)) }
+                    contentDescription = t.label
+                    setOnClickListener { v ->
+                        v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        v.animate().scaleX(0.8f).scaleY(0.8f).setDuration(80).withEndAction { Motion.scaleTo(v, 1f, Motion.BOUNCY) }.start()
+                        t.tap(v)
+                        main.postDelayed({ rebuild() }, 600)
+                    }
+                }
+                b.addView(ImageView(ctx).apply { setImageResource(t.icon); setColorFilter(if (on) 0xFF1C1C1E.toInt() else iconCol) },
+                    FrameLayout.LayoutParams(dp(18 * k), dp(18 * k), Gravity.CENTER))
+                fan.addView(b, FrameLayout.LayoutParams(btn, btn).apply {
+                    gravity = Gravity.TOP or (if (right) Gravity.RIGHT else Gravity.LEFT)
+                    topMargin = H / 2 + py - btn / 2
+                    if (right) rightMargin = px - btn / 2 else leftMargin = px - btn / 2
+                })
+                // Remember how far it travels from the centre (for the blossom animation).
+                b.tag = floatArrayOf((if (right) -1 else 1) * (ccx - px).toFloat(), -py.toFloat())
+                toolViews += b
+            }
+        }
+        val frame = DragFrame().apply { clipChildren = false }
+        frame.addView(fan, FrameLayout.LayoutParams(W, H))
+        r.addView(frame, FrameLayout.LayoutParams(W, H))
+        r.alpha = if (searching) 0f else 1f
+        l.y = l.y.coerceIn(0, ctx.resources.displayMetrics.heightPixels - H)
+        runCatching { wm?.updateViewLayout(r, l) }
+        if (animateIn) {
+            // Blossom: the half circle grows out of the edge, the tools fly out from the centre.
+            fan.pivotX = if (right) W.toFloat() else 0f; fan.pivotY = H / 2f
+            fan.scaleX = 0.3f; fan.scaleY = 0.3f; fan.alpha = 0f
+            fan.animate().alpha(1f).setDuration(200).start()
+            Motion.scaleTo(fan, 1f, Motion.FLUID)
+            for ((i, v) in toolViews.withIndex()) {
+                val d = v.tag as FloatArray
+                v.translationX = d[0]; v.translationY = d[1]
+                v.scaleX = 0.3f; v.scaleY = 0.3f; v.alpha = 0f
+                v.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f)
+                    .setStartDelay(60L + i * 35L).setDuration(380)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
+            }
+        }
+    }
+
+    /** Tools fly back into the centre, then [done]. */
+    private fun foldEdge(fan: FrameLayout, done: () -> Unit) {
+        var last = 0L
+        for (i in 0 until fan.childCount) {
+            val v = fan.getChildAt(i)
+            val d = v.tag as? FloatArray ?: continue
+            last = maxOf(last, i * 25L)
+            v.animate().translationX(d[0]).translationY(d[1]).scaleX(0.3f).scaleY(0.3f).alpha(0f)
+                .setStartDelay(i * 25L).setDuration(220).start()
+        }
+        fan.animate().scaleX(0.4f).scaleY(0.4f).alpha(0.6f).setStartDelay(last + 120).setDuration(180)
+            .withEndAction { done() }.start()
+    }
+
     /** Hold anywhere on the bar, then drag it around the screen. */
     private inner class DragFrame : FrameLayout(ctx) {
         private var dx = 0f; private var dy = 0f; private var sx = 0; private var sy = 0
@@ -260,7 +388,7 @@ class ToolsBar(private val ctx: Context) {
             getChildAt(0)?.let { Motion.scaleTo(it, 1.08f, Motion.SNAPPY) }
             val now = android.os.SystemClock.uptimeMillis()
             val c = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
-            (getChildAt(0) as? LinearLayout)?.let { b -> for (i in 0 until b.childCount) b.getChildAt(i).dispatchTouchEvent(c) }
+            (getChildAt(0) as? android.view.ViewGroup)?.let { b -> for (i in 0 until b.childCount) b.getChildAt(i).dispatchTouchEvent(c) }
             c.recycle()
         }
         override fun onInterceptTouchEvent(e: MotionEvent) = handle(e)
@@ -272,7 +400,8 @@ class ToolsBar(private val ctx: Context) {
                 MotionEvent.ACTION_MOVE -> {
                     if (!dragging && abs(e.rawX - dx) + abs(e.rawY - dy) > dp(10)) removeCallbacks(lift)
                     if (dragging) {
-                        l.x = sx + (e.rawX - dx).toInt()
+                        val fromRight = (l.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT
+                        l.x = sx + (if (fromRight) -1 else 1) * (e.rawX - dx).toInt()
                         l.y = (sy + (e.rawY - dy).toInt()).coerceIn(0, ctx.resources.displayMetrics.heightPixels - dp(40))
                         runCatching { wm?.updateViewLayout(root, l) }
                         return true
@@ -284,9 +413,21 @@ class ToolsBar(private val ctx: Context) {
                         dragging = false
                         getChildAt(0)?.let { Motion.scaleTo(it, 1f, Motion.BOUNCY) }
                         val d = ctx.resources.displayMetrics.density
-                        settings.toolsDx = (l.x / d).roundToInt()
+                        // Where did it land? Near a side → dock there as a half circle.
+                        val sw = ctx.resources.displayMetrics.widthPixels
+                        val wv = (root?.width ?: width)
+                        val cx = when {
+                            (l.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.LEFT -> l.x + wv / 2
+                            (l.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT -> sw - l.x - wv / 2
+                            else -> sw / 2 + l.x
+                        }
+                        val newEdge = when { cx < dp(90) -> "left"; cx > sw - dp(90) -> "right"; else -> "none" }
+                        if (newEdge == "none") settings.toolsDx = ((cx - sw / 2) / d).roundToInt()
                         settings.toolsDy = ((l.y - dp(64)) / d).roundToInt()
+                        val changed = newEdge != settings.toolsEdge
+                        settings.toolsEdge = newEdge
                         performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                        if (changed || newEdge != "none") main.post { rebuild(animateIn = true) }
                         return true
                     }
                 }
