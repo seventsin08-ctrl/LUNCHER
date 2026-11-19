@@ -22,6 +22,8 @@ class LuncherAccessibility : AccessibilityService() {
         instance = this
         // Lets the headphone pop-up appear on top of any app.
         runCatching { HeadsetPopup.get(applicationContext) }
+        // Bring the always-on sidebar back (e.g. after a restart).
+        runCatching { SidebarService.sync(applicationContext) }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {

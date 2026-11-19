@@ -218,6 +218,8 @@ class SettingsActivity : Activity() {
 
     override fun onPause() {
         visible = false
+        // Apply sidebar changes (side, size, apps) right away, even over other apps.
+        runCatching { SidebarService.sync(this) }
         super.onPause()
     }
 
@@ -565,13 +567,15 @@ class SettingsActivity : Activity() {
             toggle(side, "App Names", "Show names under the icons", s.sidebarLabels) { s.sidebarLabels = it }
             segment(side, "Side", listOf("left" to "Left Edge", "right" to "Right Edge"),
                 if (s.sidebarRight) "right" else "left") { s.sidebarRight = it == "right" }
-            toggle(side, "Show Over Other Apps", "Use the sidebar inside any app, not only on the Home Screen",
+            toggle(side, "Show Over Other Apps", "Always there — inside any app, games and full-screen videos",
                 s.sidebarOverApps) { s.sidebarOverApps = it; rebuild() }
             if (s.sidebarOverApps && !HeadsetPopup.canShowOverApps(this)) {
                 button(side, "Allow Showing Over Other Apps…", 0xFF0A84FF.toInt()) {
                     runCatching { startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
                 }
             }
+            if (s.sidebarOverApps) info(side, "Android shows a small “Sidebar is on” notification while it runs over other apps. " +
+                "You can hide it by long-pressing the notification and turning off its category.")
             info(side, "Tip: tap or swipe the handle inward to open. Pinch the open sidebar to resize it. " +
                 "Long-press the handle and drag to move it up or down.")
         }

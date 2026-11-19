@@ -34,7 +34,10 @@ import kotlin.math.roundToInt
  * Works on top of other apps when the launcher may draw over them, otherwise on the Home Screen.
  */
 class Sidebar(
-    private val act: Activity,
+    /** Any context (the launcher screen, or the background sidebar service). */
+    private val act: android.content.Context,
+    /** The launcher screen when the sidebar only lives on the Home Screen, else null. */
+    private val host: Activity?,
     private val settings: Settings,
     private val apps: () -> List<AppInfo>,
     private val launch: (AppInfo) -> Unit
@@ -68,7 +71,8 @@ class Sidebar(
         if (!settings.sidebarOn) return
         val type = windowType()
         overApps = type != null && settings.sidebarOverApps
-        val ctxForWm = if (overApps) (LuncherAccessibility.instance ?: act) else act
+        if (!overApps && host == null) return
+        val ctxForWm: android.content.Context = if (overApps) (LuncherAccessibility.instance ?: act) else host!!
         val w = ctxForWm.getSystemService(WindowManager::class.java) ?: return
         val right = settings.sidebarRight
         val h = HandleView(act, right)
@@ -81,7 +85,10 @@ class Sidebar(
         ).apply {
             gravity = (if (right) Gravity.END else Gravity.START) or Gravity.TOP
             y = dp(settings.sidebarY)
-            if (!overApps) token = act.window.decorView.windowToken
+            if (!overApps) token = host?.window?.decorView?.windowToken
+            // Stay put over full-screen games and videos (including in the notch area).
+            if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(h, lp) }.isFailure) return
         wm = w; handle = h; handleLp = lp
@@ -180,14 +187,17 @@ class Sidebar(
         ).apply {
             gravity = (if (right) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
             dimAmount = 0.32f
-            if (!overApps) token = act.window.decorView.windowToken
+            if (!overApps) token = host?.window?.decorView?.windowToken
+            // Stay put over full-screen games and videos (including in the notch area).
+            if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             if (Build.VERSION.SDK_INT >= 31) blurBehindRadius = dp(18)
             if (Build.VERSION.SDK_INT >= 31) flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
         }
         if (runCatching { w.addView(root, lp) }.isFailure) return
         panelRoot = root; panel = card
         handle?.animate()?.alpha(0f)?.setDuration(120)?.start()
-        act.window.decorView.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
         // Slide in from the edge, the icons following one after another.
         val off = dp(130).toFloat() * (if (right) 1 else -1)
         Motion.spring(card, DynamicAnimation.TRANSLATION_X, 0f, Motion.FLUID, start = off)

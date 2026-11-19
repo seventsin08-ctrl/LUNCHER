@@ -644,7 +644,7 @@ class MainActivity : Activity() {
             ViewCompat.requestApplyInsets(root)
         }
         if (::controlCenter.isInitialized) controlCenter.tileStyle = settings.ccStyle
-        if (sidebar != null) setupSidebar()
+        setupSidebar()
         loadSpatialWallpaper()
         appliedVersion = settings.version
         applyStyleGlobals()
@@ -831,7 +831,10 @@ class MainActivity : Activity() {
     }
 
     private fun setupSidebar() {
-        if (sidebar == null) sidebar = Sidebar(this, settings, { allApps }) { a ->
+        // Over other apps (games, videos…) a background service keeps the sidebar alive;
+        // otherwise it lives on the Home Screen only.
+        if (SidebarService.sync(this)) { sidebar?.detach(); return }
+        if (sidebar == null) sidebar = Sidebar(this, this, settings, { allApps }) { a ->
             runCatching {
                 startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(a.component)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
