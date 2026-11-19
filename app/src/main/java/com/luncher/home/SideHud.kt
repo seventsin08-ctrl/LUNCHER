@@ -698,7 +698,6 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val all = historyProvider?.invoke().orEmpty()
         // Group by app, newest app first; newest conversation first inside each.
         val allGroups = all.groupBy { it.pkg }.entries.sortedByDescending { e -> e.value.maxOf { it.time } }
-        val groups = if (filterPkg == null) allGroups else allGroups.filter { it.key == filterPkg }
         val (sw, sh) = settings.winSize("hist")
         val width = if (sw > 0) dp(sw).coerceAtMost(m.widthPixels - dp(16)) else minOf((m.widthPixels * 0.92f).toInt(), dp(400))
         val root = android.widget.LinearLayout(ctx).apply {
@@ -742,7 +741,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         head.addView(circleButton("✕") { hideHistory() }, android.widget.LinearLayout.LayoutParams(dp(30), dp(30)))
         root.addView(head)
 
-        // Filter chips: All + one per app (logo + count). Tap to see only that app.
+        // Filter chips: All + one per app (logo + count). Tap to see only that app —
+        // the list slides over to it in place (no window rebuild, so it's smooth).
+        var current = filterPkg
+        val chipViews = ArrayList<Triple<String?, View, android.graphics.drawable.GradientDrawable>>()
+        var select: (String?) -> Unit = {}
         if (allGroups.size > 1) {
             val chipScroll = android.widget.HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
             val chips = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -750,10 +753,12 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 val c = android.widget.LinearLayout(ctx).apply {
                     orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(if (icon != null) 6 else 12), dp(5), dp(10), dp(5))
-                    background = android.graphics.drawable.GradientDrawable().apply {
-                        cornerRadius = dp(16).toFloat(); setColor(if (on) 0xFF0A84FF.toInt() else 0x26FFFFFF)
+                    val bg = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(16).toFloat(); setColor(if (on) CHIP_ON else CHIP_OFF)
                     }
-                    setOnClickListener { performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); showHistory(pkg, histPanelLp?.let { it.x to it.y }) }
+                    background = bg
+                    chipViews += Triple(pkg, this, bg)
+                    setOnClickListener { performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); select(pkg) }
                 }
                 if (icon != null) c.addView(roundIcon(icon, dp(22)), android.widget.LinearLayout.LayoutParams(dp(22), dp(22)))
                 c.addView(android.widget.TextView(ctx).apply {
@@ -765,12 +770,16 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             chip(null, "All", totalMsgs, filterPkg == null, null)
             for ((pkg, convs) in allGroups) chip(appLookup?.invoke(pkg)?.first, null, convs.sumOf { maxOf(1, it.messages.size) }, filterPkg == pkg, pkg)
             chipScroll.addView(chips)
+            chipScrollRef = chipScroll
             root.addView(chipScroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
         }
 
         // Scrollable list (drag the corner grip to make the window bigger or smaller)
         val scroll = MaxScroll(ctx, if (sh > 0) dp(sh) else (m.heightPixels * 0.55f).toInt())
         val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        fun fill(f: String?) {
+        list.removeAllViews()
+        val groups = if (f == null) allGroups else allGroups.filter { it.key == f }
         if (groups.isEmpty()) list.addView(android.widget.TextView(ctx).apply {
             text = "No notifications yet\nNew messages and notifications will show up here"
             textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(0, dp(20), 0, dp(20)); gravity = Gravity.CENTER
@@ -842,6 +851,48 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
             }
         }
+        }
+        fill(filterPkg)
+        select = { pkg ->
+            if (pkg != current) {
+                val order = chipViews.map { it.first }
+                val dir = if (order.indexOf(pkg) >= order.indexOf(current)) 1f else -1f
+                current = pkg
+                // Chips: colours glide to the new selection; the picked one gets a little pop.
+                for ((cp, v, bg) in chipViews) {
+                    val on = cp == pkg
+                    val from = bg.color?.defaultColor ?: CHIP_OFF
+                    val to = if (on) CHIP_ON else CHIP_OFF
+                    if (from != to) android.animation.ValueAnimator.ofArgb(from, to).apply {
+                        duration = 220; addUpdateListener { bg.setColor(it.animatedValue as Int) }; start()
+                    }
+                    if (on) {
+                        v.scaleX = 0.92f; v.scaleY = 0.92f
+                        Motion.scaleTo(v, 1f, Motion.BOUNCY)
+                        chipScrollRef?.let { cs -> cs.post { cs.smoothScrollTo((v.left - (cs.width - v.width) / 2).coerceAtLeast(0), 0) } }
+                    }
+                }
+                // Keep the window the same size while the list changes (no jump).
+                scroll.minimumHeight = scroll.height
+                list.animate().cancel()
+                list.animate().alpha(0f).translationX(-dp(28) * dir).setDuration(110)
+                    .setInterpolator(android.view.animation.AccelerateInterpolator(1.5f))
+                    .withEndAction {
+                        fill(pkg)
+                        scroll.scrollTo(0, 0)
+                        list.translationX = dp(28) * dir
+                        list.animate().alpha(1f).translationX(0f).setDuration(260)
+                            .setInterpolator(android.view.animation.DecelerateInterpolator(2.2f)).start()
+                        // Cards rise in one after another.
+                        for (i in 0 until minOf(list.childCount, 12)) {
+                            val ch = list.getChildAt(i)
+                            ch.alpha = 0f; ch.translationY = dp(12).toFloat()
+                            ch.animate().alpha(1f).translationY(0f).setStartDelay(30L + i * 22L).setDuration(240)
+                                .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+                        }
+                    }.start()
+            }
+        }
         scroll.addView(list)
         root.addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -873,6 +924,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
     private var histPanelLp: WindowManager.LayoutParams? = null
     private var histSeen = 0L
+    private var chipScrollRef: android.widget.HorizontalScrollView? = null
+    private val CHIP_ON = 0xFF0A84FF.toInt()
+    private val CHIP_OFF = 0x26FFFFFF
     private var keepGravity = Gravity.CENTER
 
     private fun hideHistory(immediate: Boolean = false) {
