@@ -294,6 +294,10 @@ class Settings(ctx: Context) {
     var toolsOpacity: Int
         get() = p.getInt("s_tools_opacity", 100)
         set(v) = put("s_tools_opacity", v)
+    /** Tools bar folded into its small arrow tab. Saved without refreshing. */
+    var toolsCollapsed: Boolean
+        get() = p.getBoolean("s_tools_collapsed", false)
+        set(v) { p.edit().putBoolean("s_tools_collapsed", v).apply() }
     /** Where you dragged the tools bar (dp from its normal spot). Saved without refreshing. */
     var toolsDx: Int
         get() = p.getInt("s_tools_dx", 0)

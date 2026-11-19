@@ -31,7 +31,7 @@ class SidebarService : Service() {
             val s = Settings(ctx)
             val allowed = LuncherAccessibility.instance != null || android.provider.Settings.canDrawOverlays(ctx)
             // Also keeps the launcher alive so the island (music, timers…) stays on top of other apps.
-            val want = allowed && ((s.sidebarOn && s.sidebarOverApps) || (s.island && s.islandOverApps))
+            val want = allowed && ((s.sidebarOn && s.sidebarOverApps) || (s.island && s.islandOverApps) || s.islandTools)
             val i = Intent(ctx, SidebarService::class.java).setAction(ACTION_REFRESH)
             if (want) runCatching { ctx.startForegroundService(i) }
             else runCatching { ctx.stopService(Intent(ctx, SidebarService::class.java)) }
@@ -40,6 +40,7 @@ class SidebarService : Service() {
     }
 
     private var sidebar: Sidebar? = null
+    private var tools: ToolsBar? = null
     @Volatile private var apps: List<AppInfo> = emptyList()
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -63,6 +64,8 @@ class SidebarService : Service() {
         goForeground()
         // Settings changed (side, size, apps…): rebuild the handle.
         main.post { runCatching { sidebar?.attach() } }
+        // The tools bar: always on screen, on the Home Screen and over every app.
+        main.post { runCatching { (tools ?: ToolsBar(this).also { tools = it }).attach() } }
         if (intent?.action == ACTION_REFRESH) loadApps()
         return START_STICKY
     }
@@ -100,6 +103,7 @@ class SidebarService : Service() {
 
     override fun onDestroy() {
         runCatching { sidebar?.detach() }
+        runCatching { tools?.detach() }; tools = null
         sidebar = null
         io.shutdownNow()
         super.onDestroy()

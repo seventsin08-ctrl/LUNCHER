@@ -329,7 +329,7 @@ class MainActivity : Activity() {
         island.enabled = settings.island
         island.popupMs = settings.islandPopupMs.toLong()
         island.alwaysShow = settings.islandAlways
-        island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
+        island.idleTools = null // the tools bar is its own always-on window now (ToolsBar)
         island.quickActions = { quickActions() }
         island.allow = { id ->
             settings.islandAllows(when {
@@ -673,7 +673,7 @@ class MainActivity : Activity() {
             island.enabled = settings.island
             island.popupMs = settings.islandPopupMs.toLong()
             island.alwaysShow = settings.islandAlways
-            island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
+            island.idleTools = null
             overlayIsland?.idleTools = island.idleTools
             applyIslandLook()
             island.applyFilter()
@@ -931,7 +931,7 @@ class MainActivity : Activity() {
     private fun setupSidebar() {
         // Over other apps (games, videos…) a background service keeps the sidebar alive;
         // otherwise it lives on the Home Screen only.
-        if (SidebarService.sync(this)) { sidebar?.detach(); return }
+        if (SidebarService.sync(this) && settings.sidebarOverApps) { sidebar?.detach(); return }
         if (sidebar == null) sidebar = Sidebar(this, this, settings, { allApps }) { a ->
             runCatching {
                 startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(a.component)
@@ -4696,6 +4696,7 @@ class MainActivity : Activity() {
 
     private fun openSearch() {
         if (::island.isInitialized) island.setSearching(true)
+        ToolsBar.current?.setSearching(true)
         searchField.setText("")
         filterSearch("")
         searchOverlay.visibility = View.VISIBLE
@@ -4717,6 +4718,7 @@ class MainActivity : Activity() {
 
     private fun closeSearch(animate: Boolean = true) {
         if (::island.isInitialized) island.setSearching(false)
+        ToolsBar.current?.setSearching(false)
         imm().hideSoftInputFromWindow(searchField.windowToken, 0)
         searchField.clearFocus()
         val fast = !animate || anim == 0f

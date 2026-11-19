@@ -699,8 +699,10 @@ class SettingsActivity : Activity() {
 
         // ---------------- Island tools bar (shown when nothing is playing)
         val tools = section("ISLAND TOOLS")
-        toggle(tools, "Island Tools", "When nothing is playing, the island becomes a bar of tools: " +
-            "Flashlight, Brightness, Silent, Game Mode, Lock Screen and Settings", s.islandTools) { s.islandTools = it; rebuild() }
+        toggle(tools, "Tools Bar", "Always on screen — on the Home Screen and over every app: " +
+            "Flashlight, Brightness, Silent, Game Mode, Lock Screen and Settings", s.islandTools) {
+            s.islandTools = it; runCatching { SidebarService.sync(this) }; rebuild()
+        }
         if (s.islandTools) {
             slider(tools, "Size", 60, 150, s.toolsScale, { "$it%" }) { s.toolsScale = it }
             segment(tools, "Color", listOf("black" to "Black", "glass" to "Glass", "theme" to "Theme", "white" to "White", "custom" to "Custom"),
@@ -715,7 +717,8 @@ class SettingsActivity : Activity() {
                 s.toolsScale = s.toolsScale // nudges the launcher to re-apply the look
                 android.widget.Toast.makeText(this, "The tools bar is back at the top", android.widget.Toast.LENGTH_SHORT).show()
             }
-            info(tools, "Move it: hold the tools bar for a moment, then drag it anywhere on the screen.")
+            info(tools, "It never hides by itself. Tap its arrow ⌃ to fold it into a small tab, and ⌄ to open it again. " +
+                "Move it: hold the bar for a moment, then drag it anywhere on the screen.")
         }
 
         // ---------------- Sounds
