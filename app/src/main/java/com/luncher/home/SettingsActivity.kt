@@ -42,7 +42,7 @@ class SettingsActivity : Activity() {
         Category("look", "Appearance", 0xFF0A84FF.toInt(), R.drawable.ic_cc_contrast, listOf("APPEARANCE", "THEME", "WALLPAPER")),
         Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "WIDGETS")),
         Category("island", "Dynamic Island", 0xFF1C1C1E.toInt(), R.drawable.ic_set_island,
-            listOf("DYNAMIC ISLAND & ASSISTANT", "ISLAND CONTENT", "ISLAND SERVICES")),
+            listOf("DYNAMIC ISLAND & ASSISTANT", "SIDE ISLAND", "ISLAND CONTENT", "ISLAND SERVICES")),
         Category("sidebar", "Sidebar", 0xFFFF9F0A.toInt(), R.drawable.ic_set_sidebar, listOf("SIDEBAR")),
         Category("motion", "Animations & Gestures", 0xFFFF375F.toInt(), R.drawable.ic_set_hand, listOf("ANIMATIONS", "GESTURES")),
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
@@ -464,6 +464,40 @@ class SettingsActivity : Activity() {
             s.islandStyle) { s.islandStyle = it; pv?.style = it; previewChanged(replay = true) }
         segment(isl, "Pop-up Animation", listOf("3d" to "3D", "spring" to "Pop", "fade" to "Fade", "slide" to "Slide", "zoom" to "Zoom"),
             s.islandAnim) { s.islandAnim = it; pv?.anim = it; previewChanged(replay = true) }
+        // ---------------- Side island: what it shows and how it behaves
+        val side2 = section("SIDE ISLAND")
+        toggle(side2, "Side Island", "A black shape that grows out of the left edge of the screen", s.sideHud) {
+            s.sideHud = it; rebuild()
+        }
+        if (s.sideHud) {
+            info(side2, "Choose what the side island shows:")
+            toggle(side2, "Volume", "Volume buttons on the Home Screen show a slider here", s.sideShowVolume) { s.sideShowVolume = it }
+            toggle(side2, "Silent & Ring", "When you switch between Ring, Vibrate and Silent", s.sideShowRinger) { s.sideShowRinger = it }
+            toggle(side2, "Focus", "When a Focus mode turns on or off", s.sideShowFocus) { s.sideShowFocus = it }
+            toggle(side2, "Messages", "New messages slide out with the app icon, sender and text (tap to open, swipe left to dismiss)",
+                s.sideMessages) { s.sideMessages = it; rebuild() }
+            if (s.sideMessages) {
+                segment(side2, "Messages From", listOf("all" to "All Apps", "chosen" to "Chosen Apps"), s.sideMsgMode) {
+                    s.sideMsgMode = it
+                }
+                button(side2, "Choose Message Apps (${s.sideMsgApps.size})…", 0xFF0A84FF.toInt()) {
+                    chooseApps("Messages From", launchableApps(), s.sideMsgApps) { chosen ->
+                        s.sideMsgApps = chosen
+                        if (chosen.isNotEmpty()) s.sideMsgMode = "chosen"
+                    }
+                }
+            }
+            toggle(side2, "Always Show on Edge", "A slim sliver stays on the edge when nothing is showing", s.sideRest) {
+                s.sideRest = it; rebuild()
+            }
+            if (s.sideRest) segment(side2, "Tap the Sliver For", listOf("volume" to "Volume Slider", "music" to "Play / Pause",
+                "none" to "Nothing"), s.sideTap) { s.sideTap = it }
+            slider(side2, "Position on Edge", 10, 80, s.sideY, { "$it%" }) { s.sideY = it }
+            segment(side2, "Stays For", listOf("1200" to "Short", "1800" to "Normal", "3500" to "Long"), s.sideMs.toString()) {
+                s.sideMs = it.toInt()
+            }
+        }
+
         // What may appear in the island
         val content = section("ISLAND CONTENT")
         for ((type, label, sub) in listOf(
@@ -503,14 +537,6 @@ class SettingsActivity : Activity() {
 
         toggle(isl, "Always Show Island", "A small island stays at the top; pull it down (or tap it) for quick controls",
             s.islandAlways) { s.islandAlways = it; previewChanged() }
-        toggle(isl, "Side Island for Volume & Silent", "Volume, Silent and Focus grow out of the screen edge",
-            s.sideHud) { s.sideHud = it; rebuild() }
-        if (s.sideHud) {
-            toggle(isl, "Always Show Side Island", "A small bump stays on the left edge; tap it for a volume slider you can drag",
-                s.sideRest) { s.sideRest = it }
-            toggle(isl, "Messages in Side Island", "New messages slide out of the edge (tap to open, swipe left to dismiss); " +
-                "music stays in the top island", s.sideMessages) { s.sideMessages = it }
-        }
         toggle(isl, "Assistant Button", "Show an AI assistant button in the island's pull-down controls",
             s.assistant != "off") { on ->
             s.assistant = if (on) (getSharedPreferences("luncher", MODE_PRIVATE).getString("last_assistant", "gemini") ?: "gemini") else "off"

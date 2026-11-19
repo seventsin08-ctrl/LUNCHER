@@ -40,12 +40,18 @@ class SideHud(private val act: Activity, private val settings: Settings) {
     private var view: HudView? = null
     private val backToRest = Runnable { retract() }
     private var onOpen: (() -> Unit)? = null
+    /** Set by the launcher: play / pause the current music (for "Tap the Sliver For → Play / Pause"). */
+    var onPlayPause: (() -> Unit)? = null
 
     private val audio get() = act.getSystemService(AudioManager::class.java)
 
     /** Show the resting bump (or remove everything if the side island is off). */
     fun rest() {
         if (!settings.sideHud || !settings.sideRest) { dismiss(); return }
+        lp?.let { l ->
+            val y = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(125)
+            if (l.y != y) { l.y = y; view?.let { v -> runCatching { wm?.updateViewLayout(v, l) } } }
+        }
         val v = view ?: create() ?: return
         if (v.kind != Kind.REST) return
         v.kind = Kind.REST
@@ -76,7 +82,8 @@ class SideHud(private val act: Activity, private val settings: Settings) {
         v.invalidate()
         v.growTo(1f)
         v.removeCallbacks(backToRest)
-        v.postDelayed(backToRest, when (kind) { Kind.MESSAGE -> 5000L; Kind.VOLUME -> 1800L; else -> 1800L })
+        val ms = settings.sideMs.toLong()
+        v.postDelayed(backToRest, if (kind == Kind.MESSAGE) ms + 3200L else ms)
         if (kind == Kind.MESSAGE) v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
     }
 
@@ -106,7 +113,7 @@ class SideHud(private val act: Activity, private val settings: Settings) {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.START or Gravity.TOP
-            y = (act.resources.displayMetrics.heightPixels * 0.3f).toInt()
+            y = (act.resources.displayMetrics.heightPixels * settings.sideY / 100f).toInt() - dp(125)
             if (type == WindowManager.LayoutParams.TYPE_APPLICATION) token = act.window.decorView.windowToken
             if (android.os.Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -292,8 +299,13 @@ class SideHud(private val act: Activity, private val settings: Settings) {
                         kind == Kind.MESSAGE && kotlin.math.abs(dx) < dp(10) -> { val o = onOpen; retract(); o?.invoke() }
                         kind == Kind.REST -> {
                             performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-                            volume(audio.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat())
+                            when (settings.sideTap) {
+                                "volume" -> {
+                                    val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                    volume(audio.getStreamVolume(AudioManager.STREAM_MUSIC) / max.toFloat())
+                                }
+                                "music" -> onPlayPause?.invoke()
+                            }
                             return true
                         }
                         else -> {}

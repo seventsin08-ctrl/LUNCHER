@@ -380,6 +380,7 @@ class MainActivity : Activity() {
         NotificationService.onOngoing = { refreshOngoing() }
         startPrivacyWatch()
         sideHud = SideHud(this, settings)
+        sideHud.onPlayPause = { togglePlay() }
         root.post { runCatching { sideHud.rest() } }
         setupSidebar()
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
@@ -755,8 +756,8 @@ class MainActivity : Activity() {
         val am = getSystemService(android.media.AudioManager::class.java)
         am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
             if (step > 0) android.media.AudioManager.ADJUST_RAISE else android.media.AudioManager.ADJUST_LOWER,
-            if (settings.sideHud) 0 else android.media.AudioManager.FLAG_SHOW_UI)
-        if (settings.sideHud && ::sideHud.isInitialized) {
+            if (settings.sideHud && settings.sideShowVolume) 0 else android.media.AudioManager.FLAG_SHOW_UI)
+        if (settings.sideHud && settings.sideShowVolume && ::sideHud.isInitialized) {
             val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
             sideHud.volume(am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) / max.toFloat())
         }
@@ -764,7 +765,7 @@ class MainActivity : Activity() {
 
     // On the Home Screen the volume buttons show the side island instead of Android's slider.
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
-        if (settings.sideHud && (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN)) {
+        if (settings.sideHud && settings.sideShowVolume && (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN)) {
             stepVolume(if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) 1 else -1)
             return true
         }
@@ -773,7 +774,7 @@ class MainActivity : Activity() {
 
     private val ringerReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
-            if (!settings.sideHud || !::sideHud.isInitialized) return
+            if (!settings.sideHud || !settings.sideShowRinger || !::sideHud.isInitialized) return
             when (getSystemService(android.media.AudioManager::class.java).ringerMode) {
                 android.media.AudioManager.RINGER_MODE_NORMAL ->
                     sideHud.status(listOf(R.drawable.ic_cc_bell to Color.WHITE), "RING")
@@ -5111,7 +5112,7 @@ class MainActivity : Activity() {
 
     private fun applyFocusState(announce: Boolean) {
         focusId = Focus.current(this)?.id
-        if (announce && settings.sideHud && ::sideHud.isInitialized) {
+        if (announce && settings.sideHud && settings.sideShowFocus && ::sideHud.isInitialized) {
             val f = Focus.current(this)
             if (f != null) sideHud.status(listOf(R.drawable.ic_cc_moon to f.color, R.drawable.ic_cc_person to 0xFFBF5AF2.toInt()), f.name.uppercase())
             else sideHud.status(listOf(R.drawable.ic_cc_moon to 0xFF8E8E93.toInt()), "FOCUS OFF")
@@ -5270,13 +5271,12 @@ class MainActivity : Activity() {
         if (f != null && Focus.silences(this, f)) return
         if (mediaController?.packageName == pkg) return
         val now = System.currentTimeMillis()
-        if (!settings.islandAllows("note")) return
-        if (settings.islandNoteMode == "chosen" && pkg !in settings.islandNoteApps) return
         if (now - (lastIslandNote[pkg] ?: 0L) < 4000L) return
         lastIslandNote[pkg] = now
         val app = allApps.firstOrNull { it.packageName == pkg }
         // Messages come out of the side island; the top island stays for music, timers and calls.
-        if (settings.sideHud && settings.sideMessages && ::sideHud.isInitialized) {
+        if (settings.sideHud && settings.sideMessages && ::sideHud.isInitialized &&
+            (settings.sideMsgMode == "all" || pkg in settings.sideMsgApps)) {
             sideHud.message(app?.icon, title.ifBlank { app?.label ?: "Message" }, text) {
                 if (app != null) runCatching {
                     startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(app.component)
@@ -5285,6 +5285,9 @@ class MainActivity : Activity() {
             }
             return
         }
+        // Top island (when messages aren't going to the side island): its own app filter applies.
+        if (!settings.islandAllows("note")) return
+        if (settings.islandNoteMode == "chosen" && pkg !in settings.islandNoteApps) return
         if (!settings.island || (!isActive && overlayIsland == null)) return
         island.flash(IslandActivity("note", app?.icon, R.drawable.ic_music, Color.WHITE,
             title.ifBlank { app?.label ?: "Notification" }, text, null, false, Color.WHITE,

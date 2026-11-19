@@ -144,6 +144,35 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_side_msgs", true)
         set(v) = put("s_side_msgs", v)
 
+    var sideShowVolume: Boolean
+        get() = p.getBoolean("s_side_vol", true)
+        set(v) = put("s_side_vol", v)
+    var sideShowRinger: Boolean
+        get() = p.getBoolean("s_side_ring", true)
+        set(v) = put("s_side_ring", v)
+    var sideShowFocus: Boolean
+        get() = p.getBoolean("s_side_focus", true)
+        set(v) = put("s_side_focus", v)
+    /** all | chosen */
+    var sideMsgMode: String
+        get() = p.getString("s_side_msg_mode", "all") ?: "all"
+        set(v) = put("s_side_msg_mode", v)
+    var sideMsgApps: Set<String>
+        get() = p.getStringSet("s_side_msg_apps", emptySet())?.toSet() ?: emptySet()
+        set(v) = putSet("s_side_msg_apps", v)
+    /** volume | music | none — tapping the resting sliver */
+    var sideTap: String
+        get() = p.getString("s_side_tap", "volume") ?: "volume"
+        set(v) = put("s_side_tap", v)
+    /** Vertical position on the edge, % from the top. */
+    var sideY: Int
+        get() = p.getInt("s_side_y", 30)
+        set(v) = put("s_side_y", v)
+    /** How long volume / status stay (ms); messages stay a bit longer. */
+    var sideMs: Int
+        get() = p.getInt("s_side_ms", 1800)
+        set(v) = put("s_side_ms", v)
+
     // ---- Hello screen
     var helloOnUnlock: Boolean
         get() = p.getBoolean("s_hello_unlock", false)
