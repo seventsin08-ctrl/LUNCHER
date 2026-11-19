@@ -172,6 +172,33 @@ class Settings(ctx: Context) {
     var sideChatCard: Boolean
         get() = p.getBoolean("s_side_chat", true)
         set(v) = put("s_side_chat", v)
+    /** Show photos and attachments in the chat window. */
+    var sideMedia: Boolean
+        get() = p.getBoolean("s_side_media", true)
+        set(v) = put("s_side_media", v)
+    /** Reply box in the chat window. */
+    var sideReply: Boolean
+        get() = p.getBoolean("s_side_reply", true)
+        set(v) = put("s_side_reply", v)
+    /** Photo viewer: below | center | full */
+    var viewerPos: String
+        get() = p.getString("s_viewer_pos", "below") ?: "below"
+        set(v) = put("s_viewer_pos", v)
+    /** zoom | slide | fade | flip */
+    var viewerAnim: String
+        get() = p.getString("s_viewer_anim", "zoom") ?: "zoom"
+        set(v) = put("s_viewer_anim", v)
+    /** rounded | squircle | circle | square */
+    var viewerShape: String
+        get() = p.getString("s_viewer_shape", "rounded") ?: "rounded"
+        set(v) = put("s_viewer_shape", v)
+    /** dark | glass | theme | custom */
+    var viewerBg: String
+        get() = p.getString("s_viewer_bg", "dark") ?: "dark"
+        set(v) = put("s_viewer_bg", v)
+    var viewerColor: Int
+        get() = p.getInt("s_viewer_color", 0xF01C1C1E.toInt())
+        set(v) = put("s_viewer_color", v)
     /** Which edge: false = left, true = right. */
     var sideRight: Boolean
         get() = p.getBoolean("s_side_right", false)

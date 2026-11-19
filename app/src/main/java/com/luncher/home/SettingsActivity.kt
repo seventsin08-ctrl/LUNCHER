@@ -43,7 +43,7 @@ class SettingsActivity : Activity() {
         Category("look", "Appearance", 0xFF0A84FF.toInt(), R.drawable.ic_cc_contrast, listOf("APPEARANCE", "THEME", "WALLPAPER")),
         Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "WIDGETS")),
         Category("island", "Dynamic Island", 0xFF1C1C1E.toInt(), R.drawable.ic_set_island,
-            listOf("DYNAMIC ISLAND & ASSISTANT", "SIDE ISLAND", "ISLAND CONTENT", "ISLAND SERVICES")),
+            listOf("DYNAMIC ISLAND & ASSISTANT", "SIDE ISLAND", "CHAT WINDOW", "ISLAND CONTENT", "ISLAND SERVICES")),
         Category("sidebar", "Sidebar", 0xFFFF9F0A.toInt(), R.drawable.ic_set_sidebar, listOf("SIDEBAR")),
         Category("motion", "Animations & Gestures", 0xFFFF375F.toInt(), R.drawable.ic_set_hand, listOf("ANIMATIONS", "GESTURES")),
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
@@ -182,6 +182,12 @@ class SettingsActivity : Activity() {
 
     /** A live side island on this screen while you edit it. */
     private var sidePreview: SideHud? = null
+    private fun previewViewer() {
+        ThemeEngine.resolve(this, s)
+        val p = sidePreview ?: SideHud(this, s, preview = true).also { sidePreview = it }
+        p.previewViewer()
+    }
+
     private fun previewSide() {
         ThemeEngine.resolve(this, s)
         val p = sidePreview ?: SideHud(this, s, preview = true).also { sidePreview = it }
@@ -569,6 +575,27 @@ class SettingsActivity : Activity() {
                 s.sideMs = it.toInt()
             }
         }
+
+        // ---------------- Chat window: photos, replies and the photo viewer
+        val chatSec = section("CHAT WINDOW")
+        toggle(chatSec, "Photos & Attachments", "See photos right in the chat; videos, voice messages and files show as a tap-to-open chip",
+            s.sideMedia) { s.sideMedia = it }
+        toggle(chatSec, "Reply Box", "Answer from the chat window — works with any app that has Reply in its notifications " +
+            "(Messenger, WhatsApp, Telegram, Instagram, SMS, Discord…)", s.sideReply) { s.sideReply = it }
+        info(chatSec, "Photo viewer — tap a photo in the chat to open it. A preview shows while you change these.")
+        segment(chatSec, "Opens", listOf("below" to "Under Chat", "center" to "Center", "full" to "Full Screen"), s.viewerPos) {
+            s.viewerPos = it; previewViewer()
+        }
+        segment(chatSec, "Animation", listOf("zoom" to "Zoom", "slide" to "Slide", "fade" to "Fade", "flip" to "3D Flip"), s.viewerAnim) {
+            s.viewerAnim = it; previewViewer()
+        }
+        segment(chatSec, "Shape", listOf("rounded" to "Rounded", "squircle" to "Squircle", "circle" to "Circle", "square" to "Square"),
+            s.viewerShape) { s.viewerShape = it; previewViewer() }
+        segment(chatSec, "Background", listOf("dark" to "Dark", "glass" to "Glass", "theme" to "Theme", "custom" to "Custom"), s.viewerBg) {
+            s.viewerBg = it; previewViewer(); rebuild()
+        }
+        if (s.viewerBg == "custom") swatches(chatSec, "Viewer Color", s.viewerColor) { s.viewerColor = it; previewViewer() }
+        button(chatSec, "Preview Photo Viewer", 0xFF0A84FF.toInt()) { previewViewer() }
 
         // What may appear in the island
         val content = section("ISLAND CONTENT")

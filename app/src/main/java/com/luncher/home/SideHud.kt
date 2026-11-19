@@ -123,7 +123,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 val hv = view
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> hv?.removeCallbacks(backToRest)
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> hv?.postDelayed(backToRest, 6000)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (!holding) hv?.postDelayed(backToRest, 6000)
                 }
                 return super.dispatchTouchEvent(e)
             }
@@ -169,7 +169,9 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
         val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
         val showNames = chat.messages.map { it.first }.filter { it.isNotBlank() }.toSet().size > 1
-        for ((who, msg) in chat.messages) {
+        for ((idx, pair) in chat.messages.withIndex()) {
+            val (who, msg) = pair
+            val med = if (settings.sideMedia) chat.media.getOrNull(idx) else null
             val mine = who == "You" || who.equals("me", true)
             val bubble = android.widget.LinearLayout(ctx).apply {
                 orientation = android.widget.LinearLayout.VERTICAL
@@ -183,7 +185,31 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 text = who; textSize = 11f; setTextColor(0xB3FFFFFF.toInt())
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             })
-            bubble.addView(android.widget.TextView(ctx).apply { text = msg; textSize = 14f; setTextColor(Color.WHITE) })
+            if (med?.image != null) {
+                // Photo right in the chat; tap to open it in the photo viewer.
+                bubble.addView(android.widget.ImageView(ctx).apply {
+                    setImageBitmap(med.image); adjustViewBounds = true; maxHeight = dp(200)
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(view: View, outline: android.graphics.Outline) =
+                            outline.setRoundRect(0, 0, view.width, view.height, dp(12).toFloat())
+                    }
+                    clipToOutline = true
+                    setOnClickListener { showViewer(med.image, open) }
+                }, android.widget.LinearLayout.LayoutParams(dp(176), android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(2); bottomMargin = if (msg.isNotBlank()) dp(5) else 0
+                })
+            } else if (med != null) {
+                // Video, voice message, PDF…: a chip that opens it in the app.
+                bubble.addView(android.widget.TextView(ctx).apply {
+                    text = "📎  ${med.label}"; textSize = 13f; setTextColor(Color.WHITE)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                    setPadding(dp(10), dp(7), dp(10), dp(7))
+                    background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x33FFFFFF) }
+                    setOnClickListener { retract(); open() }
+                })
+            }
+            if (msg.isNotBlank()) bubble.addView(android.widget.TextView(ctx).apply { text = msg; textSize = 14f; setTextColor(Color.WHITE) })
             list.addView(bubble, android.widget.LinearLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 topMargin = dp(5); gravity = if (mine) Gravity.END else Gravity.START
@@ -193,6 +219,53 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         root.addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+
+        // Reply right here (uses the app's own Reply, so it works for any chat app that has one).
+        if (settings.sideReply && chat.reply != null) {
+            val bar = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0x26FFFFFF) }
+                setPadding(dp(12), 0, dp(4), 0)
+            }
+            val input = android.widget.EditText(ctx).apply {
+                hint = "Reply…"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 14f
+                background = null; maxLines = 3; setPadding(0, dp(8), 0, dp(8))
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            }
+            val send = android.widget.TextView(ctx).apply {
+                text = "↑"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFF0A84FF.toInt()) }
+            }
+            fun doSend() {
+                val t = input.text.toString().trim()
+                if (t.isEmpty()) return
+                if (chat.sendReply(act, t)) {
+                    // Show it straight away as your (blue) message.
+                    list.addView(android.widget.TextView(ctx).apply {
+                        text = t; textSize = 14f; setTextColor(Color.WHITE); setPadding(dp(11), dp(7), dp(11), dp(8))
+                        background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF0A84FF.toInt()) }
+                    }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(5); gravity = Gravity.END })
+                    input.setText("")
+                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+                    root.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                } else android.widget.Toast.makeText(act, "This app doesn't allow replies here", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            send.setOnClickListener { doSend() }
+            input.setOnEditorActionListener { _, _, _ -> doSend(); true }
+            // Typing needs the keyboard: let this window take focus only while you reply.
+            input.setOnTouchListener { v, e ->
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) startTyping(v as android.widget.EditText)
+                false
+            }
+            bar.addView(input, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            bar.addView(send, android.widget.LinearLayout.LayoutParams(dp(32), dp(32)))
+            root.addView(bar, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+        }
 
         root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(dp(320), View.MeasureSpec.AT_MOST))
@@ -216,7 +289,150 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         Motion.scaleTo(root, 1f, Motion.BOUNCY)
     }
 
+    /** True while you're typing a reply or looking at a photo: the chat window stays open. */
+    private var holding = false
+
+    private fun startTyping(input: android.widget.EditText) {
+        val c = card ?: return
+        val l = cardLp ?: return
+        holding = true
+        view?.removeCallbacks(backToRest)
+        if (l.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0) {
+            l.flags = l.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            l.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+            runCatching { wm?.updateViewLayout(c, l) }
+        }
+        input.post {
+            input.requestFocus()
+            act.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                ?.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    // ---------------------------------------------------------------- photo viewer (customisable)
+
+    private var viewer: View? = null
+
+    /** Opens a photo in a window under the chat (or centred / full screen — Settings › Chat Window). */
+    fun showViewer(bmp: Bitmap, open: (() -> Unit)?) {
+        hideViewer(immediate = true)
+        val hudLp = lp ?: return
+        val w = wm ?: return
+        val ctx = act
+        val m = ctx.resources.displayMetrics
+        holding = true
+        view?.removeCallbacks(backToRest)
+        val pos = settings.viewerPos
+        val full = pos == "full"
+        val width = when (pos) { "below" -> dp(268); "center" -> (m.widthPixels * 0.88f).toInt(); else -> m.widthPixels }
+        val bg = when (settings.viewerBg) {
+            "glass" -> Color.argb(205, 44, 44, 48)
+            "theme" -> IconFactory.blend(Color.BLACK, ThemeEngine.accent, 0.35f) or 0xF0000000.toInt()
+            "custom" -> settings.viewerColor
+            else -> Color.argb(240, 12, 12, 14)
+        }
+        val root = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = if (full) 0f else dp(26).toFloat(); setColor(if (full) (bg and 0x00FFFFFF) or 0xF2000000.toInt() else bg)
+                if (!full) setStroke(maxOf(1, dp(1)), 0x2EFFFFFF)
+            }
+            elevation = dp(12).toFloat()
+        }
+        val shape = settings.viewerShape
+        val img = android.widget.ImageView(ctx).apply {
+            setImageBitmap(bmp)
+            adjustViewBounds = shape != "circle"
+            scaleType = if (shape == "circle") android.widget.ImageView.ScaleType.CENTER_CROP else android.widget.ImageView.ScaleType.FIT_CENTER
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    when (shape) {
+                        "circle" -> outline.setOval(0, 0, view.width, view.height)
+                        "square" -> outline.setRect(0, 0, view.width, view.height)
+                        "squircle" -> outline.setRoundRect(0, 0, view.width, view.height, minOf(view.width, view.height) * 0.3f)
+                        else -> outline.setRoundRect(0, 0, view.width, view.height, dp(18).toFloat())
+                    }
+                }
+            }
+            clipToOutline = true
+            setOnClickListener { hideViewer() }
+        }
+        val maxH = if (full) (m.heightPixels * 0.75f).toInt() else dp(if (pos == "below") 260 else 420)
+        if (shape == "circle") root.addView(img, android.widget.LinearLayout.LayoutParams(minOf(width - dp(20), maxH), minOf(width - dp(20), maxH)))
+        else { img.maxHeight = maxH; root.addView(img, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)) }
+        val bar = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        fun pill(t: String, fn: () -> Unit) = android.widget.TextView(ctx).apply {
+            text = t; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0x33FFFFFF) }
+            setOnClickListener { fn() }
+        }.also { bar.addView(it, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(5), dp(10), dp(5), 0) }) }
+        if (open != null) pill("Open in App") { hideViewer(); retract(); open() }
+        pill("Close") { hideViewer() }
+        root.addView(bar)
+
+        val cl = cardLp
+        val c = card
+        val l = WindowManager.LayoutParams(width, if (full) android.view.ViewGroup.LayoutParams.MATCH_PARENT else android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            hudLp.type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT).apply {
+            token = hudLp.token
+            when {
+                full || pos == "center" -> gravity = Gravity.CENTER
+                cl != null && c != null -> {
+                    gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP
+                    x = cl.x; y = cl.y + c.height + dp(10)
+                }
+                else -> { gravity = (if (isRight) Gravity.END else Gravity.START) or Gravity.TOP; x = dp(66); y = hudLp.y + dp(80) }
+            }
+        }
+        if (runCatching { w.addView(root, l) }.isFailure) { holding = false; return }
+        viewer = root
+        // Opening animation (Settings › Chat Window › Photo Animation).
+        root.cameraDistance = 9000f * m.density
+        root.pivotX = if (pos == "below") (if (isRight) width.toFloat() else 0f) else width / 2f
+        root.pivotY = 0f
+        when (settings.viewerAnim) {
+            "slide" -> { root.alpha = 0f; root.translationY = -dp(40).toFloat()
+                root.animate().alpha(1f).translationY(0f).setDuration(320).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start() }
+            "fade" -> { root.alpha = 0f; root.animate().alpha(1f).setDuration(280).start() }
+            "flip" -> { root.alpha = 0f; root.rotationX = -80f
+                root.animate().alpha(1f).rotationX(0f).setDuration(480).setInterpolator(android.view.animation.OvershootInterpolator(1.1f)).start() }
+            else -> { root.alpha = 0f; root.scaleX = 0.6f; root.scaleY = 0.6f
+                root.animate().alpha(1f).setDuration(200).start(); Motion.scaleTo(root, 1f, Motion.BOUNCY) }
+        }
+        root.postDelayed({ if (viewer === root) hideViewer() }, 30_000)
+    }
+
+    fun hideViewer(immediate: Boolean = false) {
+        val v = viewer ?: return
+        viewer = null
+        holding = false
+        if (card != null) { view?.removeCallbacks(backToRest); view?.postDelayed(backToRest, 6000) }
+        if (immediate) { runCatching { wm?.removeViewImmediate(v) }; return }
+        v.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(180).withEndAction { runCatching { wm?.removeViewImmediate(v) } }.start()
+    }
+
+    /** Settings preview of the photo viewer with a sample picture. */
+    fun previewViewer() {
+        if (view == null) rest()
+        val b = Bitmap.createBitmap(600, 420, Bitmap.Config.ARGB_8888)
+        val c = Canvas(b)
+        val p = Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, 600f, 420f,
+            intArrayOf(0xFF2E3A59.toInt(), 0xFF8E5CF2.toInt(), 0xFFFF8A5C.toInt()), null, android.graphics.Shader.TileMode.CLAMP) }
+        c.drawRect(0f, 0f, 600f, 420f, p)
+        p.shader = null; p.color = 0x55FFFFFF; c.drawCircle(440f, 120f, 60f, p)
+        showViewer(b, null)
+    }
+
     private fun hideCard(immediate: Boolean = false) {
+        hideViewer(immediate = true)
+        holding = false
         val c = card ?: return
         card = null; cardLp = null
         view?.cardShown = false
