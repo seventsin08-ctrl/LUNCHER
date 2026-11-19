@@ -259,6 +259,14 @@ class Settings(ctx: Context) {
         get() = p.getInt("s_side_ms", 1800)
         set(v) = put("s_side_ms", v)
 
+    /** Now Playing widget keeps showing the last song after the music stops (and after a restart). */
+    var musicKeepLast: Boolean
+        get() = p.getBoolean("s_music_keep", true)
+        set(v) = put("s_music_keep", v)
+    /** Now Playing widget as an oblong (pill / stadium shape) instead of a rounded square. */
+    var musicOblong: Boolean
+        get() = p.getBoolean("s_music_oblong", true)
+        set(v) = put("s_music_oblong", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

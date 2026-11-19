@@ -54,6 +54,7 @@ import android.provider.Settings as SysSettings
 import android.text.TextUtils
 import android.view.GestureDetector
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
@@ -1967,7 +1968,9 @@ class MainActivity : Activity() {
         text: String,
         onClick: (View) -> Unit,
         onLong: ((View) -> Unit)? = null,
-        onRemove: (() -> Unit)? = null
+        onRemove: (() -> Unit)? = null,
+        /** Oblong: ends fully rounded (a pill / stadium) instead of 22dp corners. */
+        pill: Boolean = false
     ): View {
         val inset = ((cellW() - dp(iconDp)) / 2).coerceAtLeast(0)
         val outer = FrameLayout(this).apply { clipChildren = false }
@@ -1977,14 +1980,18 @@ class MainActivity : Activity() {
             clipChildren = false
         }
         val box = FrameLayout(this).apply {
-            background = Glass.panel(this@MainActivity, 22f)
-            outlineProvider = roundedOutline(22f)
+            // GradientDrawable caps the radius at half the height, so a huge radius = pill ends.
+            background = Glass.panel(this@MainActivity, if (pill) 999f else 22f)
+            outlineProvider = if (pill) object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height, minOf(view.width, view.height) / 2f)
+            } else roundedOutline(22f)
             clipToOutline = true
         }
         box.addView(inner, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         box.addView(View(this).apply {
             background = GradientDrawable().apply {
-                cornerRadius = dp(22).toFloat()
+                cornerRadius = dp(if (pill) 999 else 22).toFloat()
                 setStroke(maxOf(1, dp(1)), Color.argb(if (settings.glass) 80 else 30, 255, 255, 255))
             }
         }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -2172,7 +2179,7 @@ class MainActivity : Activity() {
             WidgetType.BATTERY ->
                 widgetFrame(batteryWidget(), "Batteries", { openIntent(Intent(Intent.ACTION_POWER_USAGE_SUMMARY), it) }, null, remove)
             WidgetType.MUSIC ->
-                widgetFrame(musicWidget(), "Now Playing", { musicTapped(it) }, null, remove)
+                widgetFrame(musicWidget(), "Now Playing", { musicTapped(it) }, null, remove, pill = settings.musicOblong)
             WidgetType.APPWIDGET -> buildAppWidget(w, remove)
             WidgetType.DIGITAL_CLOCK ->
                 widgetFrame(MoreWidgets.digitalClock(this, false), "Digital Clock",
@@ -2442,9 +2449,11 @@ class MainActivity : Activity() {
         }
         frame.addView(bg, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
+        val oblong = settings.musicOblong
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(14), dp(14), dp(12))
+            // Oblong: keep everything clear of the round ends.
+            if (oblong) setPadding(dp(30), dp(16), dp(30), dp(14)) else setPadding(dp(14), dp(14), dp(14), dp(12))
         }
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2452,9 +2461,11 @@ class MainActivity : Activity() {
         }
         val art = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            outlineProvider = roundedOutline(10f)
+            outlineProvider = if (oblong) object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setOval(0, 0, view.width, view.height)
+            } else roundedOutline(10f)
             clipToOutline = true
-            background = Glass.panel(this@MainActivity, 10f)
+            background = Glass.panel(this@MainActivity, if (oblong) 999f else 10f)
             setImageResource(R.drawable.ic_music)
             setColorFilter(0xB3FFFFFF.toInt())
         }
@@ -2486,10 +2497,10 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         controls.addView(roundIconButton(R.drawable.ic_prev, 36, false) {
-            mediaController?.transportControls?.skipToPrevious()
+            mediaController?.transportControls?.skipToPrevious() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }, LinearLayout.LayoutParams(dp(36), dp(36)))
         controls.addView(roundIconButton(R.drawable.ic_next, 36, false) {
-            mediaController?.transportControls?.skipToNext()
+            mediaController?.transportControls?.skipToNext() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
         }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(10) })
         val source = TextView(this).apply {
             setTextColor(0x99FFFFFF.toInt())
@@ -4309,6 +4320,19 @@ class MainActivity : Activity() {
                 v.hint.text = "Tap to show your music here"
                 v.bg.setImageDrawable(null)
             }
+            (c == null || meta == null) && settings.musicKeepLast && prefs.getString("last_song_title", null) != null -> {
+                // Music stopped (or the phone just started): keep the last song, ready to resume.
+                v.body.visibility = View.VISIBLE
+                v.hint.visibility = View.GONE
+                v.title.text = prefs.getString("last_song_title", "")
+                v.artist.text = prefs.getString("last_song_artist", "")
+                val art = lastSongArt()
+                if (art != null) { v.art.clearColorFilter(); v.art.setImageBitmap(art); v.bg.setImageBitmap(art) }
+                else { v.art.setImageResource(R.drawable.ic_music); v.art.setColorFilter(0xB3FFFFFF.toInt()); v.bg.setImageDrawable(null) }
+                val pkg = prefs.getString("last_song_pkg", null)
+                v.source.text = pkg?.let { p -> runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(p, 0)) }.getOrNull() } ?: ""
+                v.play.setImageResource(R.drawable.ic_play)
+            }
             c == null || meta == null -> {
                 v.body.visibility = View.INVISIBLE
                 v.hint.visibility = View.VISIBLE
@@ -4337,14 +4361,45 @@ class MainActivity : Activity() {
                 v.source.text = runCatching {
                     packageManager.getApplicationLabel(packageManager.getApplicationInfo(c.packageName, 0))
                 }.getOrNull() ?: ""
+                rememberSong(v.title.text.toString(), v.artist.text.toString(), c.packageName, art)
                 val playing = c.playbackState?.state == PlaybackState.STATE_PLAYING
                 v.play.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
             }
         }
     }
 
+    /** Remember the song so the widget can keep showing it after the music stops. */
+    private fun rememberSong(title: String, artist: String, pkg: String, art: android.graphics.Bitmap?) {
+        val changed = prefs.getString("last_song_title", null) != title || prefs.getString("last_song_pkg", null) != pkg
+        if (!changed) return
+        prefs.edit().putString("last_song_title", title).putString("last_song_artist", artist).putString("last_song_pkg", pkg).apply()
+        lastArtCache = art
+        val f = java.io.File(filesDir, "last_song_art.png")
+        if (art == null) { f.delete(); return }
+        val copy = runCatching { android.graphics.Bitmap.createScaledBitmap(art, minOf(art.width, 400), minOf(art.height, 400), true) }.getOrNull() ?: return
+        Thread { runCatching { f.outputStream().use { copy.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, it) } } }.start()
+    }
+    private var lastArtCache: android.graphics.Bitmap? = null
+    private fun lastSongArt(): android.graphics.Bitmap? = lastArtCache ?: runCatching {
+        android.graphics.BitmapFactory.decodeFile(java.io.File(filesDir, "last_song_art.png").path)
+    }.getOrNull()?.also { lastArtCache = it }
+
+    /** Send a play / next / previous key to the phone's last music app (when no player is active). */
+    private fun mediaKey(code: Int) {
+        val am = getSystemService(android.media.AudioManager::class.java) ?: return
+        runCatching {
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
+        }
+    }
+
     private fun togglePlay() {
-        val c = mediaController ?: return
+        val c = mediaController ?: run {
+            // Nothing active: resume the last song in its app.
+            mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY)
+            musicViews?.play?.setImageResource(R.drawable.ic_pause)
+            return
+        }
         if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause()
         else c.transportControls.play()
     }
@@ -4358,6 +4413,11 @@ class MainActivity : Activity() {
             mediaController != null -> {
                 val launch = packageManager.getLaunchIntentForPackage(mediaController!!.packageName)
                 if (launch != null) openIntent(launch, from)
+            }
+            settings.musicKeepLast && prefs.getString("last_song_pkg", null) != null -> {
+                val launch = packageManager.getLaunchIntentForPackage(prefs.getString("last_song_pkg", null)!!)
+                if (launch != null) openIntent(launch, from)
+                else openIntent(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC), from)
             }
             else -> openIntent(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC), from)
         }

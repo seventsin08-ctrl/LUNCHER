@@ -419,6 +419,10 @@ class SettingsActivity : Activity() {
         toggle(widgets, "Clock & Calendar Icons", null, s.widgetEnabled("ICONS")) { s.setWidgetEnabled("ICONS", it) }
         toggle(widgets, "Calendar", null, s.widgetEnabled("CALENDAR")) { s.setWidgetEnabled("CALENDAR", it) }
         toggle(widgets, "Now Playing", null, s.widgetEnabled("MUSIC")) { s.setWidgetEnabled("MUSIC", it) }
+        toggle(widgets, "Now Playing: Keep Last Song", "Stays on the Home Screen with your last song — even after the music " +
+            "ends or the phone restarts — tap ▶ to carry on", s.musicKeepLast) { s.musicKeepLast = it }
+        toggle(widgets, "Now Playing: Oblong Shape", "A long, fully rounded (pill) shape instead of a rounded square",
+            s.musicOblong) { s.musicOblong = it }
         toggle(widgets, "Batteries", null, s.widgetEnabled("BATTERY")) { s.setWidgetEnabled("BATTERY", it) }
         if (s.hiddenWidgets.isNotEmpty()) {
             button(widgets, "Restore Removed Widgets", 0xFF0A84FF.toInt()) {
