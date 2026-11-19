@@ -75,7 +75,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
 
     /** Show the resting bump (or remove everything if the side island is off). */
     fun rest() {
-        if (!preview && (!settings.sideHud || !settings.sideRest)) { dismiss(); return }
+        if (!preview && (!settings.sideHud || !settings.sideRest || GameState.playing)) { dismiss(); return }
         // Switched edges: rebuild the window on the other side.
         if (createdRight != null && createdRight != isRight) dismiss()
         lp?.let { l ->
@@ -136,6 +136,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
      * (or updates). Other apps' windows stay open too, stacked under each other.
      */
     fun chat(icon: Bitmap?, appLabel: String, chat: ChatInfo, open: () -> Unit) {
+        if (!preview && GameState.playing) return
         hideHistory()
         lastIcon = icon
         message(icon, chat.title, chat.messages.lastOrNull()?.second ?: "", open)
@@ -566,6 +567,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     private fun hideAllCards(immediate: Boolean = false) { for (k in cards.keys.toList()) hideCard(k, immediate) }
 
     private fun show(kind: Kind, fill: (HudView) -> Unit) {
+        if (!preview && GameState.playing) return   // nothing pops up over a game
         val v = view ?: create() ?: return
         val wasRest = v.kind == Kind.REST
         v.kind = kind

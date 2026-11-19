@@ -51,12 +51,8 @@ class SidebarService : Service() {
         super.onCreate()
         goForeground()
         val settings = Settings(this)
-        sidebar = Sidebar(this, null, settings, { apps }) { a ->
-            runCatching {
-                startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(a.component)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
-            }
-        }
+        // While gaming, apps open in a small window over the game.
+        sidebar = Sidebar(this, null, settings, { apps }) { a -> GameState.launch(this, a.component) }
         loadApps()
     }
 

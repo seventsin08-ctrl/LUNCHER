@@ -36,6 +36,10 @@ class LuncherAccessibility : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Only which app is in front (to know when a game is being played). Nothing on screen is read.
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
+            runCatching { GameState.onForeground(applicationContext, event.packageName?.toString()) }
+    }
     override fun onInterrupt() {}
 }

@@ -325,6 +325,14 @@ class Settings(ctx: Context) {
     var holoSettings: Boolean
         get() = false // hologram look removed: classic Settings design
         set(v) = put("s_holo_settings", v)
+    /** While a game is on screen, hide the islands, chat windows and pop-ups (the Sidebar stays). */
+    var gameHide: Boolean
+        get() = p.getBoolean("s_game_hide", true)
+        set(v) = put("s_game_hide", v)
+    /** While gaming, apps opened from the Sidebar open in a small floating window. */
+    var gameSmallWindow: Boolean
+        get() = p.getBoolean("s_game_small_window", true)
+        set(v) = put("s_game_small_window", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

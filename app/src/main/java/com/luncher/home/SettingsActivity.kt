@@ -757,6 +757,10 @@ class SettingsActivity : Activity() {
 
         // ---------------- Sidebar
         val side = section("SIDEBAR")
+        toggle(side, "Hide Islands While Gaming", "When a game is on screen, the Dynamic Island, side island, chat windows " +
+            "and pop-ups disappear (the Sidebar stays). Needs the Accessibility Helper", s.gameHide) { s.gameHide = it }
+        toggle(side, "Small Window While Gaming", "Apps you open from the Sidebar during a game open in a small floating " +
+            "window over it (if your phone supports small windows)", s.gameSmallWindow) { s.gameSmallWindow = it }
         toggle(side, "Sidebar", "A handle on the edge of the screen: swipe it in for your favourite apps", s.sidebarOn) {
             s.sidebarOn = it; rebuild()
         }

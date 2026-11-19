@@ -409,6 +409,7 @@ class MainActivity : Activity() {
         }
         root.post { runCatching { sideHud.rest() } }
         setupSidebar()
+        GameState.listen(gameListener)
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
         ContextCompat.registerReceiver(this, ringerReceiver, IntentFilter(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION), ContextCompat.RECEIVER_EXPORTED)
         // "hello" only when the launcher is set up fresh: first install, or after a reset / imported setup.
@@ -573,7 +574,16 @@ class MainActivity : Activity() {
         return super.dispatchTouchEvent(ev)
     }
 
+    /** A game came on screen (or left): hide / bring back the islands and pop-ups. */
+    private val gameListener: () -> Unit = { mainHandler.post { applyGameState() } }
+    private fun applyGameState() {
+        val g = GameState.playing
+        overlayRoot?.visibility = if (g) View.GONE else View.VISIBLE
+        if (::sideHud.isInitialized) runCatching { if (g) sideHud.dismiss() else sideHud.rest() }
+    }
+
     override fun onDestroy() {
+        GameState.unlisten(gameListener)
         cancelHomeHold()
         dockWidthAnimator?.cancel()
         dockWidthAnimator = null
@@ -774,6 +784,7 @@ class MainActivity : Activity() {
         }
         if (runCatching { wm.addView(holder, lp) }.isFailure) return
         overlayIsland = ov; overlayRoot = holder; overlayWm = wm; overlayLp = lp
+        if (GameState.playing) holder.visibility = View.GONE
         island.mirror = ov
         for (a in island.snapshot()) ov.put(a)
     }
@@ -948,12 +959,7 @@ class MainActivity : Activity() {
         // Over other apps (games, videos…) a background service keeps the sidebar alive;
         // otherwise it lives on the Home Screen only.
         if (SidebarService.sync(this) && settings.sidebarOverApps) { sidebar?.detach(); return }
-        if (sidebar == null) sidebar = Sidebar(this, this, settings, { allApps }) { a ->
-            runCatching {
-                startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(a.component)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
-            }
-        }
+        if (sidebar == null) sidebar = Sidebar(this, this, settings, { allApps }) { a -> GameState.launch(this, a.component) }
         root.post { runCatching { sidebar?.attach() } }
     }
 

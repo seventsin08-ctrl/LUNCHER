@@ -4,7 +4,7 @@ plugins {
 }
 
 // Update this number for every release; it also controls the installed app name.
-val launcherNumber = "89"
+val launcherNumber = "90"
 
 android {
     namespace = "com.luncher.home"
@@ -14,7 +14,7 @@ android {
         applicationId = "com.applelauncher.home"
         minSdk = 26
         targetSdk = 35
-        versionCode = 94
+        versionCode = 95
         versionName = launcherNumber
     }
 

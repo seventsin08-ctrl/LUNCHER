@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        90 to listOf("Gaming: the islands, chat windows and pop-ups hide while a game is on screen — the Sidebar stays",
+            "Apps opened from the Sidebar during a game open in a small floating window"),
         89 to listOf("Tools are back in the Dynamic Island: hidden around the front camera — tap it to open the tools island",
             "Camera added to the island tools; the separate floating tools bar is gone"),
         88 to listOf("Tools on the side can look like the Sidebar: a panel with labelled tiles (Settings › Island Tools › On the Side)",
