@@ -35,6 +35,117 @@ class SettingsActivity : Activity() {
     private lateinit var list: LinearLayout
     private var previewRow: LinearLayout? = null
     private var scrollY = 0
+    private class Category(val id: String, val title: String, val color: Int, val icon: Int, val sections: List<String>)
+
+    /** iOS-style Settings: a home page of colourful rows, each opening its own page. */
+    private val categories = listOf(
+        Category("look", "Appearance", 0xFF0A84FF.toInt(), R.drawable.ic_cc_contrast, listOf("APPEARANCE", "THEME", "WALLPAPER")),
+        Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "WIDGETS")),
+        Category("island", "Dynamic Island", 0xFF1C1C1E.toInt(), R.drawable.ic_set_island,
+            listOf("DYNAMIC ISLAND & ASSISTANT", "ISLAND CONTENT", "ISLAND SERVICES")),
+        Category("sidebar", "Sidebar", 0xFFFF9F0A.toInt(), R.drawable.ic_set_sidebar, listOf("SIDEBAR")),
+        Category("motion", "Animations & Gestures", 0xFFFF375F.toInt(), R.drawable.ic_set_hand, listOf("ANIMATIONS", "GESTURES")),
+        Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
+        Category("phone", "Phone & Connections", 0xFF30D158.toInt(), R.drawable.ic_cc_wifi, listOf("PHONE & CONNECTIVITY", "CONNECTIONS")),
+        Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
+        Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "HELLO"))
+    )
+    private val groups = listOf(listOf("look", "home", "island", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
+    /** null = the Settings home page. */
+    private var page: String? = null
+    private lateinit var scrollView: ScrollView
+    private lateinit var navTitle: TextView
+    private lateinit var navBack: View
+    private lateinit var navBar: FrameLayout
+    private var largeTitle: View? = null
+
+    private fun open(id: String?, forward: Boolean) {
+        page = id
+        build()
+        scrollView.scrollTo(0, 0)
+        // Slide like iOS: new page comes in from the right, going back comes from the left.
+        val w = resources.displayMetrics.widthPixels.toFloat()
+        list.translationX = if (forward) w * 0.35f else -w * 0.25f
+        list.alpha = 0f
+        list.animate().translationX(0f).alpha(1f).setDuration(260)
+            .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+        updateNav()
+        list.post { updatePreviewVisibility() }
+    }
+
+    @Deprecated("Back on the Settings home page closes Settings")
+    override fun onBackPressed() {
+        if (page != null) open(null, forward = false) else super.onBackPressed()
+    }
+
+    /** Fade the small centred title in once the big title scrolls away. */
+    private fun updateNav() {
+        if (!::navTitle.isInitialized) return
+        navBack.visibility = if (page != null) View.VISIBLE else View.GONE
+        navTitle.text = categories.firstOrNull { it.id == page }?.title ?: "Settings"
+        val t = largeTitle
+        val shown = t == null || scrollY > t.bottom - dp(10)
+        navTitle.alpha = if (shown) 1f else 0f
+        navBar.background = if (shown) GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(0xF2000000.toInt(), 0xCC000000.toInt(), 0x00000000)) else null
+    }
+
+    private fun iconSquare(res: Int, color: Int, size: Int = dp(30)) = FrameLayout(this).apply {
+        background = GradientDrawable().apply { cornerRadius = size * 0.26f; setColor(color) }
+        addView(ImageView(this@SettingsActivity).apply { setImageResource(res); setColorFilter(Color.WHITE) },
+            FrameLayout.LayoutParams((size * 0.62f).toInt(), (size * 0.62f).toInt(), Gravity.CENTER))
+    }
+
+    /** The Settings home page: launcher card on top, then grouped category rows. */
+    private fun buildHome() {
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFF1C1C1E.toInt()) }
+        }
+        head.addView(ImageView(this).apply {
+            setImageDrawable(runCatching { packageManager.getApplicationIcon(packageName) }.getOrNull())
+        }, LinearLayout.LayoutParams(dp(58), dp(58)))
+        val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
+        head.addView(TextView(this).apply {
+            text = "Apple Launcher\nVersion $ver · Home Screen, island, widgets & more"
+            setTextColor(Color.WHITE); textSize = 15f; setPadding(dp(14), 0, 0, 0)
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        list.addView(head, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(18) })
+        for (g in groups) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFF1C1C1E.toInt()) }
+                clipToOutline = true
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) =
+                        outline.setRoundRect(0, 0, view.width, view.height, dp(26).toFloat())
+                }
+            }
+            for ((i, id) in g.withIndex()) {
+                val c = categories.first { it.id == id }
+                if (i > 0) card.addView(View(this).apply { setBackgroundColor(0xFF38383A.toInt()) },
+                    LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(0.5f))).apply { marginStart = dp(60) })
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), dp(12), dp(14), dp(12))
+                    background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null,
+                        android.graphics.drawable.ColorDrawable(Color.WHITE))
+                    setOnClickListener { open(c.id, forward = true) }
+                }
+                row.addView(iconSquare(c.icon, c.color).apply {
+                    if (c.color == 0xFF1C1C1E.toInt()) (background as GradientDrawable).setStroke(dp(1), 0x55FFFFFF)
+                }, LinearLayout.LayoutParams(dp(30), dp(30)))
+                row.addView(title(c.title), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(14) })
+                row.addView(ImageView(this).apply {
+                    setImageResource(R.drawable.ic_set_chevron); setColorFilter(0xFF5A5A5F.toInt()); rotation = 180f
+                }, LinearLayout.LayoutParams(dp(16), dp(16)))
+                card.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            }
+            list.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(22) })
+        }
+    }
+
     private var islandPreview: IslandPreview? = null
     private var islandCard: View? = null
 
@@ -67,6 +178,26 @@ class SettingsActivity : Activity() {
         // The live island preview floats above the settings list.
         val frame = FrameLayout(this)
         frame.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        scrollView = scroll
+        // iOS 26-style top bar: round glass back button and a small centred title.
+        navBar = FrameLayout(this)
+        navBack = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL; setColor(0xCC2C2C2E.toInt()); setStroke(maxOf(1, dp(1)), 0x33FFFFFF)
+            }
+            addView(ImageView(this@SettingsActivity).apply { setImageResource(R.drawable.ic_set_chevron); setColorFilter(Color.WHITE) },
+                FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+            setOnClickListener { v -> v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).withEndAction {
+                v.animate().scaleX(1f).scaleY(1f).setDuration(160).start() }.start(); open(null, forward = false) }
+            visibility = View.GONE
+        }
+        navTitle = TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 17f; alpha = 0f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        navBar.addView(navBack, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.START or Gravity.BOTTOM).apply { setMargins(dp(14), 0, 0, dp(6)) })
+        navBar.addView(navTitle, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(18) })
+        frame.addView(navBar, FrameLayout.LayoutParams(MATCH_PARENT, dp(110), Gravity.TOP))
         val preview = IslandPreview(this).apply { load(s) }
         frame.addView(preview, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         islandPreview = preview
@@ -75,12 +206,14 @@ class SettingsActivity : Activity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             list.setPadding(dp(16), bars.top + dp(8), dp(16), bars.bottom + dp(32))
             preview.statusTop = bars.top
+            navBar.layoutParams = (navBar.layoutParams as FrameLayout.LayoutParams).apply { height = bars.top + dp(62) }
             preview.cutTop = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top
             insets
         }
-        scroll.viewTreeObserver.addOnScrollChangedListener { scrollY = scroll.scrollY; updatePreviewVisibility() }
+        scroll.viewTreeObserver.addOnScrollChangedListener { scrollY = scroll.scrollY; updatePreviewVisibility(); updateNav() }
         build()
         scroll.post { updatePreviewVisibility() }
+        intent?.getStringExtra("page")?.let { p -> if (categories.any { it.id == p }) open(p, forward = true) }
     }
 
     override fun onPause() {
@@ -106,13 +239,15 @@ class SettingsActivity : Activity() {
     private fun build() {
         list.removeAllViews()
 
-        list.addView(TextView(this).apply {
-            text = "Settings"
+        largeTitle = TextView(this).apply {
+            text = categories.firstOrNull { it.id == page }?.title ?: "Settings"
             setTextColor(Color.WHITE)
             textSize = 34f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setPadding(dp(4), dp(8), 0, dp(14))
-        })
+            setPadding(dp(4), dp(52), 0, dp(14))
+        }
+        list.addView(largeTitle)
+        if (page == null) { buildHome(); updateNav(); return }
 
         val apps = section("APPS")
         button(apps, "Manage & uninstall apps…", 0xFF0A84FF.toInt()) {
@@ -364,7 +499,11 @@ class SettingsActivity : Activity() {
         segment(content, "Pop-up Length", listOf("2500" to "Short", "4500" to "Normal", "8000" to "Long"),
             s.islandPopupMs.toString()) { s.islandPopupMs = it.toInt() }
 
-        toggle(isl, "Swipe Down for Assistant", "Swipe down on the island to open your AI assistant",
+        toggle(isl, "Always Show Island", "A small island stays at the top; pull it down (or tap it) for quick controls",
+            s.islandAlways) { s.islandAlways = it; previewChanged() }
+        toggle(isl, "Side Island for Volume & Silent", "Volume, Silent and Focus grow out of the screen edge",
+            s.sideHud) { s.sideHud = it }
+        toggle(isl, "Assistant Button", "Show an AI assistant button in the island's pull-down controls",
             s.assistant != "off") { on ->
             s.assistant = if (on) (getSharedPreferences("luncher", MODE_PRIVATE).getString("last_assistant", "gemini") ?: "gemini") else "off"
             rebuild()
@@ -406,6 +545,41 @@ class SettingsActivity : Activity() {
                 startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     android.net.Uri.parse("package:$packageName")))
             }
+        }
+
+        // ---------------- Sidebar
+        val side = section("SIDEBAR")
+        toggle(side, "Sidebar", "A handle on the edge of the screen: swipe it in for your favourite apps", s.sidebarOn) {
+            s.sidebarOn = it; rebuild()
+        }
+        if (s.sidebarOn) {
+            button(side, "Choose Sidebar Apps (${s.sidebarApps.size})…", 0xFF0A84FF.toInt()) {
+                chooseApps("Sidebar Apps", launchableApps(), s.sidebarApps.toSet()) { chosen ->
+                    // Keep your order; newly picked apps go at the end.
+                    s.sidebarApps = s.sidebarApps.filter { it in chosen } + chosen.filter { it !in s.sidebarApps }
+                }
+            }
+            if (s.sidebarApps.size > 1) button(side, "Change Order…", 0xFF0A84FF.toInt()) { reorderSidebar() }
+            segment(side, "Side", listOf("left" to "Left Edge", "right" to "Right Edge"),
+                if (s.sidebarRight) "right" else "left") { s.sidebarRight = it == "right" }
+            toggle(side, "Show Over Other Apps", "Use the sidebar inside any app, not only on the Home Screen",
+                s.sidebarOverApps) { s.sidebarOverApps = it; rebuild() }
+            if (s.sidebarOverApps && !HeadsetPopup.canShowOverApps(this)) {
+                button(side, "Allow Showing Over Other Apps…", 0xFF0A84FF.toInt()) {
+                    runCatching { startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
+                }
+            }
+            info(side, "Tip: tap or swipe the handle inward to open. Long-press the handle and drag to move it up or down.")
+        }
+
+        // ---------------- Hello screen
+        val hello = section("HELLO")
+        button(hello, "Play “hello” Screen", 0xFF0A84FF.toInt()) {
+            startActivity(Intent(this, MainActivity::class.java).putExtra("hello", true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        }
+        toggle(hello, "Show “hello” After Unlocking", "The welcome animation plays each time you unlock", s.helloOnUnlock) {
+            s.helloOnUnlock = it
         }
 
         // ---------------- Backup & transfer (like moving to a new iPhone)
@@ -562,6 +736,20 @@ class SettingsActivity : Activity() {
         }, 900)
     }
 
+    /** Simple reorder: tap an app to move it to the top of the sidebar. */
+    private fun reorderSidebar() {
+        val all = launchableApps().toMap()
+        val cur = s.sidebarApps.filter { it in all }
+        android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
+            .setTitle("Tap an app to move it to the top")
+            .setItems(cur.map { all[it] ?: it }.toTypedArray()) { _, i ->
+                s.sidebarApps = listOf(cur[i]) + cur.filterIndexed { j, _ -> j != i }
+                reorderSidebar()
+            }
+            .setPositiveButton("Done") { _, _ -> rebuild() }
+            .show()
+    }
+
     private fun launchableApps(): List<Pair<String, String>> {
         val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return packageManager.queryIntentActivities(main, 0)
@@ -594,19 +782,22 @@ class SettingsActivity : Activity() {
     }
 
     private fun section(title: String): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(26).toFloat()
+                setColor(0xFF1C1C1E.toInt())
+            }
+        }
+        // Sections that belong to another page are built but never shown.
+        val cat = categories.firstOrNull { it.id == page } ?: return card
+        if (title !in cat.sections) return card
         list.addView(TextView(this).apply {
             text = title
             setTextColor(0xFF8E8E93.toInt())
             textSize = 13f
-            setPadding(dp(16), dp(18), 0, dp(7))
+            setPadding(dp(18), dp(20), 0, dp(8))
         })
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(0xFF1C1C1E.toInt())
-            }
-        }
         list.addView(card, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         return card
     }

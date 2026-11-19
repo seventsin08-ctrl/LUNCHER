@@ -47,6 +47,9 @@ class IslandActivity(
     val media: IslandMedia? = null
 )
 
+/** A round button in the island's pull-down quick controls. */
+class QuickAction(val iconRes: Int, val label: String, val active: () -> Boolean, val onTap: () -> Unit)
+
 /** Live music controls for the expanded island. */
 class IslandMedia(
     val appIcon: Bitmap?,
@@ -170,7 +173,7 @@ class DynamicIsland(
         val detector = GestureDetector(act, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                if (expanded) collapse() else expand()
+                if (expanded) collapse() else if (current() == null) showQuick() else expand()
                 return true
             }
             override fun onLongPress(e: MotionEvent) {
@@ -184,7 +187,10 @@ class DynamicIsland(
                 if (e1 == null) return false
                 val dx = e2.x - e1.x; val dy = e2.y - e1.y
                 if (abs(dy) > abs(dx) && dy > dp(30)) {
-                    buzz(); collapse(); onAssistant(); return true
+                    // Pull down: quick controls (the assistant is one of the buttons).
+                    if (quickActions != null) { if (!quickMode) { collapse(false); showQuick() } }
+                    else { buzz(); collapse(); onAssistant() }
+                    return true
                 }
                 if (abs(dx) > abs(dy) && abs(dx) > dp(30)) {
                     cycle(if (dx < 0) 1 else -1); return true
@@ -289,6 +295,12 @@ class DynamicIsland(
         if (gone.isNotEmpty()) { gone.forEach { activities.remove(it) }; refresh() }
     }
 
+    /** Keep a small empty island at the top even when nothing is happening (like iPhone). */
+    var alwaysShow = false
+    /** Buttons shown when you pull the island down (flashlight, silent, rotation…). */
+    var quickActions: (() -> List<QuickAction>)? = null
+    private var quickMode = false
+
     /** A second island (floating over other apps) that copies everything shown here. */
     var mirror: DynamicIsland? = null
     /** True for the floating copy: it lives in its own small window over other apps. */
@@ -382,7 +394,7 @@ class DynamicIsland(
 
     private fun refresh() {
         val a = current()
-        if (!enabled || a == null) {
+        if (!enabled || (a == null && !alwaysShow)) {
             if (expanded) collapse(animate = false)
             if (pill.visibility == View.VISIBLE) {
                 val a = pill.animate().alpha(0f).setDuration((200 * Motion.scale).toLong())
@@ -395,7 +407,7 @@ class DynamicIsland(
             }
             return
         }
-        bind(a)
+        if (a == null) compact.visibility = View.INVISIBLE else { compact.visibility = View.VISIBLE; bind(a) }
         if (pill.visibility != View.VISIBLE) {
             pill.visibility = View.VISIBLE
             onShownChanged?.invoke(true)
@@ -424,11 +436,77 @@ class DynamicIsland(
                 }
             }
         }
-        if (!expanded) animateSize(compactWidth(a), dp(36), dp(18).toFloat())
-        else bindExpanded(a)
+        if (quickMode) return
+        if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), dp(36), dp(18).toFloat())
+        else if (a != null) bindExpanded(a) else collapse()
+    }
+
+    private fun idleW() = dp(118)
+
+    /** Pull-down quick controls: round buttons either side of a close chevron (iOS concept). */
+    fun showQuick() {
+        val acts = quickActions?.invoke() ?: return
+        if (expanded && !quickMode) collapse(false)
+        quickMode = true
+        expanded = true
+        buzz()
+        bindQuick(acts)
+        compact.animate().alpha(0f).setDuration(120).start()
+        expandedView.visibility = View.VISIBLE
+        expandedView.alpha = 0f
+        expandedView.animate().alpha(1f).setStartDelay(90).setDuration(220).start()
+        expandedView.measure(
+            View.MeasureSpec.makeMeasureSpec(expandedW(), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        Motion.scaleTo(pill, 1f, Motion.FLUID)
+        pill.animate().translationX(0f).setDuration((260 * Motion.scale).toLong()).start()
+        animateSize(expandedW(), expandedView.measuredHeight, dp(32).toFloat())
+        if (!overlayMode && catcher == null) {
+            val c = View(act).apply { isClickable = true; setOnClickListener { collapse() } }
+            root.addView(c, root.indexOfChild(pill), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            catcher = c
+        }
+    }
+
+    private fun bindQuick(acts: List<QuickAction>) {
+        expandedView.removeAllViews()
+        expandedView.setPadding(dp(12), dp(12), dp(12), dp(12))
+        val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val half = (acts.size + 1) / 2
+        fun btn(q: QuickAction): View {
+            val on = q.active()
+            val f = FrameLayout(act).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (on) Color.WHITE else 0xFF2C2C2E.toInt()) }
+                contentDescription = q.label
+                setOnClickListener { v ->
+                    buzz()
+                    v.animate().scaleX(0.82f).scaleY(0.82f).setDuration(80).withEndAction { Motion.scaleTo(v, 1f, Motion.BOUNCY) }.start()
+                    q.onTap()
+                    v.postDelayed({ if (quickMode) bindQuick(quickActions?.invoke() ?: acts) }, 220)
+                }
+            }
+            f.addView(ImageView(act).apply {
+                setImageResource(q.iconRes); setColorFilter(if (on) 0xFF1C1C1E.toInt() else Color.WHITE)
+            }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+            return f
+        }
+        for (q in acts.take(half)) row.addView(btn(q), LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(8) })
+        row.addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
+        // Centre: close chevron
+        row.addView(FrameLayout(act).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2C2C2E.toInt()) }
+            setOnClickListener { collapse() }
+            addView(ImageView(act).apply { setImageResource(R.drawable.ic_set_chevron); setColorFilter(Color.WHITE); rotation = 90f },
+                FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+        }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        row.addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
+        for (q in acts.drop(half)) row.addView(btn(q), LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(8) })
+        expandedView.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
     }
 
     private fun compactWidth(a: IslandActivity): Int {
+        if (a.media != null) return dp(172) + (if (visibleList().size > 1) dp(10) else 0)
         val textW = label.paint.measureText(a.title).toInt().coerceAtMost(dp(150))
         val trailW = a.trailing?.let { trailing.paint.measureText(it).toInt() + dp(6) } ?: 0
         val barsW = if (a.showBars) dp(28) else 0
@@ -441,7 +519,7 @@ class DynamicIsland(
     private fun bind(a: IslandActivity) {
         if (a.icon != null) { icon.setImageBitmap(a.icon); icon.clearColorFilter() }
         else { icon.setImageResource(a.iconRes); icon.setColorFilter(a.iconTint) }
-        label.text = a.title
+        label.text = if (a.media != null) "" else a.title
         trailing.text = a.trailing ?: ""
         trailing.setTextColor(a.accent)
         trailing.visibility = if (a.trailing == null) View.GONE else View.VISIBLE
@@ -641,6 +719,7 @@ class DynamicIsland(
     fun collapse(animate: Boolean = true) {
         if (!expanded) return
         expanded = false
+        quickMode = false
         catcher?.let { root.removeView(it) }
         catcher = null
         expandedView.animate().cancel()
@@ -648,7 +727,10 @@ class DynamicIsland(
         compact.animate().alpha(1f).setDuration(if (animate) 180 else 0).start()
         Motion.scaleTo(pill, sizeScale, Motion.FLUID)
         pill.animate().translationX(offsetX).setDuration((260 * Motion.scale).toLong()).start()
-        current()?.let { animateSize(compactWidth(it), dp(36), dp(18).toFloat()) }
+        val cur = current()
+        if (cur != null) animateSize(compactWidth(cur), dp(36), dp(18).toFloat())
+        else if (alwaysShow && enabled) { compact.visibility = View.INVISIBLE; animateSize(idleW(), dp(36), dp(18).toFloat()) }
+        else refresh()
     }
 
     /** Spring the pill's size like the island morphing. */

@@ -97,6 +97,38 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_island", true)
         set(v) = put("s_island", v)
 
+    // ---- Sidebar
+    var sidebarOn: Boolean
+        get() = p.getBoolean("s_sidebar", true)
+        set(v) = put("s_sidebar", v)
+    var sidebarOverApps: Boolean
+        get() = p.getBoolean("s_sidebar_over", true)
+        set(v) = put("s_sidebar_over", v)
+    var sidebarRight: Boolean
+        get() = p.getBoolean("s_sidebar_right", true)
+        set(v) = put("s_sidebar_right", v)
+    /** Handle position from the top, in dp (saved without refreshing the Home Screen). */
+    var sidebarY: Int
+        get() = p.getInt("s_sidebar_y", 260)
+        set(v) { p.edit().putInt("s_sidebar_y", v).apply() }
+    var sidebarApps: List<String>
+        get() = (p.getString("s_sidebar_apps", "") ?: "").split('|').filter { it.isNotEmpty() }
+        set(v) = put("s_sidebar_apps", v.joinToString("|"))
+
+    /** Keep a small island at the top even when nothing is playing (pull it down for quick controls). */
+    var islandAlways: Boolean
+        get() = p.getBoolean("s_isl_always", true)
+        set(v) = put("s_isl_always", v)
+    /** Show volume / silent / Focus as a shape growing from the screen edge. */
+    var sideHud: Boolean
+        get() = p.getBoolean("s_side_hud", true)
+        set(v) = put("s_side_hud", v)
+
+    // ---- Hello screen
+    var helloOnUnlock: Boolean
+        get() = p.getBoolean("s_hello_unlock", false)
+        set(v) = put("s_hello_unlock", v)
+
     // ---- Theme (whole launcher)
     /** wallpaper | system | custom | mono */
     var themeSource: String

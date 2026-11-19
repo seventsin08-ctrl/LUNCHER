@@ -228,6 +228,7 @@ class MainActivity : Activity() {
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             if (isActive || hasWindowFocus()) playUnlockZoom()
+            if (settings.helloOnUnlock) showHello()
         }
     }
 
@@ -327,6 +328,8 @@ class MainActivity : Activity() {
         focusId = Focus.current(this)?.id
         island.enabled = settings.island
         island.popupMs = settings.islandPopupMs.toLong()
+        island.alwaysShow = settings.islandAlways
+        island.quickActions = { quickActions() }
         island.allow = { id ->
             settings.islandAllows(when {
                 id == "timerdone" -> "timer"
@@ -377,6 +380,16 @@ class MainActivity : Activity() {
         NotificationService.onPosted = { pkg, title, text -> showNotificationInIsland(pkg, title, text) }
         NotificationService.onOngoing = { refreshOngoing() }
         startPrivacyWatch()
+        sideHud = SideHud(this)
+        setupSidebar()
+        runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
+        ContextCompat.registerReceiver(this, ringerReceiver, IntentFilter(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION), ContextCompat.RECEIVER_EXPORTED)
+        // "hello" on the first start after installing or updating, or when asked from Settings.
+        val ver = runCatching { androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0)) }.getOrDefault(0L)
+        if (intent?.getBooleanExtra("hello", false) == true || prefs.getLong("hello_seen_version", 0L) != ver) {
+            prefs.edit().putLong("hello_seen_version", ver).apply()
+            root.postDelayed({ showHello() }, 300)
+        }
         registerReceivers()
         appliedVersion = settings.version
         reloadApps()
@@ -452,6 +465,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.getBooleanExtra("hello", false)) { showHello(); return }
         goHome()
     }
 
@@ -527,6 +541,10 @@ class MainActivity : Activity() {
         NotificationService.onChange = null
         NotificationService.onPosted = null
         NotificationService.onOngoing = null
+        sidebar?.detach()
+        if (::sideHud.isInitialized) sideHud.dismiss()
+        runCatching { unregisterReceiver(ringerReceiver) }
+        runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).unregisterTorchCallback(torchCallback) }
         if (::island.isInitialized) detachOverlayIsland()
         ThemeEngine.unwatch(this)
         stopPrivacyWatch()
@@ -621,11 +639,13 @@ class MainActivity : Activity() {
         if (::island.isInitialized) {
             island.enabled = settings.island
             island.popupMs = settings.islandPopupMs.toLong()
+            island.alwaysShow = settings.islandAlways
             applyIslandLook()
             island.applyFilter()
             ViewCompat.requestApplyInsets(root)
         }
         if (::controlCenter.isInitialized) controlCenter.tileStyle = settings.ccStyle
+        if (sidebar != null) setupSidebar()
         loadSpatialWallpaper()
         appliedVersion = settings.version
         applyStyleGlobals()
@@ -667,6 +687,7 @@ class MainActivity : Activity() {
             }
         }, { settings.haptics })
         ov.overlayMode = true
+        ov.quickActions = island.quickActions
         ov.allow = island.allow
         ov.popupMs = island.popupMs
         ov.sizeScale = island.sizeScale; ov.style = island.style; ov.anim = island.anim
@@ -712,6 +733,125 @@ class MainActivity : Activity() {
         val r = overlayRoot
         if (r != null) runCatching { overlayWm?.removeViewImmediate(r) }
         overlayIsland = null; overlayRoot = null; overlayWm = null; overlayLp = null
+    }
+
+    // ================================================================ Side island, quick controls, sidebar, hello
+
+    private lateinit var sideHud: SideHud
+    private var sidebar: Sidebar? = null
+    private var torchOn = false
+    private var helloView: HelloView? = null
+
+    private fun openMusicApp() {
+        val i = mediaController?.packageName?.let { packageManager.getLaunchIntentForPackage(it) }
+            ?: Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
+        runCatching { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { toast("No music app found") }
+    }
+
+    /** Volume up/down by one step, shown as the side island. */
+    private fun stepVolume(step: Int) {
+        val am = getSystemService(android.media.AudioManager::class.java)
+        am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+            if (step > 0) android.media.AudioManager.ADJUST_RAISE else android.media.AudioManager.ADJUST_LOWER,
+            if (settings.sideHud) 0 else android.media.AudioManager.FLAG_SHOW_UI)
+        if (settings.sideHud && ::sideHud.isInitialized) {
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            sideHud.volume(am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) / max.toFloat())
+        }
+    }
+
+    // On the Home Screen the volume buttons show the side island instead of Android's slider.
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if (settings.sideHud && (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            stepVolume(if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) 1 else -1)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    private val ringerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (!settings.sideHud || !::sideHud.isInitialized) return
+            when (getSystemService(android.media.AudioManager::class.java).ringerMode) {
+                android.media.AudioManager.RINGER_MODE_NORMAL ->
+                    sideHud.status(listOf(R.drawable.ic_cc_bell to Color.WHITE), "RING")
+                android.media.AudioManager.RINGER_MODE_VIBRATE ->
+                    sideHud.status(listOf(R.drawable.ic_cc_bell_off to 0xFFFF453A.toInt(), R.drawable.ic_cc_bell to 0xFF8E8E93.toInt()), "SILENT")
+                else -> sideHud.status(listOf(R.drawable.ic_cc_bell_off to 0xFFFF453A.toInt()), "SILENT")
+            }
+        }
+    }
+
+    private val torchCallback = object : android.hardware.camera2.CameraManager.TorchCallback() {
+        override fun onTorchModeChanged(cameraId: String, enabled: Boolean) { torchOn = enabled }
+    }
+
+    private fun setTorch(on: Boolean) {
+        val cm = getSystemService(android.hardware.camera2.CameraManager::class.java) ?: return
+        runCatching {
+            val id = cm.cameraIdList.firstOrNull {
+                cm.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            } ?: return
+            cm.setTorchMode(id, on)
+            torchOn = on
+        }
+    }
+
+    /** Pull-down island controls. */
+    private fun quickActions(): List<QuickAction> {
+        val am = getSystemService(android.media.AudioManager::class.java)
+        val list = ArrayList<QuickAction>()
+        list += QuickAction(R.drawable.ic_cc_flashlight, "Flashlight", { torchOn }) { setTorch(!torchOn) }
+        list += QuickAction(R.drawable.ic_cc_moon, "Focus", { focusId != null }) { island.collapse(); showFocusSheet() }
+        if (settings.assistant != "off") list += QuickAction(R.drawable.ic_set_ai, "Assistant", { false }) { island.collapse(); openAssistant() }
+        list += QuickAction(R.drawable.ic_cc_bell_off, "Silent", { am.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL }) {
+            runCatching {
+                am.ringerMode = if (am.ringerMode == android.media.AudioManager.RINGER_MODE_NORMAL)
+                    android.media.AudioManager.RINGER_MODE_VIBRATE else android.media.AudioManager.RINGER_MODE_NORMAL
+            }
+        }
+        list += QuickAction(R.drawable.ic_cc_rotation, "Rotation Lock", {
+            runCatching { android.provider.Settings.System.getInt(contentResolver, android.provider.Settings.System.ACCELEROMETER_ROTATION) == 0 }.getOrDefault(false)
+        }) {
+            if (android.provider.Settings.System.canWrite(this)) runCatching {
+                val cur = android.provider.Settings.System.getInt(contentResolver, android.provider.Settings.System.ACCELEROMETER_ROTATION, 1)
+                android.provider.Settings.System.putInt(contentResolver, android.provider.Settings.System.ACCELEROMETER_ROTATION, if (cur == 1) 0 else 1)
+            } else {
+                toast("Allow “Modify system settings” to lock rotation")
+                runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))) }
+            }
+        }
+        list += QuickAction(R.drawable.ic_cc_contrast, "Dark Mode", {
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        }) {
+            island.collapse()
+            val ok = runCatching { startActivity(Intent("android.settings.DARK_THEME_SETTINGS")) }.isSuccess
+            if (!ok) runCatching { startActivity(Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS)) }
+        }
+        return list
+    }
+
+    private fun setupSidebar() {
+        if (sidebar == null) sidebar = Sidebar(this, settings, { allApps }) { a ->
+            runCatching {
+                startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(a.component)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
+            }
+        }
+        root.post { runCatching { sidebar?.attach() } }
+    }
+
+    /** The iPhone "hello" screen. */
+    private fun showHello() {
+        if (helloView != null) return
+        val v = HelloView(this) {
+            helloView?.let { root.removeView(it) }
+            helloView = null
+        }
+        helloView = v
+        root.addView(v, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        v.alpha = 0f
+        v.animate().alpha(1f).setDuration(400).start()
     }
 
     private fun applyIslandLook() {
@@ -2020,6 +2160,9 @@ class MainActivity : Activity() {
                     "Quote", { editQuote(w.id) }, null, remove)
             WidgetType.PHOTO_WIDE ->
                 widgetFrame(photoWidget(w.id), "Wide Photo", { v -> photoTapped(w.id, v) }, { v -> showPhotoMenu(w.id, v) }, remove)
+            WidgetType.IPOD ->
+                widgetFrame(IPodView(this, { currentMusic() }, { currentIslandMedia() }, { openMusicApp() }, { step -> stepVolume(step) }),
+                    "iPod", { }, null, remove)
             WidgetType.TIMER ->
                 widgetFrame(TimerWidget.create(this), "Timer", { v -> showTimerPicker(v) }, null, remove)
             WidgetType.STACK -> {
@@ -2530,7 +2673,11 @@ class MainActivity : Activity() {
             WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK -> cols
             else -> (cols / 2).coerceAtLeast(1)
         }
-        val height = if (type == WidgetType.CLOCK_ICON || type == WidgetType.CALENDAR_ICON) 1 else 2
+        val height = when (type) {
+            WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
+            WidgetType.IPOD -> 3
+            else -> 2
+        }
         return width to height
     }
 
@@ -2554,7 +2701,8 @@ class MainActivity : Activity() {
             Triple(WidgetType.BATTERY, "Batteries", "Phone and headphone battery levels"),
             Triple(WidgetType.MUSIC, "Now Playing", "What's playing, with controls"),
             Triple(WidgetType.STACK, "Smart Stack", "Swipe up and down between widgets"),
-            Triple(WidgetType.TIMER, "Timer", "Start a timer; it counts down live in the island")
+            Triple(WidgetType.TIMER, "Timer", "Start a timer; it counts down live in the island"),
+            Triple(WidgetType.IPOD, "iPod", "Classic click wheel: spin for volume, tap to play, skip and open music")
         )
         val layer = FrameLayout(this).apply { setBackgroundColor(Color.argb(110, 0, 0, 0)); isClickable = true }
         val sheet = LinearLayout(this).apply {
@@ -4958,6 +5106,11 @@ class MainActivity : Activity() {
 
     private fun applyFocusState(announce: Boolean) {
         focusId = Focus.current(this)?.id
+        if (announce && settings.sideHud && ::sideHud.isInitialized) {
+            val f = Focus.current(this)
+            if (f != null) sideHud.status(listOf(R.drawable.ic_cc_moon to f.color, R.drawable.ic_cc_person to 0xFFBF5AF2.toInt()), f.name.uppercase())
+            else sideHud.status(listOf(R.drawable.ic_cc_moon to 0xFF8E8E93.toInt()), "FOCUS OFF")
+        }
         restylePersistent()
         rebuild()
         haptic(root, HapticFeedbackConstants.CONFIRM)
