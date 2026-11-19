@@ -214,6 +214,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 text = msg; textSize = 14f; setTextColor(Color.WHITE)
                 // Links are tappable: they open right away (and the chat window steps aside).
                 linkify(this) { hideCard(chat.pkg) }
+                // Hold a message to copy it (it also lands in the clipboard strip above the window).
+                setOnLongClickListener { copyText(msg); true }
             })
             list.addView(bubble, android.widget.LinearLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -265,6 +267,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         cards[chat.pkg] = me
         cardOf[root] = me
         dragBy(head, root, l, onStart = { root.removeCallbacks(me.close) }, onEnd = { if (!me.holding) me.restartTimer(9000) })
+        if (settings.sideReply && chat.reply != null) root.post { showClips() }
         resizeBy(chatGrip, root, l, scroll, "chat", minW = dp(220))
         me.restartTimer()
         // Grows out of the side island (a soft slide when it's an extra window).
@@ -509,6 +512,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             hint = "Reply…"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 14f
             background = null; maxLines = 3; setPadding(0, dp(8), 0, dp(8))
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            tag = "reply"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
         val send = android.widget.TextView(ctx).apply {
@@ -535,8 +539,34 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }
         send.setOnClickListener { doSend() }
         input.setOnEditorActionListener { _, _, _ -> doSend(); true }
-        input.setOnTouchListener { v, e -> if (e.actionMasked == MotionEvent.ACTION_DOWN) startTyping(card(), v as android.widget.EditText); false }
+        input.setOnTouchListener { v, e ->
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) { activeInput = input to card; startTyping(card(), v as android.widget.EditText) }
+            false
+        }
+        // Paste: whatever you copied (in any app) goes straight into the reply.
+        val paste = android.widget.TextView(ctx).apply {
+            text = "📋"; textSize = 15f; gravity = Gravity.CENTER
+            contentDescription = "Paste"
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setShape(android.graphics.drawable.GradientDrawable.OVAL); setColor(0x26FFFFFF)
+            }
+            setOnClickListener {
+                performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                activeInput = input to card
+                startTyping(card(), input)
+                // The clipboard can only be read once this window has focus.
+                input.postDelayed({
+                    val clip = runCatching {
+                        act.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
+                            ?.getItemAt(0)?.coerceToText(act)?.toString()
+                    }.getOrNull()
+                    if (!clip.isNullOrBlank()) { insertText(input, clip); Clips.add(act, clip); refreshClips() }
+                    else android.widget.Toast.makeText(act, "Nothing copied yet", android.widget.Toast.LENGTH_SHORT).show()
+                }, 220)
+            }
+        }
         bar.addView(input, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(paste, android.widget.LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(6) })
         bar.addView(send, android.widget.LinearLayout.LayoutParams(dp(32), dp(32)))
         return bar
     }
@@ -593,13 +623,130 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val c = cards.remove(pkg) ?: return
         cardOf.remove(c.root)
         c.root.removeCallbacks(c.close)
-        if (cards.isEmpty()) view?.let { it.cardShown = false; it.invalidate() }
+        if (cards.isEmpty()) { view?.let { it.cardShown = false; it.invalidate() }; hideClips(); activeInput = null }
         if (immediate) { runCatching { wm?.removeViewImmediate(c.root) }; return }
         c.root.animate().alpha(0f).scaleX(0.6f).scaleY(0.8f).setDuration(180)
             .withEndAction { runCatching { wm?.removeViewImmediate(c.root) } }.start()
     }
 
     private fun hideAllCards(immediate: Boolean = false) { for (k in cards.keys.toList()) hideCard(k, immediate) }
+
+    // ---------------------------------------------------------------- copy / paste + clipboard strip
+    /** The reply box you last used (paste / clipboard chips go there). */
+    private var activeInput: Pair<android.widget.EditText, () -> Card>? = null
+    private var clipPanel: android.widget.LinearLayout? = null
+    private var clipLp: WindowManager.LayoutParams? = null
+    private var clipRow: android.widget.LinearLayout? = null
+
+    private fun copyText(t: String) {
+        runCatching {
+            act.getSystemService(android.content.ClipboardManager::class.java)
+                ?.setPrimaryClip(android.content.ClipData.newPlainText("message", t))
+        }
+        Clips.add(act, t)
+        view?.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        android.widget.Toast.makeText(act, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+        showClips()
+    }
+
+    private fun insertText(input: android.widget.EditText, t: String) {
+        val s = maxOf(0, input.selectionStart); val e = maxOf(0, input.selectionEnd)
+        input.text.replace(minOf(s, e), maxOf(s, e), t)
+        input.setSelection(minOf(input.text.length, minOf(s, e) + t.length))
+    }
+
+    /**
+     * The clipboard strip: a small window above the chat window with everything you copied.
+     * Tap an item to paste it into the reply box, hold it to remove it, drag the strip by its top.
+     */
+    private fun showClips() {
+        if (preview || cards.isEmpty()) return
+        if (clipPanel != null) { refreshClips(); return }
+        val hudLp = lp ?: return
+        val w = wm ?: return
+        val ctx = act
+        val root = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(10))
+            background = cardBackground(dp(20).toFloat())
+            elevation = dp(10).toFloat()
+        }
+        val head = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(6))
+        }
+        head.addView(View(ctx).apply {
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(0x55FFFFFF) }
+        }, android.widget.LinearLayout.LayoutParams(dp(26), dp(4)).apply { marginEnd = dp(8) })
+        head.addView(android.widget.TextView(ctx).apply {
+            text = "📋  CLIPBOARD"; textSize = 11f; setTextColor(0x99FFFFFF.toInt())
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(circleButton("✕") { hideClips() }, android.widget.LinearLayout.LayoutParams(dp(22), dp(22)))
+        root.addView(head)
+        val scroll = android.widget.HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false }
+        val row = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
+        scroll.addView(row)
+        root.addView(scroll)
+        clipRow = row
+        val first = cards.values.first()
+        val p = act.getSharedPreferences("luncher", android.content.Context.MODE_PRIVATE)
+        val width = first.lp.width
+        val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT).apply {
+            gravity = first.lp.gravity
+            // Where you last dragged it, or just above the chat window.
+            x = p.getInt("clip_x", first.lp.x)
+            y = p.getInt("clip_y", -1).takeIf { it >= 0 } ?: (first.lp.y - dp(96)).coerceAtLeast(maxOf(dp(30), topLimit()))
+            token = hudLp.token
+        }
+        if (runCatching { w.addView(root, l) }.isFailure) return
+        clipPanel = root; clipLp = l
+        dragBy(head, root, l, onEnd = { p.edit().putInt("clip_x", l.x).putInt("clip_y", l.y).apply() })
+        refreshClips()
+        root.alpha = 0f; root.translationY = dp(12).toFloat()
+        root.animate().alpha(1f).translationY(0f).setDuration(220).start()
+    }
+
+    private fun refreshClips() {
+        val row = clipRow ?: return
+        row.removeAllViews()
+        val items = Clips.list(act)
+        if (items.isEmpty()) {
+            row.addView(android.widget.TextView(act).apply {
+                text = "Hold a message to copy it — it shows up here"; textSize = 12.5f; setTextColor(0x99FFFFFF.toInt())
+                setPadding(dp(4), dp(6), dp(4), dp(6))
+            })
+            return
+        }
+        for (t in items) row.addView(android.widget.TextView(act).apply {
+            text = if (t.length > 26) t.take(25) + "…" else t
+            textSize = 13f; setTextColor(Color.WHITE); maxLines = 1
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(0x2EFFFFFF) }
+            setOnClickListener {
+                performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                val target = activeInput ?: cards.values.firstNotNullOfOrNull { c ->
+                    c.root.findViewWithTag<android.widget.EditText>("reply")?.let { it to { c } }
+                }
+                if (target == null) { copyText(t); return@setOnClickListener }
+                startTyping(target.second(), target.first)
+                insertText(target.first, t)
+            }
+            setOnLongClickListener {
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                Clips.remove(act, t); refreshClips(); true
+            }
+        }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) })
+    }
+
+    private fun hideClips() {
+        val p = clipPanel ?: return
+        clipPanel = null; clipLp = null; clipRow = null
+        p.animate().alpha(0f).setDuration(160).withEndAction { runCatching { wm?.removeViewImmediate(p) } }.start()
+    }
 
     private fun show(kind: Kind, fill: (HudView) -> Unit) {
         if (!preview && GameState.playing) return   // nothing pops up over a game
@@ -990,6 +1137,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         OverlayZones.unlisten(zoneFit); zoneAnim?.cancel()
         if (!preview) OverlayZones.setSideHud(null)
         runCatching { histPanel?.let { wm?.removeViewImmediate(it) } }; histPanel = null
+        runCatching { clipPanel?.let { wm?.removeViewImmediate(it) } }; clipPanel = null; clipRow = null
         hideAllCards(immediate = true)
         val v = view ?: return
         view = null; lp = null; createdRight = null

@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        93 to listOf("Copy & paste in chat windows: hold a message to copy it, 📋 pastes into the reply",
+            "Clipboard strip above the chat window with everything you copied — tap to paste, hold to remove, drag to move"),
         92 to listOf("After “hello”, a short tour shows everything the launcher can do",
             "Links in chat windows are tappable and open right away",
             "Side island message text sits on its own bubble — no more mixing with the app underneath"),
