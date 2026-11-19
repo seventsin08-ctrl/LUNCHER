@@ -412,10 +412,14 @@ class MainActivity : Activity() {
         ContextCompat.registerReceiver(this, ringerReceiver, IntentFilter(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION), ContextCompat.RECEIVER_EXPORTED)
         // "hello" only when the launcher is set up fresh: first install, or after a reset / imported setup.
         // (Anyone who already saw it in an earlier version counts as set up.)
+        // Also once after every update: "hello", then What's New with everything that changed.
+        val cur = WhatsNew.current(this)
+        val seen = prefs.getInt("seen_launcher_version", -1)
         val fresh = !prefs.getBoolean("hello_done", false) && !prefs.contains("hello_seen_version")
-        if (fresh) {
-            prefs.edit().putBoolean("hello_done", true).apply()
-            root.postDelayed({ showHello() }, 300)
+        if (fresh || (cur > 0 && cur != seen)) {
+            prefs.edit().putBoolean("hello_done", true).putInt("seen_launcher_version", cur).apply()
+            val from = if (seen in 1 until cur) seen else cur - 1
+            root.postDelayed({ showHello { if (cur > 0) WhatsNew.show(this, root, from, cur) } }, 300)
         }
         registerReceivers()
         appliedVersion = settings.version
@@ -434,6 +438,11 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // "Show hello again" from Settings › General.
+        if (prefs.getBoolean("hello_force", false)) {
+            prefs.edit().remove("hello_force").apply()
+            root.postDelayed({ showHello() }, 250)
+        }
         Tilt.resume()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
@@ -942,11 +951,12 @@ class MainActivity : Activity() {
     }
 
     /** The iPhone "hello" screen. */
-    private fun showHello() {
+    private fun showHello(then: (() -> Unit)? = null) {
         if (helloView != null) return
         val v = HelloView(this) {
             helloView?.let { root.removeView(it) }
             helloView = null
+            then?.invoke()
         }
         helloView = v
         root.addView(v, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))

@@ -19,7 +19,7 @@ object Backup {
     private const val PREFS = "luncher"
     /** Temporary state that shouldn't move to another phone. */
     private val skip = setOf("clip_stamp", "timer_end", "timer_total", "s_version", "asked_bt_permission",
-        "hello_done", "hello_seen_version")
+        "hello_done", "hello_seen_version", "seen_launcher_version", "hello_force")
 
     class Result(val ok: Boolean, val message: String)
 

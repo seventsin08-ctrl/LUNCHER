@@ -197,6 +197,7 @@ class SettingsActivity : Activity() {
         }
     }
 
+    private var rootFrame: FrameLayout? = null
     private var islandPreview: IslandPreview? = null
     private var islandCard: View? = null
 
@@ -236,6 +237,7 @@ class SettingsActivity : Activity() {
         scroll.addView(list, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         // The live island preview floats above the settings list.
         val frame = FrameLayout(this)
+        rootFrame = frame
         ThemeEngine.resolve(this, s)
         hc = Holo.color()
         if (holo) {
@@ -829,6 +831,15 @@ class SettingsActivity : Activity() {
 
         // ---------------- About
         val about = section("GENERAL")
+        button(about, "What's New", 0xFF0A84FF.toInt()) {
+            val cur = runCatching { packageManager.getPackageInfo(packageName, 0).versionName?.toInt() }.getOrNull() ?: 0
+            // Every update's notes, newest first.
+            rootFrame?.let { WhatsNew.show(this, it, 0, cur) }
+        }
+        button(about, "Show “hello” Again", 0xFF0A84FF.toInt()) {
+            getSharedPreferences("luncher", MODE_PRIVATE).edit().putBoolean("hello_force", true).apply()
+            finish()
+        }
         button(about, "Default Home App…", 0xFF0A84FF.toInt()) {
             runCatching { startActivity(Intent(SysSettings.ACTION_HOME_SETTINGS)) }
         }
