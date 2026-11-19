@@ -549,6 +549,10 @@ class SettingsActivity : Activity() {
             }
             toggle(side2, "Recent Apps", "An extension under the chat button: your recently used apps — scroll it and tap one " +
                 "to switch apps quickly", s.sideRecents) { s.sideRecents = it }
+            toggle(side2, "Headphones", "Your connected earbuds, AirPods, headset or wired headphones — with battery — " +
+                "in the side island (tap it for Bluetooth settings)", s.sideDevice) { s.sideDevice = it }
+            toggle(side2, "Temperature", "The phone's temperature in the side island", s.sideTemp) { s.sideTemp = it }
+            segment(side2, "Temperature Unit", listOf("c" to "°C", "f" to "°F"), if (s.sideTempF) "f" else "c") { s.sideTempF = it == "f" }
             segment(side2, "Recent Apps Shown", listOf("1" to "1", "2" to "2", "3" to "3", "4" to "4", "5" to "5"),
                 s.sideRecentsShown.toString()) { s.sideRecentsShown = it.toInt() }
             segment(side2, "Recent App Size", listOf("s" to "Small", "m" to "Medium", "l" to "Large"), s.sideRecentsSize) {

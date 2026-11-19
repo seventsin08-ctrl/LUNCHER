@@ -534,6 +534,20 @@ class HeadsetPopup private constructor(private val app: Context) {
         }
     }
 
+    /** What's connected right now (for the side island): name, kind and battery (-1 = unknown). */
+    fun connectedNow(): Triple<String, HeadsetKind, Int>? {
+        val h = runCatching { audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstNotNullOfOrNull { headsetOf(it) } }.getOrNull()
+            ?: return null
+        runCatching { refineKind(h) }
+        var level = -1
+        val addr = h.address
+        if (h.bluetooth && addr != null && hasBluetoothPermission()) level = runCatching {
+            val dev = app.getSystemService(BluetoothManager::class.java)!!.adapter.getRemoteDevice(addr)
+            dev.javaClass.getMethod("getBatteryLevel").invoke(dev) as Int
+        }.getOrDefault(-1)
+        return Triple(h.name, h.kind, if (level in 0..100) level else -1)
+    }
+
     private fun fetchBattery(h: Headset) {
         if (!hasBluetoothPermission()) {
             requestBluetooth(force = false)

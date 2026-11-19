@@ -384,6 +384,7 @@ class MainActivity : Activity() {
         sideHud.onMoved = { setupSidebar() }
         NotificationService.loadHistory(this)
         // Recently used apps for the side island's extension (tap to switch apps).
+        sideHud.deviceProvider = { runCatching { HeadsetPopup.get(this).connectedNow() }.getOrNull() }
         sideHud.recentProvider = {
             switcherEntries().map { e ->
                 val app = e.app

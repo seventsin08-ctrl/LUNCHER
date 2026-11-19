@@ -36,6 +36,7 @@ import kotlin.math.roundToInt
  */
 class SideHud(private val act: Activity, private val settings: Settings, private val preview: Boolean = false) {
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
+    private fun dp(v: Float) = v * act.resources.displayMetrics.density
 
     private enum class Kind { REST, VOLUME, STATUS, MESSAGE }
     /** Half the side island window's height, in dp. */
@@ -94,6 +95,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         // Extension under the chat button: your recently used apps (scrollable).
         // Refresh at most every 3 s so holding the volume key stays smooth.
         val now = android.os.SystemClock.uptimeMillis()
+        // Headphones + temperature are cheap: refresh every time it opens.
+        it.device = if (settings.sideDevice && !preview) runCatching { deviceProvider?.invoke() }.getOrNull() else null
+        it.tempText = if (settings.sideTemp) phoneTemp()?.let { c ->
+            if (settings.sideTempF) "${(c * 9 / 5 + 32).roundToInt()}°" else "${c.roundToInt()}°"
+        } else null
         if (now - recentsAt > 3000) {
             recentsAt = now
             it.recents = if (settings.sideRecents && !preview) runCatching { recentProvider?.invoke() }.getOrNull().orEmpty().take(15) else emptyList()
@@ -580,7 +586,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val v = view ?: return
         l.width = when (kind) { Kind.REST -> dp(20); Kind.VOLUME -> dp(96); Kind.STATUS -> dp(220); Kind.MESSAGE -> dp(320) }
         // Grow/shrink the height around the same centre (taller only for volume + recent apps).
-        val newH = dp(if (kind == Kind.VOLUME && v.recents.isNotEmpty()) TALL_HALF * 2 else HALF * 2)
+        val newH = if (kind == Kind.VOLUME) maxOf(dp(HALF * 2), v.shapeHeight() + dp(24)) else dp(HALF * 2)
         if (newH != l.height) { val c = l.y + l.height / 2; l.height = newH; l.y = c - newH / 2 }
         v.post { avoidZones() }
         l.flags = if (kind == Kind.STATUS) l.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -637,6 +643,16 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     // ---------------------------------------------------------------- message history (middle window)
+
+    /** Connected headphones: (name, kind, battery % or -1), or null. Set by the launcher. */
+    var deviceProvider: (() -> Triple<String, HeadsetKind, Int>?)? = null
+
+    /** Phone temperature in °C (battery sensor). */
+    private fun phoneTemp(): Float? = runCatching {
+        val i = act.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val t = i?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE) ?: Int.MIN_VALUE
+        if (t == Int.MIN_VALUE) null else t / 10f
+    }.getOrNull()
 
     /** Recently used apps for the side island's extension: (icon, open). */
     var recentProvider: (() -> List<Pair<Bitmap?, () -> Unit>>)? = null
@@ -843,10 +859,61 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         private val rowH get() = iconS + dp(8)
         private val divider = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF; strokeWidth = maxOf(1f, dp(1) * 0.8f) }
 
+        // ---- headphones + temperature (between the chat button and recent apps)
+        var device: Triple<String, HeadsetKind, Int>? = null
+        var tempText: String? = null
+        val deviceSlot = RectF()
+        private val infoText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; textAlign = Paint.Align.CENTER
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+        private val emoji = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+
+        fun infoHeight(): Float = (if (device != null) dp(52) else 0) + (if (tempText != null) dp(40) else 0) +
+            (if (device != null || tempText != null) dp(6) else 0).toFloat()
+
+        fun drawInfo(c: Canvas, bodyW: Float, areaTop: Float, a: Float) {
+            val k = ((a - 0.2f) / 0.8f).coerceIn(0f, 1f)
+            val cx = mx(bodyW / 2f)
+            divider.alpha = (70 * k).toInt()
+            c.drawLine(mx(dp(12).toFloat()), areaTop + 1, mx(bodyW - dp(12)), areaTop + 1, divider)
+            var y = areaTop + dp(6)
+            val d = device
+            deviceSlot.setEmpty()
+            if (d != null) {
+                // Battery ring around the headphones icon, percentage under it.
+                val rr = dp(15).toFloat(); val cy = y + dp(18)
+                ring.strokeWidth = dp(2.5f)
+                ring.color = 0x33FFFFFF; ring.alpha = (60 * k).toInt(); c.drawCircle(cx, cy, rr, ring)
+                if (d.third >= 0) {
+                    ring.color = if (d.third <= 20) 0xFFFF453A.toInt() else 0xFF30D158.toInt(); ring.alpha = (255 * k).toInt()
+                    r.set(cx - rr, cy - rr, cx + rr, cy + rr); c.drawArc(r, -90f, 360f * d.third / 100f, false, ring)
+                }
+                emoji.textSize = dp(15).toFloat(); emoji.alpha = (255 * k).toInt()
+                val glyph = when (d.second) { HeadsetKind.SPEAKER -> "🔊"; else -> "🎧" }
+                c.drawText(glyph, cx, cy - (emoji.descent() + emoji.ascent()) / 2, emoji)
+                infoText.textSize = dp(10.5f); infoText.alpha = (230 * k).toInt()
+                val label = if (d.third >= 0) "${d.third}%" else when (d.second) {
+                    HeadsetKind.WIRED -> "Wired"; HeadsetKind.SPEAKER -> "Speaker"; HeadsetKind.OVER_EAR -> "Phones"; else -> "Buds"
+                }
+                c.drawText(label, cx, cy + rr + dp(13), infoText)
+                deviceSlot.set(cx - bodyW / 2, y, cx + bodyW / 2, y + dp(52))
+                y += dp(52)
+            }
+            val t = tempText
+            if (t != null) {
+                emoji.textSize = dp(13).toFloat(); emoji.alpha = (255 * k).toInt()
+                c.drawText("🌡️", cx, y + dp(14), emoji)
+                infoText.textSize = dp(12f); infoText.alpha = (240 * k).toInt()
+                c.drawText(t, cx, y + dp(32), infoText)
+            }
+        }
+
         fun moving() = moving
         /** Height of the visible shape (including its soft flares), for making room. */
         fun shapeHeight(): Int = when (kind) {
-            Kind.VOLUME -> (dp(150) + (if (settings.sideHistory && !preview) dp(60) else 0) + recentsHeight() + dp(40)).toInt()
+            Kind.VOLUME -> (dp(150) + (if (settings.sideHistory && !preview) dp(60) else 0) + infoHeight() + recentsHeight() + dp(40)).toInt()
             Kind.REST -> dp(120)
             else -> (height * 0.6f).toInt()
         }
@@ -1004,11 +1071,13 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                     val sliderH = dp(150).toFloat()
                     val chatH = if (chat) dp(60).toFloat() else 0f
                     val recH = recentsHeight()
-                    val h = sliderH + chatH + recH
+                    val infoH = infoHeight()
+                    val h = sliderH + chatH + infoH + recH
                     val top = (height - h) / 2f; val bottom = top + sliderH
                     shape(bodyW, top, top + h); flip(); drawBody(c)
                     if (chat && a > 0f) drawChatSlot(c, bodyW, top + sliderH, a)
-                    if (recH > 0f && a > 0f) drawRecents(c, bodyW, top + sliderH + chatH, recH, a)
+                    if (infoH > 0f && a > 0f) drawInfo(c, bodyW, top + sliderH + chatH, a)
+                    if (recH > 0f && a > 0f) drawRecents(c, bodyW, top + sliderH + chatH + infoH, recH, a)
                     if (a <= 0f) return
                     val inset = dp(7).toFloat()
                     r.set(inset, top + inset, bodyW - inset, bottom - inset); flipRect()
@@ -1141,6 +1210,14 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                         }
                     }
                     if (inRecents) { postDelayed(backToRest, 4000); return true }
+                    if (kind == Kind.VOLUME && !dragging && !moving && !deviceSlot.isEmpty && deviceSlot.contains(e.x, e.y)) {
+                        performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                        runCatching {
+                            act.startActivity(android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                        retract(); return true
+                    }
                     if (kind == Kind.VOLUME && !dragging && chatSlot.contains(e.x, e.y)) {
                         performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                         toggleHistory()
