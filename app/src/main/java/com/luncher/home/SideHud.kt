@@ -143,6 +143,9 @@ class SideHud(private val act: Activity, private val settings: Settings) {
         var grown = 0f
         private var spring: SpringAnimation? = null
         private val black = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = maxOf(1f, dp(1) * 0.8f); color = Color.WHITE
+        }
         private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3A3A3C.toInt() }
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF2F2F7.toInt() }
         private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -173,8 +176,9 @@ class SideHud(private val act: Activity, private val settings: Settings) {
             }
         }
 
-        private fun shape(bodyW: Float, top: Float, bottom: Float) {
-            val f = dp(26) * grown.coerceAtMost(1f)
+        private fun shape(bodyW: Float, top: Float, bottom: Float, fillet: Float = dp(26).toFloat()) {
+            // The curves where it leaves the edge must fit inside the window, or they get cut off.
+            val f = minOf(fillet, width * 0.45f) * grown.coerceAtMost(1f)
             val rad = minOf(dp(20).toFloat(), bodyW / 2f)
             path.reset()
             path.moveTo(0f, top - f)
@@ -193,11 +197,13 @@ class SideHud(private val act: Activity, private val settings: Settings) {
             val a = ((grown - 0.4f) / 0.6f).coerceIn(0f, 1f)
             when (kind) {
                 Kind.REST -> {
-                    // A slim liquid bump resting on the edge.
-                    val h = dp(64).toFloat()
+                    // A slim liquid sliver hugging the edge, with a faint rim so it reads on dark wallpapers.
+                    val h = dp(70).toFloat()
                     val top = (height - h) / 2f
-                    shape(dp(6) * grown, top, top + h)
+                    shape(dp(5) * grown, top, top + h, dp(8).toFloat())
                     c.drawPath(path, black)
+                    rim.alpha = (60 * grown).toInt().coerceIn(0, 60)
+                    c.drawPath(path, rim)
                 }
                 Kind.VOLUME -> {
                     val bodyW = dp(58) * grown
