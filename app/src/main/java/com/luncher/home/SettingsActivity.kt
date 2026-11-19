@@ -39,6 +39,7 @@ class SettingsActivity : Activity() {
 
     /** iOS-style Settings: a home page of colourful rows, each opening its own page. */
     private val categories = listOf(
+        Category("setup", "Permissions & Setup", 0xFF34C759.toInt(), R.drawable.ic_cc_lock, listOf("PERMISSIONS")),
         Category("look", "Appearance", 0xFF0A84FF.toInt(), R.drawable.ic_cc_contrast, listOf("APPEARANCE", "THEME", "WALLPAPER")),
         Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "WIDGETS")),
         Category("island", "Dynamic Island", 0xFF1C1C1E.toInt(), R.drawable.ic_set_island,
@@ -50,7 +51,7 @@ class SettingsActivity : Activity() {
         Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
         Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "RESET"))
     )
-    private val groups = listOf(listOf("look", "home", "island", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
+    private val groups = listOf(listOf("setup"), listOf("look", "home", "island", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
     /** null = the Settings home page. */
     private var page: String? = null
     private lateinit var scrollView: ScrollView
@@ -112,6 +113,26 @@ class SettingsActivity : Activity() {
             setTextColor(Color.WHITE); textSize = 15f; setPadding(dp(14), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         list.addView(head, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(18) })
+        // Like iPhone's "Finish Setting Up": shows until everything the launcher needs is allowed.
+        val missing = Setup.items(this).count { !it.allowed(this) }
+        if (missing > 0) {
+            val fin = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(18), dp(14), dp(14), dp(14))
+                background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFF1C1C1E.toInt()) }
+                setOnClickListener { open("setup", forward = true) }
+            }
+            fin.addView(title("Finish Setting Up"), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            fin.addView(TextView(this).apply {
+                text = "$missing"; setTextColor(Color.WHITE); textSize = 14f; gravity = Gravity.CENTER
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFFF3B30.toInt()) }
+            }, LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(8) })
+            fin.addView(ImageView(this).apply {
+                setImageResource(R.drawable.ic_set_chevron); setColorFilter(0xFF5A5A5F.toInt()); rotation = 180f
+            }, LinearLayout.LayoutParams(dp(16), dp(16)))
+            list.addView(fin, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(22) })
+        }
         for (g in groups) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -226,6 +247,10 @@ class SettingsActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_SETUP) {
+            if (guiding) { list.removeCallbacks(stepRun); list.postDelayed(stepRun, 500) } else rebuild()
+            return
+        }
         if (requestCode == REQ_MIC) {
             if (!VoiceService.hasMic(this)) s.voiceOn = false
             VoiceService.sync(this)
@@ -247,6 +272,7 @@ class SettingsActivity : Activity() {
         if (pendingRingtone != null && SysSettings.System.canWrite(this)) applyRingtone()
         // Permission rows may have changed while the user was in system settings.
         rebuild()
+        if (guiding) { list.removeCallbacks(stepRun); list.postDelayed(stepRun, 500) }
     }
 
     private fun rebuild() {
@@ -268,6 +294,20 @@ class SettingsActivity : Activity() {
         }
         list.addView(largeTitle)
         if (page == null) { buildHome(); updateNav(); return }
+
+        // ---------------- Permissions & Setup
+        val perms = section("PERMISSIONS")
+        if (perms.parent != null) {
+            val items = Setup.items(this)
+            val missingNow = items.count { !it.allowed(this) }
+            info(perms, if (missingNow == 0) "Everything is set up ✓" else
+                "$missingNow still needed. Tap one to go straight to the right screen, or tap Set Up All to go through them one by one.")
+            if (missingNow > 0) button(perms, "Set Up All", 0xFF0A84FF.toInt()) {
+                guiding = true; tried.clear(); nextSetupStep()
+            }
+            for (it in items) permRow(perms, it)
+            if (Setup.isVivo) button(perms, "vivo: Allow Background Start…", 0xFF0A84FF.toInt()) { Setup.vivoBackground(this) }
+        }
 
         val apps = section("APPS")
         button(apps, "Manage & uninstall apps…", 0xFF0A84FF.toInt()) {
@@ -843,6 +883,54 @@ class SettingsActivity : Activity() {
             .show()
     }
 
+    // ---------------- guided setup
+    private var guiding = false
+    /** One step at a time: coming back from a pop-up and from a screen can happen together. */
+    private val stepRun = Runnable { if (guiding) nextSetupStep() }
+    private val tried = HashSet<String>()
+
+    /** Open the next permission that's still missing (each one only once per run). */
+    private fun nextSetupStep() {
+        val next = Setup.items(this).firstOrNull { !it.allowed(this) && it.id !in tried }
+        if (next == null) {
+            guiding = false
+            val left = Setup.items(this).count { !it.allowed(this) }
+            android.widget.Toast.makeText(this, if (left == 0) "All set ✓" else "Done — $left skipped", android.widget.Toast.LENGTH_SHORT).show()
+            rebuild(); return
+        }
+        tried += next.id
+        askFor(next)
+    }
+
+    private fun askFor(item: Setup.Item) {
+        val p = item.runtime
+        if (p != null) requestPermissions(arrayOf(p), REQ_SETUP) else item.open?.invoke(this)
+    }
+
+    private fun permRow(card: LinearLayout, item: Setup.Item) {
+        val ok = item.allowed(this)
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(12), dp(14), dp(12))
+            setOnClickListener { askFor(item) }
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(title(item.title))
+        texts.addView(subtitle(item.why))
+        row.addView(texts, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        row.addView(TextView(this).apply {
+            text = if (ok) "Allowed" else "Allow ›"
+            textSize = 13f; gravity = Gravity.CENTER
+            setTextColor(if (ok) 0xFF30D158.toInt() else Color.WHITE)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat(); setColor(if (ok) 0x2230D158 else 0xFF0A84FF.toInt())
+            }
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(10) })
+        addRow(card, row)
+    }
+
     private fun launchableApps(): List<Pair<String, String>> {
         val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return packageManager.queryIntentActivities(main, 0)
@@ -1114,6 +1202,7 @@ class SettingsActivity : Activity() {
         const val REQ_RINGTONE = 5101
         const val REQ_EXPORT = 5102
         const val REQ_MIC = 5104
+        const val REQ_SETUP = 5105
         const val REQ_IMPORT = 5103
 
         fun usageAccessGranted(act: Activity): Boolean = runCatching {
