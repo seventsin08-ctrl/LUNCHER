@@ -180,6 +180,10 @@ class Settings(ctx: Context) {
     var sideHistory: Boolean
         get() = p.getBoolean("s_side_history", true)
         set(v) = put("s_side_history", v)
+    /** Saved window sizes in dp (0 = default). Saved without redrawing the launcher. */
+    fun winSize(key: String): Pair<Int, Int> = p.getInt("s_win_${key}_w", 0) to p.getInt("s_win_${key}_h", 0)
+    fun setWinSize(key: String, w: Int, h: Int) { p.edit().putInt("s_win_${key}_w", w).putInt("s_win_${key}_h", h).apply() }
+    fun resetWinSizes() { p.edit().remove("s_win_chat_w").remove("s_win_chat_h").remove("s_win_hist_w").remove("s_win_hist_h").apply() }
     /** Recently used apps under the side island's chat button. */
     var sideRecents: Boolean
         get() = p.getBoolean("s_side_recents", true)

@@ -3,6 +3,7 @@ package com.luncher.home
 import android.app.Activity
 import android.os.Build
 import android.animation.ValueAnimator
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -139,7 +140,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val w = wm ?: return
         val ctx = act
         val m = ctx.resources.displayMetrics
-        val width = dp(272)
+        val (sw, sh) = settings.winSize("chat")
+        val width = if (sw > 0) dp(sw).coerceAtMost(m.widthPixels - dp(16)) else dp(272)
         // Same app again: replace its window in the same spot.
         val old = cards[chat.pkg]
         val keepX = old?.lp?.x; val keepY = old?.lp?.y
@@ -180,10 +182,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             setOnClickListener { hideCard(chat.pkg); open() }
         })
         // Messages (scroll for more; newest at the bottom)
-        val scroll = object : android.widget.ScrollView(ctx) {
-            override fun onMeasure(wSpec: Int, hSpec: Int) =
-                super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec(dp(170), View.MeasureSpec.AT_MOST))
-        }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        val scroll = MaxScroll(ctx, if (sh > 0) dp(sh) else dp(170))
         val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
         val showNames = chat.messages.map { it.first }.filter { it.isNotBlank() }.toSet().size > 1
         for ((idx, pair) in chat.messages.withIndex()) {
@@ -216,9 +215,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         if (settings.sideReply && chat.reply != null) root.addView(replyBar(chat, list, scroll) { me },
             android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+        val chatGrip = resizeGrip()
+        root.addView(chatGrip, gripLp())
 
         root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(dp(360), View.MeasureSpec.AT_MOST))
+            View.MeasureSpec.makeMeasureSpec(m.heightPixels, View.MeasureSpec.AT_MOST))
         val h = root.measuredHeight
         // Where it goes: same spot when updating; beside the side island when it's the first;
         // otherwise under the last window (or above the first one if there's no room).
@@ -248,6 +249,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         cards[chat.pkg] = me
         cardOf[root] = me
         dragBy(head, root, l, onStart = { root.removeCallbacks(me.close) }, onEnd = { if (!me.holding) me.restartTimer(9000) })
+        resizeBy(chatGrip, root, l, scroll, "chat", minW = dp(220))
         me.restartTimer()
         // Grows out of the side island (a soft slide when it's an extra window).
         root.pivotX = if (isRight) width.toFloat() else 0f
@@ -258,6 +260,75 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     private val cardOf = HashMap<View, Card>()
+
+    /** A ScrollView whose height limit can change (window resizing). */
+    private class MaxScroll(ctx: Context, var maxH: Int) : android.widget.ScrollView(ctx) {
+        init { isVerticalScrollBarEnabled = true; isScrollbarFadingEnabled = true; overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS }
+        override fun onMeasure(wSpec: Int, hSpec: Int) =
+            super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec(maxH, View.MeasureSpec.AT_MOST))
+    }
+
+    /** The little corner grip at the bottom of a window: drag it to resize. */
+    private fun resizeGrip(): View = object : View(act) {
+        private val pnt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x80FFFFFF.toInt(); strokeWidth = dp(2).toFloat(); strokeCap = Paint.Cap.ROUND
+        }
+        override fun onDraw(c: Canvas) {
+            // Pill in the middle + diagonal lines in the corner (like a window resize handle)
+            val cx = width / 2f; val cy = height / 2f
+            pnt.alpha = 70; c.drawLine(cx - dp(16), cy, cx + dp(16), cy, pnt)
+            pnt.alpha = 140
+            val r = width - dp(4).toFloat(); val b = height - dp(3).toFloat()
+            c.drawLine(r - dp(12), b, r, b - dp(12), pnt)
+            c.drawLine(r - dp(6), b, r, b - dp(6), pnt)
+        }
+    }.apply { contentDescription = "Resize window" }
+
+    private fun gripLp() = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(18)).apply {
+        topMargin = dp(4)
+    }
+
+    /** Drag the grip: right/left = wider/narrower, down/up = taller/shorter. The size is remembered. */
+    private fun resizeBy(grip: View, win: View, l: WindowManager.LayoutParams, scroll: MaxScroll, key: String, minW: Int) {
+        val m = act.resources.displayMetrics
+        var sx = 0f; var sy = 0f; var sw = 0; var sh = 0; var ox = 0; var oy = 0; var resizing = false
+        grip.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    sx = e.rawX; sy = e.rawY; sw = win.width; sh = scroll.maxH; ox = l.x; oy = l.y; resizing = false
+                    grip.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (e.rawX - sx).toInt(); val dy = (e.rawY - sy).toInt()
+                    if (!resizing && kotlin.math.abs(dx) + kotlin.math.abs(dy) > dp(4)) {
+                        resizing = true; grip.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    }
+                    if (resizing) {
+                        val nw = (sw + dx).coerceIn(minW, m.widthPixels - dp(16))
+                        val nh = (sh + dy).coerceIn(dp(70), (m.heightPixels * 0.8f).toInt())
+                        val gw = nw - sw; val gh = nh - sh
+                        l.width = nw
+                        // Keep the top-left corner where it is, whatever the window is anchored to.
+                        val hg = l.gravity and Gravity.HORIZONTAL_GRAVITY_MASK
+                        l.x = when {
+                            hg == Gravity.CENTER_HORIZONTAL -> ox + gw / 2
+                            (l.gravity and Gravity.END) == Gravity.END -> ox - gw
+                            else -> ox
+                        }
+                        if ((l.gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.CENTER_VERTICAL) l.y = oy + gh / 2
+                        scroll.maxH = nh; scroll.requestLayout()
+                        runCatching { wm?.updateViewLayout(win, l) }
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (resizing) {
+                    val d = m.density
+                    settings.setWinSize(key, (l.width / d).toInt(), (scroll.maxH / d).toInt())
+                    grip.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                }
+            }
+            true
+        }
+    }
     private fun root2(v: View) = cardOf[v]
 
     private fun cardBackground(r: Float) = android.graphics.drawable.GradientDrawable().apply {
@@ -550,7 +621,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val chats = historyProvider?.invoke().orEmpty()
         // Group by app, newest app first; newest conversation first inside each.
         val groups = chats.groupBy { it.pkg }.entries.sortedByDescending { e -> e.value.maxOf { it.time } }
-        val width = minOf((m.widthPixels * 0.88f).toInt(), dp(380))
+        val (sw, sh) = settings.winSize("hist")
+        val width = if (sw > 0) dp(sw).coerceAtMost(m.widthPixels - dp(16)) else minOf((m.widthPixels * 0.88f).toInt(), dp(380))
         val root = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(12))
@@ -563,10 +635,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         }, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         head.addView(circleButton("✕") { hideHistory() }, android.widget.LinearLayout.LayoutParams(dp(30), dp(30)))
         root.addView(head)
-        val scroll = object : android.widget.ScrollView(ctx) {
-            override fun onMeasure(wSpec: Int, hSpec: Int) =
-                super.onMeasure(wSpec, View.MeasureSpec.makeMeasureSpec((m.heightPixels * 0.55f).toInt(), View.MeasureSpec.AT_MOST))
-        }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        // Scrollable list (drag the corner grip to make the window bigger or smaller)
+        val scroll = MaxScroll(ctx, if (sh > 0) dp(sh) else (m.heightPixels * 0.55f).toInt())
         val list = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL }
         if (groups.isEmpty()) list.addView(android.widget.TextView(ctx).apply {
             text = "No messages yet"; textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(0, dp(16), 0, dp(16)); gravity = Gravity.CENTER
@@ -628,6 +698,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             text = if (n == 1) "1 app" else "$n apps"; textSize = 12f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER
             setPadding(0, dp(10), 0, 0)
         }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+        val histGrip = resizeGrip()
+        root.addView(histGrip, gripLp())
 
         val l = WindowManager.LayoutParams(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, hudLp.type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -639,6 +711,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         if (runCatching { w.addView(root, l) }.isFailure) return
         histPanel = root
         dragBy(head, root, l)
+        resizeBy(histGrip, root, l, scroll, "hist", minW = dp(240))
         root.alpha = 0f; root.scaleX = 0.85f; root.scaleY = 0.85f
         root.animate().alpha(1f).setDuration(200).start()
         Motion.scaleTo(root, 1f, Motion.BOUNCY)

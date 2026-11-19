@@ -584,6 +584,10 @@ class SettingsActivity : Activity() {
             s.sideMedia) { s.sideMedia = it }
         toggle(chatSec, "Chat Button in Side Island", "Under the volume slider: the latest app's logo and a red count — " +
             "tap it for Message History (every app's chats under its logo), tap a chat to open its window", s.sideHistory) { s.sideHistory = it }
+        button(chatSec, "Reset Window Sizes", 0xFF0A84FF.toInt()) {
+            s.resetWinSizes()
+            android.widget.Toast.makeText(this, "Chat and history windows are back to their normal size", android.widget.Toast.LENGTH_SHORT).show()
+        }
         button(chatSec, "Open Message History", 0xFF0A84FF.toInt()) {
             NotificationService.loadHistory(this)
             ThemeEngine.resolve(this, s)
