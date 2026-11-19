@@ -187,7 +187,7 @@ class DynamicIsland(
         val detector = GestureDetector(act, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                if (expanded) collapse() else if (current() == null) showQuick() else expand()
+                if (expanded) collapse() else if (current() == null) { if (toolsOn) toggleTools() else showQuick() } else expand()
                 return true
             }
             override fun onLongPress(e: MotionEvent) {
@@ -507,8 +507,10 @@ class DynamicIsland(
             }
         }
         if (quickMode) return
-        showTools(a == null && !expanded && toolsOn)
-        if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), dp(36), dp(18).toFloat())
+        showTools(a == null && !expanded && toolsOn && toolsOpen)
+        if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), if (a == null) idleH() else dp(36),
+            (if (a == null) idleH() else dp(36)) / 2f)
+        parkAtCamera(a == null && !expanded && toolsOn && !toolsOpen)
         else if (a != null) bindExpanded(a) else collapse()
     }
 
@@ -523,7 +525,42 @@ class DynamicIsland(
     }
     private var searching = false
 
-    private fun idleW() = if (toolsOn) dp(16) + toolCount * dp(34) else dp(118)
+    private fun idleW() = when {
+        toolsOn && toolsOpen -> dp(16) + toolCount * dp(34)
+        toolsOn -> camera?.let { maxOf(dp(34), it.width() + dp(16)) } ?: dp(42)   // tucked around the front camera
+        else -> dp(118)
+    }
+    private fun idleH() = if (toolsOn && !toolsOpen) camera?.let { maxOf(dp(28), it.height() + dp(10)) } ?: dp(36) else dp(36)
+
+    /** The front camera hole on screen (from the display cutout), so the closed tools hide around it. */
+    var camera: android.graphics.Rect? = null
+        set(v) { field = v; if (toolsOn && !toolsOpen && !expanded && current() == null) pill.post { refresh() } }
+
+    /** Closed tools sit exactly on the camera; open (or anything else showing) uses the island's spot. */
+    private fun parkAtCamera(on: Boolean) {
+        val cam = camera
+        if (!on || cam == null) {
+            if (pill.translationY != 0f && !dragging) pill.animate().translationY(0f).translationX(offsetX)
+                .setDuration((280 * Motion.scale).toLong()).start()
+            return
+        }
+        val loc = IntArray(2); root.getLocationOnScreen(loc)
+        val cx = loc[0] + root.width / 2f
+        val cy = loc[1] + topMargin + idleH() * sizeScale / 2f
+        pill.animate().translationX(cam.exactCenterX() - cx).translationY(cam.exactCenterY() - cy)
+            .setDuration((280 * Motion.scale).toLong()).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)).start()
+    }
+
+    /** Tools open from the little island around the camera, and tuck back after a few seconds. */
+    private var toolsOpen = false
+    private val closeTools = Runnable { if (toolsOpen) { toolsOpen = false; refresh() } }
+    fun toggleTools() {
+        toolsOpen = !toolsOpen
+        buzz()
+        pill.removeCallbacks(closeTools)
+        if (toolsOpen) pill.postDelayed(closeTools, 6000)
+        refresh()
+    }
     private var toolCount = 0
 
     // ---- moving the tools bar: hold it, then drag anywhere
@@ -542,7 +579,11 @@ class DynamicIsland(
     }
     private fun toolsTouch(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { tDown = true; tDrag = false; tX = e.rawX; tY = e.rawY; toolsRow.postDelayed(tLift, 420) }
+            MotionEvent.ACTION_DOWN -> {
+                tDown = true; tDrag = false; tX = e.rawX; tY = e.rawY
+                // Using the tools keeps them open a little longer.
+                pill.removeCallbacks(closeTools); pill.postDelayed(closeTools, 6000)
+            }
             MotionEvent.ACTION_MOVE -> {
                 if (!tDrag && abs(e.rawX - tX) + abs(e.rawY - tY) > dp(10)) toolsRow.removeCallbacks(tLift)
                 if (tDrag) {
@@ -943,8 +984,9 @@ class DynamicIsland(
         if (cur != null) animateSize(compactWidth(cur), dp(36), dp(18).toFloat())
         else if ((alwaysShow || toolsOn) && enabled) {
             compact.visibility = View.INVISIBLE
-            showTools(toolsOn)
-            animateSize(idleW(), dp(36), dp(18).toFloat())
+            showTools(toolsOn && toolsOpen)
+            animateSize(idleW(), idleH(), idleH() / 2f)
+            parkAtCamera(toolsOn && !toolsOpen)
         }
         else refresh()
     }

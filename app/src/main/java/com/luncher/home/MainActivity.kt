@@ -329,7 +329,8 @@ class MainActivity : Activity() {
         island.enabled = settings.island
         island.popupMs = settings.islandPopupMs.toLong()
         island.alwaysShow = settings.islandAlways
-        island.idleTools = null // the tools bar is its own always-on window now (ToolsBar)
+        // The tools live in the island: hidden around the camera, tap it to open them.
+        island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
         island.quickActions = null // only one tools bar (ToolsBar) — none inside the island
         island.allow = { id ->
             settings.islandAllows(when {
@@ -682,7 +683,7 @@ class MainActivity : Activity() {
             island.enabled = settings.island
             island.popupMs = settings.islandPopupMs.toLong()
             island.alwaysShow = settings.islandAlways
-            island.idleTools = null
+            island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
             overlayIsland?.idleTools = island.idleTools
             applyIslandLook()
             island.applyFilter()
@@ -735,6 +736,7 @@ class MainActivity : Activity() {
         ov.alwaysShow = island.alwaysShow
         ov.quickActions = island.quickActions
         ov.idleTools = island.idleTools
+        ov.camera = island.camera
         applyToolsStyle(ov)
         ov.allow = island.allow
         ov.popupMs = island.popupMs
@@ -851,6 +853,11 @@ class MainActivity : Activity() {
         val list = ArrayList<QuickAction>()
         list += QuickAction(R.drawable.ic_cc_flashlight, "Flashlight", { torchOn }) { setTorch(!torchOn) }
         list += QuickAction(R.drawable.ic_cc_sun, "Brightness", { false }) { cycleBrightness() }
+        list += QuickAction(R.drawable.ic_cc_camera, "Camera", { false }) {
+            val ok = runCatching { startActivity(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)) }.isSuccess ||
+                runCatching { startActivity(Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)) }.isSuccess
+            if (!ok) toast("No camera app found")
+        }
         list += QuickAction(R.drawable.ic_cc_bell_off, "Silent", { am.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL }) {
             runCatching {
                 am.ringerMode = if (am.ringerMode == android.media.AudioManager.RINGER_MODE_NORMAL)
@@ -993,8 +1000,8 @@ class MainActivity : Activity() {
         isl.toolsIcon = if (lum > 0.62) 0xFF1C1C1E.toInt() else Color.WHITE
         isl.toolsShape = settings.toolsShape
         isl.toolsAngle = settings.toolsAngle.toFloat()
-        isl.toolsDx = dp(settings.toolsDx).toFloat()
-        isl.toolsDy = dp(settings.toolsDy).toFloat()
+        isl.toolsDx = 0f; isl.toolsDy = 0f   // the tools stay with the island (no dragging)
+        isl.toolsAngle = 0f
         isl.onToolsMoved = { dx, dy ->
             val d = resources.displayMetrics.density
             settings.toolsDx = (dx / d).roundToInt(); settings.toolsDy = (dy / d).roundToInt()
@@ -1119,6 +1126,11 @@ class MainActivity : Activity() {
             val islandRoom = if (settings.island && islandTop < bars.top + dp(70))
                 (islandBottom + dp(6) - bars.top).coerceAtLeast(0) else 0
             if (::island.isInitialized) island.setTopInset(islandTop)
+            // Where the front camera hole is, so the closed tools can hide right around it.
+            val cam = if (Build.VERSION.SDK_INT >= 28) insets.toWindowInsets()?.displayCutout?.boundingRects
+                ?.filter { it.top <= dp(4) && it.height() < dp(80) }?.minByOrNull { kotlin.math.abs(it.centerX() - root.width / 2) } else null
+            if (::island.isInitialized) island.camera = cam
+            overlayIsland?.camera = cam
             lastIslandTop = islandTop
             content.setPadding(0, bars.top + islandRoom, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
