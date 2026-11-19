@@ -192,6 +192,11 @@ class Settings(ctx: Context) {
         get() = p.getInt("s_side_ms", 1800)
         set(v) = put("s_side_ms", v)
 
+    /** Listen for "voice activation", then "open <app>". */
+    var voiceOn: Boolean
+        get() = p.getBoolean("s_voice", false)
+        set(v) = put("s_voice", v)
+
     // ---- Hello screen
     var helloOnUnlock: Boolean
         get() = p.getBoolean("s_hello_unlock", false)

@@ -412,6 +412,7 @@ class MainActivity : Activity() {
         Tilt.resume()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
+        runCatching { VoiceService.sync(this) }
         if (::sideHud.isInitialized) runCatching { sideHud.rest() }
         if (::island.isInitialized) detachOverlayIsland()
         refreshOngoing()
@@ -4872,7 +4873,8 @@ class MainActivity : Activity() {
         val rc = object : android.media.AudioManager.AudioRecordingCallback() {
             override fun onRecordingConfigChanged(configs: MutableList<android.media.AudioRecordingConfiguration>?) {
                 if (!::island.isInitialized) return
-                if (!configs.isNullOrEmpty()) island.put(IslandActivity("mic", null, R.drawable.ic_bolt,
+                // Our own "voice activation" listening isn't another app using the mic.
+                if (!configs.isNullOrEmpty() && !VoiceService.running) island.put(IslandActivity("mic", null, R.drawable.ic_bolt,
                     0xFFFF9F0A.toInt(), "Microphone in use", "An app is recording audio", "●", true, 0xFFFF9F0A.toInt()))
                 else island.remove("mic")
             }

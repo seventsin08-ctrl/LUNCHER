@@ -224,6 +224,15 @@ class SettingsActivity : Activity() {
         intent?.getStringExtra("page")?.let { p -> if (categories.any { it.id == p }) open(p, forward = true) }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_MIC) {
+            if (!VoiceService.hasMic(this)) s.voiceOn = false
+            VoiceService.sync(this)
+            rebuild()
+        }
+    }
+
     override fun onPause() {
         visible = false
         sidePreview?.dismiss(); sidePreview = null
@@ -671,6 +680,20 @@ class SettingsActivity : Activity() {
 
         // ---------------- About
         val about = section("GENERAL")
+        toggle(about, "Voice Activation", "Say “voice activation”, then “open” and an app name — e.g. “open Messenger”",
+            s.voiceOn) { on ->
+            s.voiceOn = on
+            if (on && !VoiceService.hasMic(this)) requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC)
+            else VoiceService.sync(this)
+            rebuild()
+        }
+        if (s.voiceOn) {
+            if (!HeadsetPopup.canShowOverApps(this)) button(about, "Allow Showing Over Other Apps…", 0xFF0A84FF.toInt()) {
+                runCatching { startActivity(Intent(SysSettings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName"))) }
+            }
+            info(about, "The phone listens quietly and only wakes the speech recogniser when it hears talking. " +
+                "Android shows the green microphone dot and a small notification while it's on, and it uses some battery.")
+        }
         button(about, "Default Home App…", 0xFF0A84FF.toInt()) {
             runCatching { startActivity(Intent(SysSettings.ACTION_HOME_SETTINGS)) }
         }
@@ -1090,6 +1113,7 @@ class SettingsActivity : Activity() {
         const val REQ_WALLPAPER = 5100
         const val REQ_RINGTONE = 5101
         const val REQ_EXPORT = 5102
+        const val REQ_MIC = 5104
         const val REQ_IMPORT = 5103
 
         fun usageAccessGranted(act: Activity): Boolean = runCatching {
