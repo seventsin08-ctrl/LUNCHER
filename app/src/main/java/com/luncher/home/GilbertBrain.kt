@@ -35,7 +35,24 @@ object GilbertBrain {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("gil_brain", Context.MODE_PRIVATE)
 
     /** Copy the chosen brain file into the app (runs in the background). Your old brain stays until the new one is fully copied. */
-    fun install(ctx: Context, uri: Uri, done: (Boolean, String) -> Unit) {
+    /** Name and size of a picked file (for the "too heavy?" warning). */
+    fun describe(ctx: Context, uri: Uri): Pair<String, Long> {
+        var name = ""; var size = -1L
+        runCatching {
+            ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val ni = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    val si = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (ni >= 0) name = c.getString(ni) ?: ""
+                    if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+                }
+            }
+        }
+        return name to size
+    }
+    fun isHeavy(name: String, size: Long) = name.lowercase().contains("f32") || size > MAX_BYTES
+
+    fun install(ctx: Context, uri: Uri, force: Boolean = false, done: (Boolean, String) -> Unit) {
         val app = ctx.applicationContext
         exec.execute {
             val r = runCatching {
@@ -51,7 +68,7 @@ object GilbertBrain {
                 val low = name.lowercase()
                 if (name.isNotEmpty() && !low.endsWith(".task"))
                     error("That's not a brain file — pick one that ends in “.task”")
-                if (low.contains("f32") || size > MAX_BYTES)
+                if (!force && (low.contains("f32") || size > MAX_BYTES))
                     error("That brain is too heavy for this phone (${if (size > 0) "${size / 1_000_000} MB" else "f32"}) and would crash it. Pick the “q8” .task file (about 0.5–1.6 GB).")
                 val free = android.os.StatFs(app.filesDir.path).availableBytes
                 if (size > 0 && free < size + 300_000_000L)
@@ -59,11 +76,11 @@ object GilbertBrain {
                 val tmp = File(app.filesDir, "gilbert_brain.tmp")
                 app.contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 20) } }
                 if (tmp.length() < 10_000_000) { tmp.delete(); error("That file is too small to be a brain (.task model)") }
-                if (tmp.length() > MAX_BYTES) { tmp.delete(); error("That brain is too heavy for this phone and would crash it. Pick a smaller “q8” .task file.") }
+                if (!force && tmp.length() > MAX_BYTES) { tmp.delete(); error("That brain is too heavy for this phone and would crash it. Pick a smaller “q8” .task file.") }
                 // Only now swap the old brain for the new one.
                 release()
                 file(app).delete(); tmp.renameTo(file(app))
-                prefs(app).edit().putBoolean("loading", false).putBoolean("crashed", false).apply()
+                prefs(app).edit().putBoolean("loading", false).putBoolean("crashed", false).putBoolean("heavy", force).apply()
                 lastError = null
             }
             if (r.isFailure) File(app.filesDir, "gilbert_brain.tmp").delete()
@@ -94,7 +111,9 @@ object GilbertBrain {
         // Enough memory? (A brain needs roughly its own size in free RAM.)
         val am = ctx.getSystemService(android.app.ActivityManager::class.java)
         val mi = android.app.ActivityManager.MemoryInfo(); runCatching { am.getMemoryInfo(mi) }
-        if (mi.availMem > 0 && mi.availMem < file(ctx).length() * 0.9) {
+        // Heavy brains you chose anyway get a looser check (they may still be too much for the phone).
+        val need = if (prefs(ctx).getBoolean("heavy", false)) 0.55 else 0.9
+        if (mi.availMem > 0 && mi.availMem < file(ctx).length() * need) {
             lastError = "Not enough free memory right now (${mi.availMem / 1_000_000} MB). Close some apps and try again."
             return null
         }

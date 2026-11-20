@@ -1017,11 +1017,23 @@ class SettingsActivity : Activity() {
                 }.start()
             }
             REQ_BRAIN -> {
-                android.widget.Toast.makeText(this, "Adding Gilbert's brain… (this can take a minute)", android.widget.Toast.LENGTH_LONG).show()
-                GilbertBrain.install(this, uri) { ok, msg ->
-                    android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
-                    if (ok) rebuild()
+                val go = { force: Boolean ->
+                    android.widget.Toast.makeText(this, "Adding Gilbert's brain… (this can take a minute or two)", android.widget.Toast.LENGTH_LONG).show()
+                    GilbertBrain.install(this, uri, force) { ok, msg ->
+                        android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
+                        if (ok) rebuild()
+                    }
                 }
+                val (name, size) = GilbertBrain.describe(this, uri)
+                if (GilbertBrain.isHeavy(name, size)) {
+                    android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
+                        .setTitle("Heavy brain (${if (size > 0) "${size / 1_000_000} MB" else "f32"})")
+                        .setMessage("This brain is very big for this phone. It may be slow or close the launcher while loading. " +
+                            "If it does, Gilbert switches it off automatically and you can pick the smaller q8 file. Use it anyway?")
+                        .setPositiveButton("Use Anyway") { _, _ -> go(true) }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                } else go(false)
             }
             REQ_IMPORT -> {
                 android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
