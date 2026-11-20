@@ -21,6 +21,10 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        128 to listOf("Smoother everywhere: the launcher asks the screen for its fastest refresh rate (90/120 Hz when your phone has it)",
+            "Snappier animations by default, plus a new “Instant” speed (Settings › Animations › Speed)",
+            "Gilbert's orb only animates while it's on screen, freeing the phone for everything else",
+            "Animations keep the same speed on 60, 90 and 120 Hz screens"),
         127 to listOf("Tools button by the camera: now a full circle with a ripple when you tap it",
             "It opens the tools even while music is in the island (the music comes back after a few seconds)",
             "Hold the button and drag it to move it — or move it in Settings › Adjust the Features"),

@@ -49,9 +49,9 @@ class Settings(ctx: Context) {
     var animations: Boolean
         get() = p.getBoolean("s_anim", true)
         set(v) = put("s_anim", v)
-    /** slow | normal | fast */
+    /** slow | normal | fast | instant — snappier by default */
     var animSpeed: String
-        get() = p.getString("s_anim_speed", "normal") ?: "normal"
+        get() = p.getString("s_anim_speed", "fast") ?: "fast"
         set(v) = put("s_anim_speed", v)
     /** zoom | fade | slide | none */
     var launchAnim: String
@@ -72,6 +72,7 @@ class Settings(ctx: Context) {
         get() = if (!animations) 0f else when (animSpeed) {
             "slow" -> 1.5f
             "fast" -> 0.6f
+            "instant" -> 0.35f
             else -> 1f
         }
 

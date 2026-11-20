@@ -363,6 +363,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        HighRefresh.apply(this)   // fastest refresh rate the screen has (90/120 Hz…)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         prefs = getSharedPreferences("luncher", MODE_PRIVATE)
         settings = Settings(this)
@@ -978,6 +979,7 @@ class MainActivity : Activity() {
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            HighRefresh.apply(this@MainActivity, this)
             x = dp(settings.islandX + settings.islandAppsDx)
             y = (lastIslandTop - dp(4) + dp(settings.islandAppsDy)).coerceAtLeast(0)
             if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =

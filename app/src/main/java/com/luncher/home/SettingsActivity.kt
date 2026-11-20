@@ -239,6 +239,7 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        HighRefresh.apply(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         s = Settings(this)
         val scroll = ScrollView(this).apply {
@@ -540,7 +541,7 @@ class SettingsActivity : Activity() {
             rebuild()
         }
         if (s.animations) {
-            segment(anim, "Speed", listOf("slow" to "Slow", "normal" to "Normal", "fast" to "Fast"), s.animSpeed) {
+            segment(anim, "Speed", listOf("slow" to "Slow", "normal" to "Normal", "fast" to "Fast", "instant" to "Instant"), s.animSpeed) {
                 s.animSpeed = it
             }
             segment(anim, "Opening Apps", listOf(

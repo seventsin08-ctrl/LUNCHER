@@ -149,6 +149,14 @@ class IslandFace(ctx: Context) : View(ctx) {
     }
     override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
 
+    /** Saves battery and keeps everything else smooth: the orb only animates while you can see it. */
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        if (isVisible) { lastFrame = 0L; if (anim.isPaused) anim.resume() else if (!anim.isStarted && isAttachedToWindow) anim.start() }
+        else if (anim.isRunning) anim.pause()
+    }
+    private var lastFrame = 0L
+
     override fun setVisibility(v: Int) {
         val was = visibility
         super.setVisibility(v)
@@ -157,7 +165,10 @@ class IslandFace(ctx: Context) : View(ctx) {
 
     private fun tick() {
         val now = System.currentTimeMillis()
-        t += 0.016f
+        // Same speed on 60, 90 or 120 Hz screens (it used to run faster on faster screens).
+        val ns = System.nanoTime()
+        t += if (lastFrame == 0L) 0.016f else ((ns - lastFrame) / 1e9f).coerceIn(0.004f, 0.05f)
+        lastFrame = ns
         // Life cycle: sphere for ~2s after appearing, then become the face.
         if (logo == null) morphTarget = if (now - bornAt < 2200) 0f else 1f
         // Every so often it "thinks": melts back into the sphere for a moment.
