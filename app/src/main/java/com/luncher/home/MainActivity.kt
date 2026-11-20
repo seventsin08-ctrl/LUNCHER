@@ -489,7 +489,8 @@ class MainActivity : Activity() {
             if (gameHandled) ballNow!!.onNotification(pkg, title, text, allApps.firstOrNull { it.packageName == pkg }?.icon)
             // You're already in that app: it can see its own messages, so nothing pops up for it.
             // Other apps keep popping up as usual.
-            val inThatApp = settings.gilbertQuietInApp && !isActive && GameState.foreground == pkg
+            val inThatApp = (settings.gilbertQuietInApp && !isActive && GameState.foreground == pkg) ||
+                settings.notifStyle == "original"   // Android's own banners only
             if (!inThatApp && !gameHandled) {
                 if (pkg !in settings.gilbertQuiet) peekApp(pkg)
                 if (Gilbert.shouldPop(this, settings, pkg)) showNotificationInIsland(pkg, title, text)
@@ -855,6 +856,7 @@ class MainActivity : Activity() {
 
     private fun applyStyleGlobals() {
         Glass.glass = settings.glass
+        IconFactory.CORNER = settings.iconCorner / 100f
         // Theme: colours follow the wallpaper (or system / your pick) unless set to Mono.
         ThemeEngine.resolve(this, settings)
         if (ThemeEngine.colorful) {
@@ -1289,9 +1291,9 @@ class MainActivity : Activity() {
         (pager.getChildAt(0) as? RecyclerView)?.overScrollMode = View.OVER_SCROLL_NEVER
         // If the pages turn out narrower/wider than the screen size we guessed, lay the grid out again
         // so every column (including the 4th) fits exactly.
-        pager.addOnLayoutChangeListener { _, l, _, r, _, _, ol, _, or, _ ->
-            if (r - l != or - ol && r - l > 0) pager.post { refreshPages() }
-        }
+        pager.addOnLayoutChangeListener(View.OnLayoutChangeListener { _, l, _, r, _, ol, _, or, _ ->
+            if (r - l != or - ol && r - l > 0) { pager.post { refreshPages() } }
+        })
         content.addView(pager, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
         val pillHolder = FrameLayout(this)
@@ -1415,6 +1417,8 @@ class MainActivity : Activity() {
             page.scaleX = 1f
             page.scaleY = 1f
             page.rotationY = 0f
+            page.rotation = 0f
+            page.translationX = 0f
             page.pivotX = page.width / 2f
             page.pivotY = page.height / 2f
             val p = abs(position).coerceAtMost(1f)
@@ -1433,6 +1437,46 @@ class MainActivity : Activity() {
                     val s = 1f - p * 0.18f
                     page.scaleX = s; page.scaleY = s
                     page.alpha = 1f - p * 0.6f
+                }
+                // Rolls like a wheel around the bottom.
+                "roll" -> {
+                    page.pivotY = page.height * 1.6f
+                    page.rotation = 18f * position.coerceIn(-1f, 1f)
+                }
+                // Flips over like a card around its middle.
+                "flip" -> {
+                    page.cameraDistance = page.width * 20f
+                    page.translationX = -position * page.width
+                    page.rotationY = 180f * position.coerceIn(-1f, 1f)
+                    page.alpha = if (p < 0.5f) 1f else 0f
+                }
+                // The next page slides over the current one like a stack of cards.
+                "card" -> {
+                    if (position > 0f) {
+                        page.translationX = -position * page.width
+                        val s = 1f - p * 0.12f
+                        page.scaleX = s; page.scaleY = s
+                        page.alpha = 1f - p * 0.5f
+                    }
+                }
+                // Pages tilt away in 3D.
+                "tilt" -> {
+                    page.cameraDistance = page.width * 10f
+                    page.rotationY = -25f * position.coerceIn(-1f, 1f)
+                    page.alpha = 1f - p * 0.3f
+                }
+                // Android-style: the old page shrinks back while the new one slides in.
+                "stack" -> {
+                    if (position < 0f) {
+                        page.translationX = -position * page.width * 0.7f
+                        val s = 1f - p * 0.1f
+                        page.scaleX = s; page.scaleY = s
+                        page.alpha = 1f - p * 0.7f
+                    }
+                }
+                "fade" -> {
+                    page.translationX = -position * page.width
+                    page.alpha = 1f - p
                 }
             }
         }
@@ -1723,6 +1767,7 @@ class MainActivity : Activity() {
     }
 
     private fun rowsPerPage(): Int {
+        if (settings.rows in 4..7) return settings.rows
         val m = resources.displayMetrics
         val hDp = m.heightPixels / m.density
         return ((hDp - 230f) / CELL_H).toInt().coerceIn(4, 7)
@@ -2215,7 +2260,7 @@ class MainActivity : Activity() {
     private fun label(text: String): TextView = TextView(this).apply {
         this.text = text
         setTextColor(Color.WHITE)
-        textSize = 11.5f
+        textSize = settings.labelSize / 10f
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         gravity = Gravity.CENTER
@@ -2549,7 +2594,9 @@ class MainActivity : Activity() {
             WidgetType.BATTERY ->
                 widgetFrame(batteryWidget(), "Batteries", { openIntent(Intent(Intent.ACTION_POWER_USAGE_SUMMARY), it) }, null, remove)
             WidgetType.MUSIC ->
-                widgetFrame(musicWidget(), "Now Playing", { musicTapped(it) }, null, remove, pill = settings.musicOblong)
+                widgetFrame(musicWidget(), "Now Playing",
+                    { if (settings.musicStyle.startsWith("vinyl")) vinylTapped(it) else musicTapped(it) }, null, remove,
+                    pill = settings.musicOblong && !settings.musicStyle.startsWith("vinyl"))
             WidgetType.APPWIDGET -> buildAppWidget(w, remove)
             WidgetType.DIGITAL_CLOCK ->
                 widgetFrame(MoreWidgets.digitalClock(this, false), "Digital Clock",
@@ -2821,7 +2868,118 @@ class MainActivity : Activity() {
             setOnTouchListener(pressEffect(this, 0.82f))
         }
 
+    private var vinylSpin: android.animation.ObjectAnimator? = null
+    private var vinylControls: View? = null
+    private val hideVinylControls = Runnable { showVinylControls(false) }
+
+    /** Tap the vinyl player: its buttons slide in (and tuck away again after a few seconds). */
+    private fun showVinylControls(show: Boolean) {
+        val c = vinylControls ?: return
+        mainHandler.removeCallbacks(hideVinylControls)
+        if (show) {
+            c.visibility = View.VISIBLE
+            c.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+            for (i in 0 until ((c as? android.view.ViewGroup)?.childCount ?: 0)) {
+                val b = (c as android.view.ViewGroup).getChildAt(i)
+                b.scaleX = 0.6f; b.scaleY = 0.6f
+                b.postDelayed({ Motion.scaleTo(b, 1f, Motion.BOUNCY) }, i * 50L)
+            }
+            mainHandler.postDelayed(hideVinylControls, 6000)
+        } else {
+            c.animate().alpha(0f).translationY(dp(10).toFloat()).setDuration(200).withEndAction { c.visibility = View.INVISIBLE }.start()
+        }
+    }
+
+    private fun vinylTapped(from: View) {
+        val c = vinylControls
+        if (!hasNotificationAccess() || c == null) { musicTapped(from); return }
+        showVinylControls(c.visibility != View.VISIBLE || c.alpha < 0.5f)
+    }
+
+    /** Record-player style Now Playing: a spinning vinyl with the album art in the middle and a tone arm. */
+    private fun vinylWidget(light: Boolean): View {
+        vinylSpin?.cancel(); vinylSpin = null
+        val fg = if (light) 0xFF1C1C1E.toInt() else Color.WHITE
+        val frame = FrameLayout(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                if (light) intArrayOf(0xFFF2F2F7.toInt(), 0xFFD8D8DE.toInt()) else intArrayOf(0xFF6E6E73.toInt(), 0xFF3A3A3C.toInt())).apply {
+                cornerRadius = dp(22).toFloat() }
+        }
+        val bg = ImageView(this).apply { visibility = View.GONE }
+        frame.addView(bg, FrameLayout.LayoutParams(1, 1))
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(10), dp(12), dp(10))
+        }
+        // The record
+        val rec = FrameLayout(this)
+        val disc = FrameLayout(this).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF111111.toInt()); setStroke(dp(2), 0xFF2A2A2A.toInt()) }
+            elevation = dp(6).toFloat()
+        }
+        val art = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setOval(0, 0, view.width, view.height)
+            }
+            clipToOutline = true
+            setImageResource(R.drawable.ic_music); setColorFilter(0xB3FFFFFF.toInt())
+        }
+        disc.addView(art, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.CENTER))
+        rec.addView(disc, FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER))
+        // Tone arm
+        rec.addView(View(this).apply {
+            background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(if (light) 0xFF8E8E93.toInt() else 0xFFD1D1D6.toInt()) }
+            rotation = 24f; pivotY = 0f; elevation = dp(8).toFloat()
+        }, FrameLayout.LayoutParams(dp(4), dp(62), Gravity.TOP or Gravity.END).apply { topMargin = dp(2); marginEnd = dp(8) })
+        rec.addView(View(this).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (light) 0xFFC7C7CC.toInt() else 0xFF8E8E93.toInt()) }
+            elevation = dp(8).toFloat()
+        }, FrameLayout.LayoutParams(dp(14), dp(14), Gravity.TOP or Gravity.END).apply { marginEnd = dp(3) })
+        body.addView(rec, LinearLayout.LayoutParams(dp(110), dp(104)))
+        vinylSpin = android.animation.ObjectAnimator.ofFloat(disc, View.ROTATION, 0f, 360f).apply {
+            duration = 6000; repeatCount = android.animation.ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
+        }
+        // Title, artist and the buttons
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        val title = TextView(this).apply {
+            setTextColor(fg); textSize = 16f; typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            setOnClickListener { musicTapped(this) }
+        }
+        val artist = TextView(this).apply { setTextColor((fg and 0x00FFFFFF) or 0x99000000.toInt()); textSize = 13f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        val source = TextView(this).apply { setTextColor((fg and 0x00FFFFFF) or 0x80000000.toInt()); textSize = 11f; maxLines = 1 }
+        texts.addView(source); texts.addView(title); texts.addView(artist)
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            alpha = 0f; translationY = dp(10).toFloat(); visibility = View.INVISIBLE
+        }
+        fun ctl(res: Int, onClick: () -> Unit) = ImageView(this).apply {
+            setImageResource(res); scaleType = ImageView.ScaleType.CENTER_INSIDE; setColorFilter(fg)
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor((fg and 0x00FFFFFF) or 0x1F000000) }
+            setOnClickListener { haptic(this, HapticFeedbackConstants.CLOCK_TICK); onClick(); mainHandler.removeCallbacks(hideVinylControls); mainHandler.postDelayed(hideVinylControls, 6000) }
+        }
+        controls.addView(ctl(R.drawable.ic_prev) { mediaController?.transportControls?.skipToPrevious() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS) },
+            LinearLayout.LayoutParams(dp(36), dp(36)))
+        val play = ctl(R.drawable.ic_play) { togglePlay() }
+        controls.addView(play, LinearLayout.LayoutParams(dp(42), dp(42)).apply { marginStart = dp(10); marginEnd = dp(10) })
+        controls.addView(ctl(R.drawable.ic_next) { mediaController?.transportControls?.skipToNext() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) },
+            LinearLayout.LayoutParams(dp(36), dp(36)))
+        texts.addView(controls, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(8) })
+        body.addView(texts, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        frame.addView(body, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        val hint = TextView(this).apply {
+            setTextColor(fg); textSize = 14f; gravity = Gravity.CENTER
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }
+        frame.addView(hint, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        vinylControls = controls
+        musicViews = MusicViews(art, bg, title, artist, source, play, hint, body)
+        updateMusic()
+        return frame
+    }
+
     private fun musicWidget(): View {
+        vinylControls = null; vinylSpin?.cancel(); vinylSpin = null
+        if (settings.musicStyle.startsWith("vinyl")) return vinylWidget(settings.musicStyle == "vinyl_light")
         val frame = FrameLayout(this)
         val bg = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -4750,6 +4908,11 @@ class MainActivity : Activity() {
                 val playing = c.playbackState?.state == PlaybackState.STATE_PLAYING
                 v.play.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
             }
+        }
+        // Vinyl player: the record spins only while music plays.
+        vinylSpin?.let { a ->
+            val playing = mediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+            if (playing) { if (a.isPaused) a.resume() else if (!a.isStarted) a.start() } else if (a.isRunning) a.pause()
         }
     }
 

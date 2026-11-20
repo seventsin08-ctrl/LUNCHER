@@ -57,7 +57,7 @@ class Settings(ctx: Context) {
     var launchAnim: String
         get() = p.getString("s_launch_anim", "zoom") ?: "zoom"
         set(v) = put("s_launch_anim", v)
-    /** depth | flat | cube | zoom */
+    /** depth | flat | cube | zoom | roll | flip | card | tilt | stack | fade */
     var pageEffect: String
         get() = p.getString("s_page_effect", "depth") ?: "depth"
         set(v) = put("s_page_effect", v)
@@ -80,6 +80,28 @@ class Settings(ctx: Context) {
     var swipeDown: String
         get() = p.getString("s_swipe_down", "search") ?: "search"
         set(v) = put("s_swipe_down", v)
+    // ---- Customise: grid, icons, notifications, sidebar
+    /** Home Screen rows: 0 = automatic (fits the screen), otherwise 4..7. */
+    var rows: Int
+        get() = p.getInt("s_rows", 0)
+        set(v) = put("s_rows", v)
+    /** Icon corner roundness, % of the icon (0 = square, 50 = circle). Default 22 like iPhone. */
+    var iconCorner: Int
+        get() = p.getInt("s_icon_corner", 22)
+        set(v) = put("s_icon_corner", v)
+    /** App name text size (sp ×10, 90..150). */
+    var labelSize: Int
+        get() = p.getInt("s_label_size", 115)
+        set(v) = put("s_label_size", v)
+    /** "launcher" (island / side island pop-ups), "original" (Android's own banners only) or "both". */
+    var notifStyle: String
+        get() = p.getString("s_notif_style", "launcher") ?: "launcher"
+        set(v) = put("s_notif_style", v)
+    /** Sidebar apps in 1 or 2 columns. */
+    var sidebarCols: Int
+        get() = p.getInt("s_sidebar_cols", 1)
+        set(v) = put("s_sidebar_cols", v)
+
     // ---- Dock & App Library
     var dockOn: Boolean
         get() = p.getBoolean("s_dock_on", true)
@@ -290,6 +312,10 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_music_keep", false)
         set(v) = put("s_music_keep", v)
     /** Now Playing widget as an oblong (pill / stadium shape) instead of a rounded square. */
+    /** Now Playing widget look: "classic", "vinyl" (dark record player) or "vinyl_light". */
+    var musicStyle: String
+        get() = p.getString("s_music_style", "classic") ?: "classic"
+        set(v) = put("s_music_style", v)
     var musicOblong: Boolean
         get() = p.getBoolean("s_music_oblong", false)
         set(v) = put("s_music_oblong", v)

@@ -27,7 +27,8 @@ import android.os.Build
  */
 object IconFactory {
 
-    const val CORNER = 0.225f
+    /** Icon roundness (fraction of the icon size) — Settings › Icons › Rounded Corners. */
+    @Volatile var CORNER = 0.225f
 
     /** Current style for live icons (clock / calendar) – set by the activity. */
     var style: String = "clear"

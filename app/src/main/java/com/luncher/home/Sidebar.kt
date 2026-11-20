@@ -125,6 +125,9 @@ class Sidebar(
         handle = null; handleLp = null
     }
 
+    /** Panel width: one or two columns of apps. */
+    private fun cardW() = if (settings.sidebarCols >= 2) sp(178) else sp(100)
+
     fun open() {
         if (panelRoot != null) return
         val w = wm ?: return
@@ -161,12 +164,22 @@ class Sidebar(
         val chosen = chosenApps()
         val items = ArrayList<View>()
 
+        val twoCols = settings.sidebarCols >= 2
+        // Two columns (like the phone's own smart sidebar): apps sit side by side in rows.
+        var row: LinearLayout? = null
+        fun put(v: View) {
+            if (!twoCols) { col.addView(v, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT).apply { bottomMargin = sp(10) }); return }
+            val r = row?.takeIf { it.childCount < 2 } ?: LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }.also {
+                row = it; col.addView(it, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = sp(10) })
+            }
+            r.addView(v, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT))
+        }
         for ((i, a) in chosen.withIndex()) {
-            if (i == 2 && chosen.size > 3) col.addView(View(act).apply {
+            if (!twoCols && i == 2 && chosen.size > 3) col.addView(View(act).apply {
                 background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(0x66FFFFFF) }
             }, LinearLayout.LayoutParams(dp(28), dp(3)).apply { setMargins(0, dp(4), 0, dp(12)) })
             val item = appItem(a.label, a) { launch(a); close() }
-            col.addView(item, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT).apply { bottomMargin = sp(10) })
+            put(item)
             items += item
         }
         // Edit: opens the Sidebar page in Settings to add, remove or reorder apps.
@@ -177,7 +190,7 @@ class Sidebar(
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
-        col.addView(edit, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT))
+        put(edit)
         items += edit
         card.addView(scroll, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         val back = TextView(act).apply {
@@ -187,12 +200,12 @@ class Sidebar(
         }
         card.addView(back, LinearLayout.LayoutParams(sp(44), sp(44)).apply { topMargin = dp(8) })
         val screenH = act.resources.displayMetrics.heightPixels
-        root.addView(card, FrameLayout.LayoutParams(sp(100), WRAP_CONTENT, Gravity.CENTER_VERTICAL))
+        root.addView(card, FrameLayout.LayoutParams(cardW(), WRAP_CONTENT, Gravity.CENTER_VERTICAL))
         // Size limit (Settings › Sidebar › Height); below it the panel just hugs the apps.
         val maxCard = (screenH * settings.sidebarHeight / 100f).toInt()
         val chrome = dp(16) + dp(12) + sp(44) + dp(8)
         scroll.maxH = (maxCard - chrome).coerceAtLeast(sp(80))
-        card.measure(View.MeasureSpec.makeMeasureSpec(sp(100), View.MeasureSpec.EXACTLY),
+        card.measure(View.MeasureSpec.makeMeasureSpec(cardW(), View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val cardH = card.measuredHeight.coerceAtMost(maxCard)
         // Pinch the open panel to make it (and its apps) bigger or smaller.
@@ -308,7 +321,7 @@ class Sidebar(
         zoneListener = fit
         OverlayZones.listen(fit)
         if (OverlayZones.islandBottom > 0) { curTop = maxOf(normalTop, OverlayZones.islandBottom + dp(10)).coerceAtMost(normalTop + baseH - sp(80) - chrome); place(curTop) }
-        OverlayZones.setSidebar(sp(100) + dp(20), right)
+        OverlayZones.setSidebar(cardW() + dp(20), right)
         handle?.animate()?.alpha(0f)?.setDuration(120)?.start()
         root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
         // Grows out of the edge like the side island: slides in while stretching from the edge,

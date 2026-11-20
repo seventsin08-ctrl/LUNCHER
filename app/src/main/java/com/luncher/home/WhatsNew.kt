@@ -21,6 +21,15 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        112 to listOf("Adjust the Features (top of Settings): drag the Dynamic Island, Sidebar, Side Island and Game Ball on a live phone preview",
+            "Page transitions: Android, Roll, Flip, Card, Tilt, Fade, Cube, Depth, Zoom",
+            "Layouts: 4×5, 4×6, 4×7, 5×6, 5×7 or Auto",
+            "Icons: rounded-corner slider (square to circle) and app name size",
+            "Featured colour themes: Coastal, Alpine, Trendy, Sunset, Rose, Lavender, Gold, Mint",
+            "Notification Style: Launcher, Original (Android's own) or Both",
+            "Sidebar in 1 or 2 columns",
+            "Music player styles: Classic, Vinyl and Vinyl Light — tap the vinyl player and its buttons slide in",
+            "Fixed: versions 110–111 didn't build"),
         111 to listOf("Moving Gilbert to the top no longer pushes your apps down",
             "Dock: turn it on/off, pick Glass, Dark, Light or Clear, and change roundness and icon size",
             "App Library: turn it on/off, choose Folders or an A–Z list, and rename it (Settings › Home Screen & Widgets)"),

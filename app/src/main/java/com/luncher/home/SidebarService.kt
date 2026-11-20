@@ -84,6 +84,7 @@ class SidebarService : Service() {
 
     private fun loadApps() {
         val s = Settings(this)
+        IconFactory.CORNER = s.iconCorner / 100f
         val px = (s.iconSize * resources.displayMetrics.density).toInt() * 2
         io.execute {
             val list = runCatching { AppLoader.load(this, px, s.iconStyle, s.tint) }.getOrDefault(emptyList())

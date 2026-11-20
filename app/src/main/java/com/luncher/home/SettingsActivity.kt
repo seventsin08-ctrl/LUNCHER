@@ -151,7 +151,11 @@ class SettingsActivity : Activity() {
                 "Turn off to bring everything back as it was"
             else "Turn off Gilbert, the Dynamic Island, Sidebar, Side Island and pop-ups in one go. Your look, icons, widgets and theme stay",
             s.simpleMode) { s.simpleMode = it; SoundFX.play(this, if (it) "close" else "open"); rebuild() }
-        list.addView(simple, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(18) })
+        list.addView(simple, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
+        val adj = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = cardBg() }
+        button(adj, "Adjust the Features…", 0xFF0A84FF.toInt()) { rootFrame?.let { FeatureLayoutEditor.show(this, it, s) { rebuild() } } }
+        info(adj, "Drag the Dynamic Island, Sidebar, Side Island and Game Ball on a live phone preview.")
+        list.addView(adj, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(18) })
         // Like iPhone's "Finish Setting Up": shows until everything the launcher needs is allowed.
         val missing = Setup.items(this).count { !it.allowed(this) }
         if (missing > 0) {
@@ -413,6 +417,15 @@ class SettingsActivity : Activity() {
             "custom" -> "Pick the colour below."
             else -> "Black, white and grey only, like the classic iPhone look."
         })
+        // Featured colours, like the phone's own colour themes.
+        val palettes = listOf("Coastal" to 0xFF0A84FF.toInt(), "Alpine" to 0xFF30D158.toInt(), "Trendy" to 0xFF64D2FF.toInt(),
+            "Sunset" to 0xFFFF9F0A.toInt(), "Rose" to 0xFFFF375F.toInt(), "Lavender" to 0xFFBF5AF2.toInt(),
+            "Gold" to 0xFFFFD60A.toInt(), "Mint" to 0xFF66D4CF.toInt())
+        chips(theme, "Featured Colors", palettes.map { it.first to it.first },
+            palettes.firstOrNull { s.themeSource == "custom" && it.second == s.themeColor }?.first ?: "",
+            dot = { k -> palettes.firstOrNull { it.first == k }?.second }) { k ->
+            s.themeColor = palettes.first { it.first == k }.second; s.themeSource = "custom"; rebuild()
+        }
         if (s.themeSource == "custom") swatches(theme, "Theme Color", s.themeColor) { s.themeColor = it; rebuild() }
         toggle(theme, "Tint Glass, Dock & Widgets", "Blend the theme colour into see-through panels", s.themeSurfaces) {
             s.themeSurfaces = it
@@ -442,9 +455,15 @@ class SettingsActivity : Activity() {
 
         // ---------------- Home Screen
         val home = section("HOME SCREEN")
+        chips(home, "Layout (columns × rows)", listOf("auto" to "Auto", "4x5" to "4×5", "4x6" to "4×6", "4x7" to "4×7",
+            "5x6" to "5×6", "5x7" to "5×7"), if (s.rows == 0) (if (s.columns == 4) "auto" else "${s.columns}x6") else "${s.columns}x${s.rows}") {
+            if (it == "auto") { s.columns = 4; s.rows = 0 }
+            else { val (c, r) = it.split("x").map { n -> n.toInt() }; s.columns = c; s.rows = r }
+        }
         slider(home, "Icon Size", 50, 86, s.iconSize, { "${it}" }) { s.iconSize = it }
+        slider(home, "Rounded Corners", 0, 50, s.iconCorner, { when { it == 22 -> "Default"; it >= 48 -> "Circle"; it <= 4 -> "Square"; else -> "$it%" } }) { s.iconCorner = it }
         toggle(home, "Show App Names", null, s.showLabels) { s.showLabels = it }
-        segment(home, "Columns", listOf("4" to "4", "5" to "5"), s.columns.toString()) { s.columns = it.toInt() }
+        if (s.showLabels) slider(home, "App Name Size", 90, 150, s.labelSize, { if (it == 115) "Default" else "%.1f".format(it / 10f) }) { s.labelSize = it }
         toggle(home, "Notification Badges", null, s.badges) { s.badges = it }
         if (!hasNotificationAccess()) {
             button(home, "Allow Badges & Now Playing…", 0xFF0A84FF.toInt()) {
@@ -491,6 +510,9 @@ class SettingsActivity : Activity() {
 
         // ---------------- Widgets
         val widgets = section("WIDGETS")
+        chips(widgets, "Music Player Style", listOf("classic" to "Classic", "vinyl" to "Vinyl", "vinyl_light" to "Vinyl Light"),
+            s.musicStyle) { s.musicStyle = it }
+        info(widgets, "Vinyl: a spinning record with the album art. Tap the player and its buttons slide in; tap the song name to open the app.")
         toggle(widgets, "Photos", null, s.widgetEnabled("PHOTO")) { s.setWidgetEnabled("PHOTO", it) }
         toggle(widgets, "Clock & Calendar Icons", null, s.widgetEnabled("ICONS")) { s.setWidgetEnabled("ICONS", it) }
         toggle(widgets, "Calendar", null, s.widgetEnabled("CALENDAR")) { s.setWidgetEnabled("CALENDAR", it) }
@@ -520,8 +542,9 @@ class SettingsActivity : Activity() {
             segment(anim, "Opening Apps", listOf(
                 "zoom" to "Zoom", "fade" to "Fade", "slide" to "Slide Up", "none" to "None"
             ), s.launchAnim) { s.launchAnim = it }
-            segment(anim, "Page Swipe", listOf(
-                "depth" to "Depth", "flat" to "Flat", "cube" to "Cube", "zoom" to "Zoom"
+            chips(anim, "Page Swipe Transition", listOf(
+                "depth" to "Depth", "flat" to "Flat", "stack" to "Android", "cube" to "Cube", "roll" to "Roll",
+                "flip" to "Flip", "card" to "Card", "tilt" to "Tilt", "zoom" to "Zoom", "fade" to "Fade"
             ), s.pageEffect) { s.pageEffect = it }
         }
         toggle(anim, "Blur Effects", if (Build.VERSION.SDK_INT >= 31) null else "Needs Android 12 or newer", s.blur) {
@@ -776,6 +799,11 @@ class SettingsActivity : Activity() {
                 "charging, surprised at new messages — and his eyes follow your finger", s.gilbertEmotions) { s.gilbertEmotions = it }
         }
         val gilN = section("GILBERT · NOTIFICATIONS")
+        segment(gilN, "Notification Style", listOf("launcher" to "Launcher", "original" to "Original", "both" to "Both"), s.notifStyle) {
+            s.notifStyle = it
+        }
+        info(gilN, "Launcher: messages pop out of the island / side island in the launcher's style. Original: only Android's own " +
+            "banners (the launcher shows nothing). Both: you get both.")
         toggle(gilN, "Quiet in the App You're Using", "No pop-ups or messages from an app while you have it open — " +
             "other apps still pop up as usual", s.gilbertQuietInApp) { s.gilbertQuietInApp = it }
         toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; Gilbert quietly holds the rest (red bubble) " +
@@ -839,6 +867,9 @@ class SettingsActivity : Activity() {
         toggle(side, "Game Ball", "While gaming, a small movable orb replaces the Sidebar handle (so it never clashes with " +
             "the phone's own game panel). Tap it to choose who may pop up during games, see missed messages and open " +
             "your Sidebar apps in a small window", s.gameBall) { s.gameBall = it; SidebarService.sync(this) }
+        segment(side, "Sidebar Columns", listOf("1" to "1 Column", "2" to "2 Columns"), s.sidebarCols.toString()) {
+            s.sidebarCols = it.toInt(); SidebarService.sync(this)
+        }
         toggle(side, "Sidebar", "A handle on the edge of the screen: swipe it in for your favourite apps", s.sidebarOn) {
             s.sidebarOn = it; rebuild()
         }
@@ -1209,6 +1240,41 @@ class SettingsActivity : Activity() {
         row.addView(sw)
         row.setOnClickListener { sw.toggle() }
         addRow(card, row)
+    }
+
+    /** Scrollable row of choices (for lists too long for a segmented control). */
+    private fun chips(card: LinearLayout, label: String, options: List<Pair<String, String>>, selected: String,
+                      dot: ((String) -> Int?)? = null, onChange: (String) -> Unit) {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(11), dp(16), dp(12)) }
+        col.addView(title(label))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        var current = selected
+        val cells = ArrayList<TextView>()
+        fun paint() = options.forEachIndexed { i, (k, _) ->
+            val on = k == current
+            cells[i].background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat(); setColor(if (on) 0xFF636366.toInt() else 0xFF2C2C2E.toInt())
+                if (on) setStroke(maxOf(1, dp(2)), 0xFF0A84FF.toInt())
+            }
+        }
+        for ((k, name) in options) {
+            val tv = TextView(this).apply {
+                text = name; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                dot?.invoke(k)?.let { c ->
+                    setCompoundDrawablesRelativeWithIntrinsicBounds(GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL; setColor(c); setSize(dp(12), dp(12)) }, null, null, null)
+                    compoundDrawablePadding = dp(7)
+                }
+                setOnClickListener { if (current != k) { current = k; paint(); SoundFX.play(this@SettingsActivity, "tick"); onChange(k) } }
+            }
+            cells += tv
+            row.addView(tv, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginEnd = dp(8) })
+        }
+        paint()
+        col.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(row) },
+            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
+        addRow(card, col)
     }
 
     private fun segment(
