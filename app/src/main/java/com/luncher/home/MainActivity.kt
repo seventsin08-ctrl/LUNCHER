@@ -2960,6 +2960,8 @@ class MainActivity : Activity() {
     private fun updateLyricsLine() {
         val tv = playerLyrics ?: return
         if (!Lyrics.enabled) return
+        // Showing the last song (music app closed): no live position, so no lyrics until you press play.
+        if (mediaController?.metadata == null) { tv.clear(""); return }
         val v = musicViews ?: return
         val title = v.title.text.toString(); val artist = v.artist.text.toString()
         if (title.isBlank() || v.body.visibility != View.VISIBLE) { tv.clear(); return }
@@ -5030,6 +5032,7 @@ class MainActivity : Activity() {
                 v.title.text = prefs.getString("last_song_title", "")
                 v.artist.text = prefs.getString("last_song_artist", "")
                 val art = lastSongArt()
+                applyPlayerTone(art)
                 if (art != null) { v.art.clearColorFilter(); v.art.setImageBitmap(art); v.bg.setImageBitmap(art) }
                 else { v.art.setImageResource(R.drawable.ic_music); v.art.setColorFilter(0xB3FFFFFF.toInt()); v.bg.setImageDrawable(null) }
                 val pkg = prefs.getString("last_song_pkg", null)

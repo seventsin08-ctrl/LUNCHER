@@ -310,7 +310,7 @@ class Settings(ctx: Context) {
 
     /** Now Playing widget keeps showing the last song after the music stops (and after a restart). */
     var musicKeepLast: Boolean
-        get() = p.getBoolean("s_music_keep", false)
+        get() = p.getBoolean("s_music_keep", true)
         set(v) = put("s_music_keep", v)
     /** Now Playing widget as an oblong (pill / stadium shape) instead of a rounded square. */
     /** Now Playing widget look: "classic", "vinyl" (dark record player) or "vinyl_light". */
