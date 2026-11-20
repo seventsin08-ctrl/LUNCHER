@@ -187,7 +187,7 @@ class DynamicIsland(
     }
 
     // ---------------------------------------------------------------- Gilbert talks (speech bubble)
-    private val bubble by lazy {
+    private val bubble: TextView by lazy {
         TextView(act).apply {
             setTextColor(Color.WHITE); textSize = 13.5f; maxWidth = dp(270)
             setPadding(dp(14), dp(9), dp(14), dp(10))
@@ -197,7 +197,7 @@ class DynamicIsland(
             setOnClickListener { hideBubble.run() }
         }.also { root.addView(it, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
     }
-    private val hideBubble = Runnable {
+    private val hideBubble: Runnable = Runnable {
         if (bubble.visibility == View.VISIBLE)
             bubble.animate().alpha(0f).scaleX(0.85f).scaleY(0.85f).setDuration(180).withEndAction { bubble.visibility = View.GONE }.start()
     }
@@ -223,7 +223,7 @@ class DynamicIsland(
     // ---------------------------------------------------------------- held apps beside Gilbert
     /** Tap an app logo beside Gilbert: see what that app sent. */
     var onHeldTap: ((String) -> Unit)? = null
-    private val heldRow by lazy {
+    private val heldRow: LinearLayout by lazy {
         LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
             .also { root.addView(it, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
     }
