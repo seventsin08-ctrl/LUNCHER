@@ -976,8 +976,8 @@ class MainActivity : Activity() {
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            x = dp(settings.islandX)
-            y = (lastIslandTop - dp(4)).coerceAtLeast(0)
+            x = dp(settings.islandX + settings.islandAppsDx)
+            y = (lastIslandTop - dp(4) + dp(settings.islandAppsDy)).coerceAtLeast(0)
             if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode =
                 android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
@@ -993,6 +993,23 @@ class MainActivity : Activity() {
         holder.setOnTouchListener { _, e ->
             if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) ov.collapse()
             false
+        }
+        // Hold the island over an app and drag it anywhere so it doesn't cover the app's buttons.
+        var startX = 0; var startY = 0; var started = false
+        ov.onWindowDrag = { dx, dy, done ->
+            val l = overlayLp
+            if (l != null) {
+                if (!started) { startX = l.x; startY = l.y; started = true }
+                val m = resources.displayMetrics
+                l.x = (startX + dx.toInt()).coerceIn(-m.widthPixels / 2 + dp(40), m.widthPixels / 2 - dp(40))
+                l.y = (startY + dy.toInt()).coerceIn(0, m.heightPixels - dp(80))
+                runCatching { overlayWm?.updateViewLayout(overlayRoot, l) }
+                if (done) {
+                    started = false
+                    settings.islandAppsDx = (l.x / m.density).roundToInt() - settings.islandX
+                    settings.islandAppsDy = ((l.y - (lastIslandTop - dp(4)).coerceAtLeast(0)) / m.density).roundToInt()
+                }
+            }
         }
         if (runCatching { wm.addView(holder, lp) }.isFailure) return
         overlayIsland = ov; overlayRoot = holder; overlayWm = wm; overlayLp = lp

@@ -315,7 +315,14 @@ class DynamicIsland(
             }
             override fun onLongPress(e: MotionEvent) {
                 buzz()
-                if (expanded || overlayMode) { collapse(); onVolume(); return }
+                if (expanded) { collapse(); onVolume(); return }
+                // Over other apps: hold and drag to move the island out of the way (the whole window moves).
+                if (overlayMode && onWindowDrag != null) {
+                    windowDragging = true
+                    Motion.scaleTo(pill, sizeScale * 1.08f, Motion.SNAPPY)
+                    return
+                }
+                if (overlayMode) { collapse(); onVolume(); return }
                 // Long-press and drag to move the island; let go without moving for volume.
                 dragging = true
                 Motion.scaleTo(pill, sizeScale * 1.12f, Motion.SNAPPY)
@@ -339,7 +346,7 @@ class DynamicIsland(
         pill.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.pivotX = v.width / 2f; v.pivotY = 0f }
         pill.setOnTouchListener { _, e ->
             if (e.actionMasked == MotionEvent.ACTION_DOWN) { downRawX = e.rawX; downRawY = e.rawY }
-            if (dragging) drag(e) else detector.onTouchEvent(e)
+            if (windowDragging) windowDrag(e) else if (dragging) drag(e) else detector.onTouchEvent(e)
             true
         }
     }
@@ -351,6 +358,22 @@ class DynamicIsland(
         pill.getLocationOnScreen(loc)
         return rawX >= loc[0] - dp(10) && rawX <= loc[0] + pill.width + dp(10) &&
             rawY >= loc[1] - dp(10) && rawY <= loc[1] + pill.height + dp(14)
+    }
+
+    /** Over other apps: moves the island's own window (dx, dy since the press; done = let go). */
+    var onWindowDrag: ((Float, Float, Boolean) -> Unit)? = null
+    private var windowDragging = false
+
+    private fun windowDrag(e: MotionEvent) {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> onWindowDrag?.invoke(e.rawX - downRawX, e.rawY - downRawY, false)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                windowDragging = false
+                Motion.scaleTo(pill, sizeScale, Motion.BOUNCY)
+                buzz()
+                onWindowDrag?.invoke(e.rawX - downRawX, e.rawY - downRawY, true)
+            }
+        }
     }
 
     private fun drag(e: MotionEvent) {

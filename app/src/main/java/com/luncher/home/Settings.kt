@@ -552,6 +552,13 @@ class Settings(ctx: Context) {
     var islandPlacement: String
         get() = p.getString("s_isl_place", "below") ?: "below"
         set(v) = put("s_isl_place", v)
+    /** Where you dragged the island over other apps (dp from its normal spot). */
+    var islandAppsDx: Int
+        get() = p.getInt("s_isl_apps_dx", 0)
+        set(v) { p.edit().putInt("s_isl_apps_dx", v).apply() }
+    var islandAppsDy: Int
+        get() = p.getInt("s_isl_apps_dy", 0)
+        set(v) { p.edit().putInt("s_isl_apps_dy", v).apply() }
     /** Extra nudge up (-) or down (+) in dp. */
     var islandNudge: Int
         get() = p.getInt("s_isl_nudge", 0)
