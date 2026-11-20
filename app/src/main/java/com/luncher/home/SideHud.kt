@@ -692,7 +692,11 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         val root = android.widget.LinearLayout(ctx).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(dp(12), dp(6), dp(12), dp(10))
-            background = cardBackground(dp(20).toFloat())
+            // Joined to the top of the chat card: round on top, nearly square where it meets the card.
+            background = cardBackground(dp(20).toFloat()).apply {
+                val r = dp(20).toFloat(); val b = dp(6).toFloat()
+                cornerRadii = floatArrayOf(r, r, r, r, b, b, b, b)
+            }
             elevation = dp(10).toFloat()
         }
         val head = android.widget.LinearLayout(ctx).apply {
@@ -804,7 +808,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         l.gravity = c.lp.gravity
         l.width = c.lp.width
         l.x = c.lp.x + p.getInt("clip_dx", 0)
-        l.y = (c.lp.y - h - dp(8) + p.getInt("clip_dy", 0)).coerceAtLeast(dp(24))
+        l.y = (c.lp.y - h - dp(2) + p.getInt("clip_dy", 0)).coerceAtLeast(dp(24))
         runCatching { wm?.updateViewLayout(panel, l) }
     }
 

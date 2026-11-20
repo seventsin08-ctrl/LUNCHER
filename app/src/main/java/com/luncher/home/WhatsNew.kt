@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        145 to listOf("Do Not Disturb: messages from your chat apps still show while it's on (Settings › Gilbert › Always Show Messages)",
+            "The clipboard strip now sits joined to the top of the chat card, like one piece",
+            "What's New shows every version: newest first, with ⬆ new/upgraded, 🔧 fixed and ⬇ removed/changed marks"),
         144 to listOf("Everything from 142–143 (those builds didn't finish): learning, search, chat anywhere, messages on silent; his replies type out word by word"),
         143 to listOf("Chat with Gilbert from anywhere: tap Gilbert over any app, use the Gilbert button at the top of the Sidebar, or add the “Gilbert” Quick Settings tile",
             "Messages from every chat app now always pop up — even when the phone is on silent, vibrate or Calm Mode (Settings › Gilbert › Always Show Messages)"),
@@ -170,13 +173,27 @@ object WhatsNew {
     )
 
     /** Notes for every version after [from] up to [to] (newest first). */
+    /** ⬆ new/upgraded, 🔧 fixed, ⬇ removed/changed back — guessed from each note's wording. */
+    fun mark(line: String): String {
+        val l = line.lowercase()
+        return when {
+            l.startsWith("fix") || l.contains("fixed") || l.contains("no longer") && l.contains("crash") -> "🔧"
+            l.contains("removed") || l.contains("reverted") || l.contains("back to") || l.contains("turned off") ||
+                l.contains("no longer") || l.contains("hidden") || l.startsWith("off by default") -> "⬇"
+            else -> "⬆"
+        }
+    }
+
     fun between(from: Int, to: Int): List<Pair<Int, List<String>>> =
         notes.entries.filter { it.key in (from + 1)..to }.sortedByDescending { it.key }.map { it.key to it.value }
 
     /** The card: "What's New in Apple Launcher N" with each version's changes, and Continue. */
     fun show(act: Activity, root: FrameLayout, from: Int, to: Int, onDone: (() -> Unit)? = null) {
         fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
-        val items = between(from, to).ifEmpty { between(to - 1, to) }.ifEmpty { listOf(to to listOf("Improvements and fixes")) }
+        // Every version, newest first (what's new in this update is highlighted at the top).
+        val fresh = between(from, to).ifEmpty { between(to - 1, to) }.map { it.first }.toSet()
+        val items = notes.entries.sortedByDescending { it.key }.map { it.key to it.value }
+            .ifEmpty { listOf(to to listOf("Improvements and fixes")) }
         val layer = FrameLayout(act).apply {
             setBackgroundColor(Color.argb(150, 0, 0, 0)); isClickable = true
         }
@@ -196,15 +213,29 @@ object WhatsNew {
             text = "Apple Launcher $to"; textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(0, dp(2), 0, dp(14))
         })
         val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        val accent = ThemeEngine.accent.takeIf { ThemeEngine.colorful } ?: 0xFF0A84FF.toInt()
+        // Legend: what each mark means.
+        list.addView(TextView(act).apply {
+            text = "⬆ new / upgraded    🔧 fixed    ⬇ removed / changed back"; textSize = 12f; setTextColor(0x99FFFFFF.toInt())
+            setPadding(0, 0, 0, dp(4))
+        })
+        var shownEarlier = false
         for ((ver, lines) in items) {
+            if (ver !in fresh && !shownEarlier) {
+                shownEarlier = true
+                list.addView(TextView(act).apply {
+                    text = "EARLIER VERSIONS"; textSize = 12f; setTextColor(0x80FFFFFF.toInt()); letterSpacing = 0.1f
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(0, dp(18), 0, dp(2))
+                })
+            }
             list.addView(TextView(act).apply {
-                text = "VERSION $ver"; textSize = 12f; setTextColor(ThemeEngine.accent.takeIf { ThemeEngine.colorful } ?: 0xFF0A84FF.toInt())
+                text = if (ver in fresh) "VERSION $ver  ·  NEW" else "VERSION $ver"; textSize = 12f; setTextColor(if (ver in fresh) accent else 0xB3FFFFFF.toInt())
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); letterSpacing = 0.08f
                 setPadding(0, dp(10), 0, dp(6))
             })
             for (line in lines) list.addView(TextView(act).apply {
-                text = "•  $line"; textSize = 15f; setTextColor(0xE6FFFFFF.toInt()); setLineSpacing(0f, 1.15f)
-                setPadding(0, dp(3), 0, dp(3))
+                text = "${mark(line)}  $line"; textSize = 15f; setTextColor(if (ver in fresh) 0xF2FFFFFF.toInt() else 0xB3FFFFFF.toInt())
+                setLineSpacing(0f, 1.15f); setPadding(0, dp(3), 0, dp(3))
             })
         }
         val scroll = object : ScrollView(act) {

@@ -6115,7 +6115,13 @@ class MainActivity : Activity() {
         if (!::island.isInitialized) return
         if (settings.gilbertQuietInApp && !isActive && GameState.foreground == pkg) return
         val f = focusId
-        if (f != null && Focus.silences(this, f)) return
+        // Messages still show during Do Not Disturb / Focus (Settings › Gilbert › Always Show Messages).
+        val isMessage = NotificationService.lastChat[pkg] != null && title.isNotBlank()
+        val dnd = runCatching { getSystemService(android.app.NotificationManager::class.java).currentInterruptionFilter }.getOrDefault(1) > 1
+        if (!(isMessage && settings.alwaysShowMessages)) {
+            if (f != null && Focus.silences(this, f)) return
+            if (dnd && !settings.alwaysShowMessages) return
+        }
         if (mediaController?.packageName == pkg) return
         val now = System.currentTimeMillis()
         if (now - (lastIslandNote[pkg] ?: 0L) < 4000L) return
