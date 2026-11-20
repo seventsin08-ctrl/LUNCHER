@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        142 to listOf("Gilbert learns about you: say “remember that…”, or just talk (“I'm a BSIT student”, “I love NF”) — he remembers and uses it",
+            "“search exam” / “find Jia” looks through everything he's seen; “search the web for …” opens a web search; “forget …” removes a fact",
+            "Faster replies: his words now appear as he thinks, and his brain starts answering sooner"),
         141 to listOf("You can now use heavy brains (like the 1.99 GB “f32” file) — Gilbert warns you first and stays crash-safe"),
         140 to listOf("Gilbert's brain is crash-safe: too-heavy files (like the 2 GB “f32” ones) are refused, free memory and storage are checked first, your old brain is kept until the new one is fully copied, and a brain that ever crashes is switched off automatically"),
         139 to listOf("Gilbert talks like a professional personal assistant who's also your best friend — clear, helpful and warm",

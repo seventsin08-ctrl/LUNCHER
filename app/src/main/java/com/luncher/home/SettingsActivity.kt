@@ -827,6 +827,11 @@ class SettingsActivity : Activity() {
                 }
             } else button(gilB, "Remove Brain", 0xFFFF453A.toInt()) { GilbertBrain.remove(this); rebuild() }
             info(gilB, "What Gilbert knows about you:\n" + GilbertMemory.profile(this))
+            val facts = GilbertMemory.facts(this)
+            if (facts.isNotEmpty()) {
+                info(gilB, "Things you told him (tap to forget):")
+                for (f in facts.take(20)) button(gilB, "✕  $f", 0xFFFF9F0A.toInt()) { GilbertMemory.removeFact(this, f); rebuild() }
+            } else info(gilB, "Teach him: in the chat say “remember that my exam is Friday”, or just talk — “I'm a BSIT student”, “I love NF”.")
             button(gilB, "Forget Everything", 0xFFFF453A.toInt()) { GilbertMemory.forget(this); rebuild() }
         }
         val gilN = section("GILBERT · NOTIFICATIONS")

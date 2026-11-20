@@ -27,7 +27,8 @@ object GilbertChat {
     /** Questions about facts are answered instantly from memory (fast and always correct). */
     fun isFactQuestion(q: String): Boolean {
         val t = q.lowercase()
-        return listOf("report", "brief", "summary", "summar", "rundown", "time", "date", "day is", "miss", "recap", "notif", "message", "mention", "song", "music", "listen",
+        if (t.startsWith("search") || t.startsWith("find ") || t.startsWith("look for") || t.startsWith("remember") || t.startsWith("forget ")) return true
+        return listOf("what do you know", "report", "brief", "summary", "summar", "rundown", "time", "date", "day is", "miss", "recap", "notif", "message", "mention", "song", "music", "listen",
             "artist", "app", "who am i", "about me", "know me", "battery", "storage", "temperature", "who texted", "talk to").any { t.contains(it) }
     }
 
@@ -35,6 +36,20 @@ object GilbertChat {
         val t = q.lowercase()
         fun has(vararg w: String) = w.any { t.contains(it) }
         return when {
+            t.startsWith("search the web") || t.startsWith("google ") -> {
+                val q2 = q.substringAfter(" ").removePrefix("the web for").removePrefix("web for").trim()
+                runCatching { act.startActivity(android.content.Intent(android.content.Intent.ACTION_WEB_SEARCH)
+                    .putExtra(android.app.SearchManager.QUERY, q2).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                "Opening a web search for “$q2” 🔎"
+            }
+            t.startsWith("search") || t.startsWith("find ") || t.startsWith("look for") ->
+                GilbertMemory.search(act, q.replaceFirst(Regex("^(search( for)?|find|look for)\\s*", RegexOption.IGNORE_CASE), ""))
+            t.startsWith("remember") -> GilbertMemory.learnFrom(act, q)?.let { "Got it — I'll remember: $it 📝" } ?: "Tell me what to remember, like “remember that my exam is Friday”."
+            t.startsWith("forget ") -> { val k = q.substringAfter(" ").lowercase()
+                val gone = GilbertMemory.facts(act).filter { it.lowercase().contains(k) }
+                gone.forEach { GilbertMemory.removeFact(act, it) }
+                if (gone.isEmpty()) "I don't have anything about “$k”." else "Forgotten ✓ (${gone.size})" }
+            has("what do you know") -> GilbertMemory.profile(act)
             has("report", "brief", "summary", "summar", "rundown") -> GilbertMemory.report(act)
             has("time", "date", "day is") -> "It's " + java.text.SimpleDateFormat("h:mm a, EEEE MMM d", java.util.Locale.getDefault()).format(java.util.Date()) + " ⏰"
             has("miss", "recap", "notif", "message", "what happened", "update") -> GilbertMemory.recap(act)
@@ -136,13 +151,19 @@ object GilbertChat {
             if (q.isEmpty() || GilbertBrain.busy) return
             input.setText(""); SoundFX.play(act, "tick")
             history += true to q; bubble(true, q)
+            // Learn from what you say ("I'm a BSIT student", "I love NF"…) — quietly, all on the phone.
+            if (!q.lowercase().startsWith("remember")) GilbertMemory.learnFrom(act, q)
             if (GilbertBrain.installed(act) && !isFactQuestion(q)) {
                 val thinking = bubble(false, "•")
                 // Typing dots while he thinks.
                 val dots = object : Runnable { var n = 0
                     override fun run() { if (thinking.text.length <= 3 && thinking.text.all { it == '•' }) { n = n % 3 + 1; thinking.text = "•".repeat(n); thinking.postDelayed(this, 350) } } }
                 thinking.post(dots)
-                GilbertBrain.ask(act, history.dropLast(1), q) { ans ->
+                GilbertBrain.ask(act, history.dropLast(1), q, partial = { soFar ->
+                    // Words appear as he thinks.
+                    thinking.text = soFar
+                    scroll.post { scroll.smoothScrollTo(0, list.height) }
+                }) { ans ->
                     val a = ans ?: (ruleAnswer(act, s, q) + (GilbertBrain.lastError?.let { "\n\n⚠️ $it" } ?: ""))
                     history += false to a
                     thinking.text = a; SoundFX.play(act, "chirp")

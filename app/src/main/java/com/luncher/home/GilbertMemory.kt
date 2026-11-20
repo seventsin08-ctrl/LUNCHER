@@ -55,6 +55,56 @@ object GilbertMemory {
         bump(ctx, "people", n)
     }
 
+    // ---- facts you tell him ("remember that…", "I'm a…", "I love…")
+    fun facts(ctx: Context): List<String> {
+        val a = runCatching { org.json.JSONArray(ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString("facts", "[]")) }
+            .getOrDefault(org.json.JSONArray())
+        return (0 until a.length()).map { a.getString(it) }
+    }
+    fun addFact(ctx: Context, fact: String) {
+        val f = fact.trim().trimEnd('.', '!').replaceFirstChar { it.uppercase() }
+        if (f.length < 4) return
+        val list = facts(ctx).filterNot { it.equals(f, true) }.toMutableList()
+        list.add(0, f)
+        val a = org.json.JSONArray(); list.take(60).forEach { a.put(it) }
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString("facts", a.toString()).apply()
+    }
+    fun removeFact(ctx: Context, fact: String) {
+        val a = org.json.JSONArray(); facts(ctx).filter { it != fact }.forEach { a.put(it) }
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString("facts", a.toString()).apply()
+    }
+
+    /** Learn from what you say: returns what he learned (or null). */
+    fun learnFrom(ctx: Context, said: String): String? {
+        val t = said.trim()
+        val patterns = listOf(
+            Regex("^(?:please )?remember(?: that)? (.+)$", RegexOption.IGNORE_CASE) to { m: MatchResult -> m.groupValues[1] },
+            Regex("\\bmy name is ([\\p{L} .'-]{2,30})", RegexOption.IGNORE_CASE) to { m: MatchResult -> "Your name is ${m.groupValues[1].trim()}" },
+            Regex("\\bi(?:'m| am) (?:a|an) ([^.!?]{3,60})", RegexOption.IGNORE_CASE) to { m: MatchResult -> "You're a ${m.groupValues[1].trim()}" },
+            Regex("\\bi (?:really )?(love|like|hate|enjoy) ([^.!?]{2,60})", RegexOption.IGNORE_CASE) to { m: MatchResult -> "You ${m.groupValues[1].lowercase()} ${m.groupValues[2].trim()}" },
+            Regex("\\bmy (favou?rite [^.!?]{2,30}) is ([^.!?]{2,40})", RegexOption.IGNORE_CASE) to { m: MatchResult -> "Your ${m.groupValues[1]} is ${m.groupValues[2].trim()}" },
+            Regex("\\bmy (birthday|exam|deadline|class|school|course) (?:is|are) ([^.!?]{2,60})", RegexOption.IGNORE_CASE) to { m: MatchResult -> "Your ${m.groupValues[1]} is ${m.groupValues[2].trim()}" },
+        )
+        for ((re, fmt) in patterns) re.find(t)?.let { m ->
+            val f = fmt(m).replace(Regex("\\bmy\\b", RegexOption.IGNORE_CASE), "your").replace(Regex("\\bI\\b"), "you")
+            addFact(ctx, f); return f
+        }
+        return null
+    }
+
+    /** Search everything he's seen (notes, mentions, facts, songs) for a word. */
+    fun search(ctx: Context, q: String): String {
+        val k = q.trim().lowercase()
+        if (k.length < 2) return "What should I look for?"
+        val hits = ArrayList<String>()
+        facts(ctx).filter { it.lowercase().contains(k) }.take(3).forEach { hits += "• (you told me) $it" }
+        Gilbert.notes(ctx).filter { (it.title + " " + it.text).lowercase().contains(k) }.take(5)
+            .forEach { hits += "• ${it.title}: ${it.text.take(70)}" }
+        topSongs(ctx, 50).filter { it.first.lowercase().contains(k) }.take(2).forEach { hits += "• Song: ${it.first} (${it.second}×)" }
+        return if (hits.isEmpty()) "I couldn't find “$q” in anything I've seen. Want me to search the web?"
+            else "Here's what I found for “$q”:\n" + hits.joinToString("\n")
+    }
+
     // ---- reading
     fun topSongs(ctx: Context, n: Int = 5) = top(obj(ctx, "songs"), n)
     fun topArtists(ctx: Context, n: Int = 5) = top(obj(ctx, "artists"), n).filter { it.first.isNotBlank() }
@@ -70,6 +120,7 @@ object GilbertMemory {
     fun profile(ctx: Context): String {
         val sb = StringBuilder()
         GilbertTalk.ownerName(ctx)?.let { sb.append("Name: $it\n") }
+        facts(ctx).take(6).takeIf { it.isNotEmpty() }?.let { sb.append("You told me: ${it.joinToString("; ")}\n") }
         topArtists(ctx, 5).takeIf { it.isNotEmpty() }?.let { sb.append("Favourite artists: ${it.joinToString { a -> a.first }}\n") }
         topSongs(ctx, 3).takeIf { it.isNotEmpty() }?.let { sb.append("Most played: ${it.joinToString { s -> "${s.first} (${s.second}×)" }}\n") }
         topApps(ctx, 5).takeIf { it.isNotEmpty() }?.let { sb.append("Most used apps: ${it.joinToString { a -> a.first }}\n") }
