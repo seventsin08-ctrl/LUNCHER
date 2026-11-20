@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        144 to listOf("Everything from 142–143 (those builds didn't finish): learning, search, chat anywhere, messages on silent; his replies type out word by word"),
         143 to listOf("Chat with Gilbert from anywhere: tap Gilbert over any app, use the Gilbert button at the top of the Sidebar, or add the “Gilbert” Quick Settings tile",
             "Messages from every chat app now always pop up — even when the phone is on silent, vibrate or Calm Mode (Settings › Gilbert › Always Show Messages)"),
         142 to listOf("Gilbert learns about you: say “remember that…”, or just talk (“I'm a BSIT student”, “I love NF”) — he remembers and uses it",

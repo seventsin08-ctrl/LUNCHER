@@ -123,7 +123,6 @@ object GilbertBrain {
             LlmInference.createFromOptions(ctx, LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(file(ctx).absolutePath)
                 .setMaxTokens(640)   // smaller = starts answering sooner
-                .setResultListener { partial, done -> streamTo?.invoke(partial ?: "", done) }
                 .build())
         }.onFailure { lastError = "The brain couldn't start (${it.message?.take(60) ?: "unknown"}). Try the q8 .task file." }.getOrNull()
         p.edit().putBoolean("loading", false).apply()
@@ -138,33 +137,30 @@ object GilbertBrain {
         exec.execute { load(app) }
     }
 
-    @Volatile private var streamTo: ((String, Boolean) -> Unit)? = null
-
     /**
-     * Ask Gilbert something. Words arrive as he thinks ([partial] gets the text so far, on the main
-     * thread); [done] gets his final answer (or null if the brain couldn't run).
+     * Ask Gilbert something. [partial] gets the answer typed out word by word (on the main thread);
+     * [done] gets his final answer (or null if the brain couldn't run).
      */
     fun ask(ctx: Context, history: List<Pair<Boolean, String>>, question: String,
             partial: ((String) -> Unit)? = null, done: (String?) -> Unit) {
         busy = true
         val app = ctx.applicationContext
         exec.execute {
-            val m = runCatching { load(app) }.getOrNull()
-            if (m == null) { main.post { busy = false; done(null) }; return@execute }
-            val sb = StringBuilder()
-            val finished = java.util.concurrent.CountDownLatch(1)
-            streamTo = { piece, isDone ->
-                sb.append(piece)
-                val text = clean(sb.toString())
-                if (text.isNotBlank()) main.post { partial?.invoke(text) }
-                if (isDone) finished.countDown()
-            }
-            val ok = runCatching { m.generateResponseAsync(prompt(app, history, question)) }.isSuccess
-            if (ok) finished.await(90, java.util.concurrent.TimeUnit.SECONDS)
-            streamTo = null
-            val answer = if (ok) clean(sb.toString())
-                else runCatching { clean(m.generateResponse(prompt(app, history, question))) }.getOrNull()
-            main.post { busy = false; done(answer?.takeIf { it.isNotBlank() }) }
+            val answer = runCatching {
+                val m = load(app) ?: return@runCatching null
+                clean(m.generateResponse(prompt(app, history, question)))
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+            if (answer == null || partial == null) { main.post { busy = false; done(answer) }; return@execute }
+            // Type it out quickly, word by word, like he's talking.
+            val words = answer.split(" ")
+            main.post(object : Runnable {
+                var n = 0
+                override fun run() {
+                    n++
+                    partial(words.take(n).joinToString(" "))
+                    if (n < words.size) main.postDelayed(this, 35) else { busy = false; done(answer) }
+                }
+            })
         }
     }
 
