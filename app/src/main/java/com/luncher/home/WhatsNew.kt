@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        107 to listOf("Quiet in the app you're using: no pop-ups or chat windows from an app while it's open on screen — other apps still pop up (Settings › Gilbert)"),
         106 to listOf("Gilbert's card opens only once — tap Gilbert again, press Back or Home to close it"),
         105 to listOf("Gilbert's card is redesigned: brushed graphite tiles with status chips (Ready, Holding, Mentions)",
             "Striped meters for battery, calm, temperature, storage and memory that fill in as the card opens",

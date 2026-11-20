@@ -481,8 +481,13 @@ class MainActivity : Activity() {
             // pop up now (priority apps / within the limit) or waits quietly with him.
             Gilbert.record(this, pkg)
             Gilbert.note(this, pkg, title, text)
-            if (pkg !in settings.gilbertQuiet) peekApp(pkg)
-            if (Gilbert.shouldPop(this, settings, pkg)) showNotificationInIsland(pkg, title, text)
+            // You're already in that app: it can see its own messages, so nothing pops up for it.
+            // Other apps keep popping up as usual.
+            val inThatApp = settings.gilbertQuietInApp && !isActive && GameState.foreground == pkg
+            if (!inThatApp) {
+                if (pkg !in settings.gilbertQuiet) peekApp(pkg)
+                if (Gilbert.shouldPop(this, settings, pkg)) showNotificationInIsland(pkg, title, text)
+            }
         }
         NotificationService.onOngoing = { refreshOngoing() }
         startPrivacyWatch()
@@ -5692,6 +5697,7 @@ class MainActivity : Activity() {
     private val lastIslandNote = HashMap<String, Long>()
     private fun showNotificationInIsland(pkg: String, title: String, text: String) {
         if (!::island.isInitialized) return
+        if (settings.gilbertQuietInApp && !isActive && GameState.foreground == pkg) return
         val f = focusId
         if (f != null && Focus.silences(this, f)) return
         if (mediaController?.packageName == pkg) return

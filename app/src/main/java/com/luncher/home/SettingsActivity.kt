@@ -748,6 +748,8 @@ class SettingsActivity : Activity() {
                 "charging, surprised at new messages — and his eyes follow your finger", s.gilbertEmotions) { s.gilbertEmotions = it }
         }
         val gilN = section("GILBERT · NOTIFICATIONS")
+        toggle(gilN, "Quiet in the App You're Using", "No pop-ups or messages from an app while you have it open — " +
+            "other apps still pop up as usual", s.gilbertQuietInApp) { s.gilbertQuietInApp = it }
         toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; Gilbert quietly holds the rest (red bubble) " +
             "until you tap him", s.gilbertCalm) { s.gilbertCalm = it }
         slider(gilN, "Pop-ups per Minute (others)", 1, 10, s.gilbertMaxPerMin, { "$it" }) { s.gilbertMaxPerMin = it }

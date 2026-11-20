@@ -388,6 +388,10 @@ class Settings(ctx: Context) {
     var soundFxVolume: Int
         get() = p.getInt("s_sfx_vol", 60)
         set(v) = put("s_sfx_vol", v)
+    /** No pop-ups from the app you're using right now (other apps still pop up). */
+    var gilbertQuietInApp: Boolean
+        get() = p.getBoolean("s_gil_inapp", true)
+        set(v) = put("s_gil_inapp", v)
     /** Calm Mode: only priority apps pop up; Gilbert holds the rest. */
     var gilbertCalm: Boolean
         get() = p.getBoolean("s_gil_calm", true)
