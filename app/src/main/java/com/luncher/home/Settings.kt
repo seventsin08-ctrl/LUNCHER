@@ -554,6 +554,24 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_pending_edit", false)
         set(v) { p.edit().putBoolean("s_pending_edit", v).apply() }
 
+    // ---- Simple Mode: one switch that turns off all the extras and brings them back as they were.
+    private val simpleKeys = listOf("s_island", "s_isl_over_apps", "s_island_face", "s_island_tools", "s_gil_talk",
+        "s_sidebar", "s_side_hud", "s_side_msgs", "s_side_rest", "s_headset_popup")
+    /** On = only the Home Screen (icons, dock, widgets, theme, look). No Gilbert, island, Sidebar,
+     *  Side Island or pop-ups. Turning it off restores each of those exactly as you had it. */
+    var simpleMode: Boolean
+        get() = p.getBoolean("s_simple", false)
+        set(on) {
+            if (on == simpleMode) return
+            val e = p.edit()
+            if (on) {
+                for (k in simpleKeys) { e.putBoolean("simple_was_$k", p.getBoolean(k, true)); e.putBoolean(k, false) }
+            } else {
+                for (k in simpleKeys) { e.putBoolean(k, p.getBoolean("simple_was_$k", true)); e.remove("simple_was_$k") }
+            }
+            e.putBoolean("s_simple", on).putInt("s_version", version + 1).apply()
+        }
+
     private fun put(k: String, v: Any) {
         val e = p.edit()
         when (v) {

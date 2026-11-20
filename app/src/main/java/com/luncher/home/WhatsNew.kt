@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        108 to listOf("Simple Mode (top of Settings): one switch turns off Gilbert, the Dynamic Island, Sidebar, Side Island and pop-ups — your look, icons, widgets and theme stay. Switch it off to get everything back exactly as it was"),
         107 to listOf("Quiet in the app you're using: no pop-ups or chat windows from an app while it's open on screen — other apps still pop up (Settings › Gilbert)"),
         106 to listOf("Gilbert's card opens only once — tap Gilbert again, press Back or Home to close it"),
         105 to listOf("Gilbert's card is redesigned: brushed graphite tiles with status chips (Ready, Holding, Mentions)",

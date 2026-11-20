@@ -144,6 +144,14 @@ class SettingsActivity : Activity() {
             setTextColor(Color.WHITE); textSize = 15f; setPadding(dp(14), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         list.addView(head, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(18) })
+        // One switch for everything extra; the look of the Home Screen stays.
+        val simple = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = cardBg() }
+        toggle(simple, "Simple Mode", if (s.simpleMode)
+            "On — Gilbert, Dynamic Island, Sidebar, Side Island and pop-ups are off. Your look, icons, widgets and theme stay. " +
+                "Turn off to bring everything back as it was"
+            else "Turn off Gilbert, the Dynamic Island, Sidebar, Side Island and pop-ups in one go. Your look, icons, widgets and theme stay",
+            s.simpleMode) { s.simpleMode = it; SoundFX.play(this, if (it) "close" else "open"); rebuild() }
+        list.addView(simple, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(18) })
         // Like iPhone's "Finish Setting Up": shows until everything the launcher needs is allowed.
         val missing = Setup.items(this).count { !it.allowed(this) }
         if (missing > 0) {
