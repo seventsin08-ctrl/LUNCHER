@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
-        112 to listOf("Adjust the Features (top of Settings): drag the Dynamic Island, Sidebar, Side Island and Game Ball on a live phone preview",
+        113 to listOf("Adjust the Features (top of Settings): drag the Dynamic Island, Sidebar, Side Island and Game Ball on a live phone preview",
             "Page transitions: Android, Roll, Flip, Card, Tilt, Fade, Cube, Depth, Zoom",
             "Layouts: 4×5, 4×6, 4×7, 5×6, 5×7 or Auto",
             "Icons: rounded-corner slider (square to circle) and app name size",
