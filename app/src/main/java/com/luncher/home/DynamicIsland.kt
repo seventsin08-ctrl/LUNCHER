@@ -922,7 +922,9 @@ class DynamicIsland(
             val dots = if (visibleList().size > 1) dp(10) else 0
             val text = label.text?.toString().orEmpty()
             if (text.isEmpty()) return dp(172) + dots
-            val need = dp(8) + dp(22) + dp(8) + label.paint.measureText(text).toInt() + dp(28) + dots
+            // padding 8 + art 22 + gap 8 + text + gap 6 + bars 22 + padding 12 (+ a little room)
+            val bars = if (a.showBars) dp(28) else 0
+            val need = dp(8) + dp(22) + dp(8) + kotlin.math.ceil(label.paint.measureText(text)).toInt() + bars + dp(12) + dp(10) + dots
             return need.coerceIn(dp(172) + dots, screenW() - dp(40))
         }
         val textW = label.paint.measureText(a.title).toInt().coerceAtMost(dp(150))
