@@ -146,7 +146,9 @@ object GilbertChat {
             text = "↑"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; typeface = Typeface.DEFAULT_BOLD
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF0A84FF.toInt()) }
         }
+        var spoken = false   // the last question was said out loud → he answers out loud too
         fun submit() {
+            val talkBack = spoken && s.gilbertSpeaks; spoken = false
             val q = input.text.toString().trim()
             if (q.isEmpty() || GilbertBrain.busy) return
             input.setText(""); SoundFX.play(act, "tick")
@@ -167,19 +169,44 @@ object GilbertChat {
                     val a = ans ?: (ruleAnswer(act, s, q) + (GilbertBrain.lastError?.let { "\n\n⚠️ $it" } ?: ""))
                     history += false to a
                     thinking.text = a; SoundFX.play(act, "chirp")
+                    if (talkBack) GilbertVoice.speak(act, a)
                     scroll.post { scroll.smoothScrollTo(0, list.height) }
                 }
             } else {
                 val a = ruleAnswer(act, s, q)
                 history += false to a
-                list.postDelayed({ bubble(false, a); SoundFX.play(act, "chirp") }, 350)
+                list.postDelayed({ bubble(false, a); SoundFX.play(act, "chirp"); if (talkBack) GilbertVoice.speak(act, a) }, 350)
             }
             while (history.size > 30) history.removeAt(0)
         }
         send.setOnClickListener { submit() }
         input.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { submit(); true } else false }
+        // 🎤 Talk to him: tap, speak, and it sends by itself.
+        val mic = TextView(act).apply {
+            text = "🎤"; textSize = 17f; gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x33FFFFFF) }
+        }
+        var listening = false
+        fun micIdle() { listening = false; mic.animate().cancel(); mic.scaleX = 1f; mic.scaleY = 1f
+            (mic.background as GradientDrawable).setColor(0x33FFFFFF); input.hint = "Message Gilbert" }
+        mic.setOnClickListener {
+            if (listening) { GilbertVoice.stopListening(); micIdle(); return@setOnClickListener }
+            if (act.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                act.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 7711); return@setOnClickListener
+            }
+            if (!GilbertVoice.available(act)) { bubble(false, "Speech recognition isn't available on this phone (install/enable Google app voice typing)."); return@setOnClickListener }
+            GilbertVoice.shutUp()
+            listening = true; SoundFX.play(act, "pop")
+            (mic.background as GradientDrawable).setColor(0xFFFF453A.toInt()); input.hint = "Listening…"
+            mic.animate().scaleX(1.15f).scaleY(1.15f).setDuration(500).withEndAction { mic.animate().scaleX(1f).scaleY(1f).setDuration(500).start() }.start()
+            GilbertVoice.listen(act, partial = { input.setText(it) }) { said ->
+                micIdle()
+                if (!said.isNullOrBlank()) { input.setText(said); spoken = true; submit() }
+            }
+        }
         card.addView(LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(mic, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             addView(input, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
             addView(send, LinearLayout.LayoutParams(dp(40), dp(40)))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
@@ -188,6 +215,7 @@ object GilbertChat {
         layer.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP).apply {
             leftMargin = dp(12); rightMargin = dp(12); topMargin = dp(64) })
         close = {
+            GilbertVoice.stopListening(); GilbertVoice.shutUp()
             SoundFX.play(act, "close")
             runCatching { act.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(input.windowToken, 0) }
             layer.animate().alpha(0f).setDuration(200).withEndAction { root.removeView(layer); onClosed?.invoke() }.start()

@@ -18,13 +18,20 @@ import kotlin.math.sin
  */
 object SoundFX {
     private val exec = Executors.newSingleThreadExecutor()
+    /** During Do Not Disturb the effects play like media (which DND lets through). */
+    @Volatile private var useMedia = false
     private const val RATE = 44100
 
     fun play(ctx: Context, name: String) {
         val s = Settings(ctx)
         if (!s.soundFx) return
         val am = ctx.getSystemService(AudioManager::class.java)
-        if (am != null && am.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        // Do Not Disturb on? Still play (Settings › Sounds › Sounds in Do Not Disturb). Otherwise respect silent / vibrate.
+        val dnd = runCatching { ctx.getSystemService(android.app.NotificationManager::class.java).currentInterruptionFilter }
+            .getOrDefault(1) > android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+        val allowDnd = dnd && s.soundsInDnd
+        if (!allowDnd && am != null && am.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        useMedia = allowDnd
         val vol = s.soundFxVolume / 100f
         exec.execute { runCatching { render(name, vol) } }
     }
@@ -64,7 +71,7 @@ object SoundFX {
         val peak = mix.maxOf { kotlin.math.abs(it) }.coerceAtLeast(1f)
         val pcm = ShortArray(n) { (mix[it] / peak * 9000 * vol).toInt().toShort() }
         val track = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(if (useMedia) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(RATE).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())

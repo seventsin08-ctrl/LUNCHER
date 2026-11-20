@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        146 to listOf("Talk to Gilbert with your voice: tap 🎤 in his chat, speak, and he answers — out loud too (Settings › Gilbert › Gilbert Speaks)",
+            "Sound effects keep playing during Do Not Disturb (Settings › Sounds › Sounds in Do Not Disturb)"),
         145 to listOf("Do Not Disturb: messages from your chat apps still show while it's on (Settings › Gilbert › Always Show Messages)",
             "The clipboard strip now sits joined to the top of the chat card, like one piece",
             "What's New shows every version: newest first, with ⬆ new/upgraded, 🔧 fixed and ⬇ removed/changed marks"),

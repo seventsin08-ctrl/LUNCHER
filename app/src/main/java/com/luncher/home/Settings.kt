@@ -478,6 +478,14 @@ class Settings(ctx: Context) {
     var gilbertQuietInApp: Boolean
         get() = p.getBoolean("s_gil_inapp", true)
         set(v) = put("s_gil_inapp", v)
+    /** When you talk to Gilbert with your voice, he answers out loud. */
+    var gilbertSpeaks: Boolean
+        get() = p.getBoolean("s_gil_speaks", true)
+        set(v) = put("s_gil_speaks", v)
+    /** Sound effects still play during Do Not Disturb. */
+    var soundsInDnd: Boolean
+        get() = p.getBoolean("s_sfx_dnd", true)
+        set(v) = put("s_sfx_dnd", v)
     /** Messages from any chat app always pop up — even on silent / vibrate / Calm Mode. */
     var alwaysShowMessages: Boolean
         get() = p.getBoolean("s_always_msgs", true)

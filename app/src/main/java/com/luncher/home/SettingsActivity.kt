@@ -815,6 +815,7 @@ class SettingsActivity : Activity() {
             info(gilB, if (GilbertBrain.installed(this)) "🧠 Brain on (${GilbertBrain.sizeMb(this)} MB). Gilbert chats freely — privately, on this phone, no internet needed."
                 else "Memory mode: Gilbert already learns your songs, apps and who messages you, and answers from that. " +
                     "Add his brain (a small offline AI model, .task file ~500 MB) to chat about anything.")
+            toggle(gilB, "Gilbert Speaks", "When you talk to him with 🎤, he answers out loud", s.gilbertSpeaks) { s.gilbertSpeaks = it }
             button(gilB, "Talk to Gilbert", 0xFF0A84FF.toInt()) { rootFrame?.let { GilbertChat.show(this, it, s) } }
             if (!GilbertBrain.installed(this)) {
                 button(gilB, "1. Get a Brain File (opens browser)…", 0xFF0A84FF.toInt()) {
@@ -862,6 +863,7 @@ class SettingsActivity : Activity() {
         toggle(snd, "Sound Effects", "Soft pops, ticks, Gilbert's chirps and the sparkly “hello” chime (silent when the phone is on silent)",
             s.soundFx) { s.soundFx = it; if (it) SoundFX.play(this, "success") }
         slider(snd, "Effects Volume", 10, 100, s.soundFxVolume, { "$it%" }) { s.soundFxVolume = it; SoundFX.play(this, "pop") }
+        toggle(snd, "Sounds in Do Not Disturb", "Keep the effects (and Gilbert's chirps) playing while Do Not Disturb is on", s.soundsInDnd) { s.soundsInDnd = it }
         button(snd, "Use a Song as Ringtone…", 0xFF0A84FF.toInt()) { pickRingtone() }
         button(snd, "Sound & Vibration Settings…", 0xFF0A84FF.toInt()) {
             runCatching { startActivity(Intent(SysSettings.ACTION_SOUND_SETTINGS)) }
