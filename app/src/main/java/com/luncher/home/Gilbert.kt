@@ -141,148 +141,313 @@ object Gilbert {
 
     // ---------------------------------------------------------------- Gilbert's panel
     /**
-     * Tap Gilbert: his card — what he's holding (tap an app to open it), today's noisiest apps
-     * (make them Priority or Quiet), and a quick check of the phone.
+     * Tap Gilbert: his card, in a dark "brushed metal" flow style — stacked tiles with status
+     * chips, segmented meters, and checklists. Status, held notifications (tap to open), mentions
+     * and notes, the noisiest apps (tap the chip: Normal → Priority → Quiet), and a phone check.
      */
     fun showPanel(act: Activity, root: FrameLayout, s: Settings, appInfo: (String) -> Pair<android.graphics.Bitmap?, String>?,
                   openApp: (String) -> Unit, openInbox: () -> Unit, openTools: () -> Unit) {
         fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
-        val layer = FrameLayout(act).apply { setBackgroundColor(Color.argb(140, 0, 0, 0)); isClickable = true }
+        fun dpf(v: Float) = v * act.resources.displayMetrics.density
+        val GREEN = 0xFF30D158.toInt(); val AMBER = 0xFFFFC53D.toInt(); val RED = 0xFFFF453A.toInt()
+        val BLUE = 0xFF0A84FF.toInt(); val DIM = 0x8CFFFFFF.toInt(); val FAINT = 0x59FFFFFF
+        val layer = FrameLayout(act).apply { setBackgroundColor(Color.argb(150, 0, 0, 0)); isClickable = true }
+        // The card: a brushed-graphite gradient with a fine light edge.
         val card = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(16))
-            background = GradientDrawable().apply { cornerRadius = dp(30).toFloat(); setColor(0xF7161618.toInt()); setStroke(maxOf(1, dp(1)), 0x30FFFFFF) }
-            elevation = dp(16).toFloat()
+            setPadding(dp(16), dp(16), dp(16), dp(14))
+            background = android.graphics.drawable.LayerDrawable(arrayOf(
+                GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF3A3A3E.toInt(), 0xFF232326.toInt(), 0xFF161618.toInt())).apply {
+                    cornerRadius = dpf(34f) },
+                GradientDrawable().apply { cornerRadius = dpf(34f); setColor(Color.TRANSPARENT); setStroke(maxOf(1, dp(1)), 0x2EFFFFFF) }))
+            elevation = dpf(20f)
         }
         lateinit var close: () -> Unit
-        // Header: Gilbert himself + what he thinks.
-        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(FrameLayout(act).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
-            addView(IslandFace(act).apply { configure(s) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        }, LinearLayout.LayoutParams(dp(58), dp(58)))
         val h = health(act)
-        val titles = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
-        titles.addView(TextView(act).apply { text = "Gilbert"; textSize = 22f; setTextColor(Color.WHITE); typeface = Typeface.create("sans-serif", Typeface.BOLD) })
-        titles.addView(TextView(act).apply { text = mood(act, h); textSize = 13.5f; setTextColor(0xB3FFFFFF.toInt()) })
-        head.addView(titles, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        card.addView(head)
+        val allNotes = notes(act)
+        val mentions = allNotes.filter { it.mention }.take(5)
 
-        val body = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        fun section(t: String) = body.addView(TextView(act).apply {
-            text = t; textSize = 12f; setTextColor(0x80FFFFFF.toInt()); letterSpacing = 0.06f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); setPadding(0, dp(16), 0, dp(6))
-        })
-        fun row(icon: android.graphics.Bitmap?, label: String, trail: String, onClick: (() -> Unit)?, extra: View? = null) {
-            val r = LinearLayout(act).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(6))
-                if (onClick != null) setOnClickListener { onClick() }
+        // ---- small builders
+        fun text(t: String, size: Float, color: Int, bold: Boolean = false) = TextView(act).apply {
+            text = t; textSize = size; setTextColor(color); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            typeface = Typeface.create(if (bold) "sans-serif-medium" else "sans-serif", if (bold) Typeface.BOLD else Typeface.NORMAL)
+        }
+        fun chip(t: String, color: Int) = TextView(act).apply {
+            text = t; textSize = 11f; setTextColor(color); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(8), dp(2), dp(8), dp(3))
+            background = GradientDrawable().apply { cornerRadius = dpf(9f); setColor((color and 0x00FFFFFF) or 0x2E000000) }
+        }
+        fun bigPill(t: String, color: Int, fn: () -> Unit) = TextView(act).apply {
+            text = t; textSize = 12.5f; setTextColor(color); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(dp(13), dp(7), dp(13), dp(7))
+            background = GradientDrawable().apply { cornerRadius = dpf(16f); setColor((color and 0x00FFFFFF) or 0x26000000)
+                setStroke(maxOf(1, dp(1)), (color and 0x00FFFFFF) or 0x40000000) }
+            setOnClickListener { SoundFX.play(act, "tick"); fn() }
+        }
+        fun roundBtn(glyph: String, fn: () -> Unit) = TextView(act).apply {
+            text = glyph; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x33FFFFFF, 0x14FFFFFF)).apply {
+                shape = GradientDrawable.OVAL; setStroke(maxOf(1, dp(1)), 0x40FFFFFF) }
+            setOnClickListener { SoundFX.play(act, "tick"); fn() }
+        }
+        fun iconBox(bmp: android.graphics.Bitmap?, glyph: String?, size: Int = 38): View {
+            val box = FrameLayout(act).apply {
+                background = GradientDrawable().apply { cornerRadius = dpf(size * 0.3f); setColor(0x1FFFFFFF); setStroke(maxOf(1, dp(1)), 0x1AFFFFFF) }
             }
+            if (bmp != null) box.addView(android.widget.ImageView(act).apply {
+                setImageBitmap(bmp)
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, v.width * 0.28f)
+                }; clipToOutline = true
+            }, FrameLayout.LayoutParams(dp(size - 12), dp(size - 12), Gravity.CENTER))
+            else box.addView(TextView(act).apply { text = glyph ?: "•"; textSize = size * 0.4f; gravity = Gravity.CENTER; setTextColor(Color.WHITE) },
+                FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            box.layoutParams = LinearLayout.LayoutParams(dp(size), dp(size)).apply { marginEnd = dp(12) }
+            return box
+        }
+        /** A tile: rounded glassy plate inside the card. */
+        fun tile(): LinearLayout = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x24FFFFFF, 0x10FFFFFF)).apply {
+                cornerRadius = dpf(24f); setStroke(maxOf(1, dp(1)), 0x1FFFFFFF) }
+        }
+        /** Tile header: icon · title + chip · subtitle · optional trailing view. */
+        fun tileHead(icon: View, title: String, chipV: View?, sub: String?, trail: View? = null): LinearLayout {
+            val r = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            r.addView(icon)
+            val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+            val top = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            top.addView(text(title, 16f, Color.WHITE, true))
+            if (chipV != null) top.addView(chipV, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(8) })
+            col.addView(top)
+            if (sub != null) col.addView(text(sub, 12.5f, DIM))
+            r.addView(col, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            if (trail != null) r.addView(trail)
+            return r
+        }
+        /** Segmented meter (the striped bars) + percentage. */
+        fun meter(label: String, pct: Int, color: Int, valueText: String = "$pct%"): LinearLayout {
+            val r = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(5), 0, dp(5)) }
+            r.addView(text(label, 12.5f, DIM), LinearLayout.LayoutParams(dp(84), WRAP_CONTENT))
+            r.addView(SegBar(act, pct.coerceIn(0, 100) / 100f, color), LinearLayout.LayoutParams(0, dp(20), 1f))
+            r.addView(text(valueText, 12.5f, Color.WHITE, true).apply { gravity = Gravity.END }, LinearLayout.LayoutParams(dp(74), WRAP_CONTENT))
+            return r
+        }
+        /** Checklist row: dashed circle (or ✓), line of text, trailing time/count. */
+        fun checkRow(done: Boolean, icon: android.graphics.Bitmap?, line: String, trail: String, onClick: (() -> Unit)?): LinearLayout {
+            val r = LinearLayout(act).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(7), 0, dp(7))
+                if (onClick != null) setOnClickListener { SoundFX.play(act, "tick"); onClick() }
+            }
+            r.addView(TextView(act).apply {
+                gravity = Gravity.CENTER; textSize = 11f; typeface = Typeface.DEFAULT_BOLD
+                if (done) { text = "✓"; setTextColor(Color.BLACK); background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) } }
+                else background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT)
+                    setStroke(maxOf(1, dp(1)), FAINT, dpf(2.5f), dpf(2.5f)) }
+            }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(10) })
             if (icon != null) r.addView(android.widget.ImageView(act).apply {
                 setImageBitmap(icon)
                 outlineProvider = object : android.view.ViewOutlineProvider() {
-                    override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, v.width * 0.26f)
+                    override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, v.width * 0.28f)
                 }; clipToOutline = true
-            }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(12) })
-            r.addView(TextView(act).apply { text = label; textSize = 15f; setTextColor(Color.WHITE); maxLines = 1 },
-                LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-            if (extra != null) r.addView(extra)
-            r.addView(TextView(act).apply { text = trail; textSize = 14f; setTextColor(0x99FFFFFF.toInt()); setPadding(dp(8), 0, 0, 0) })
-            body.addView(r)
+            }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(10) })
+            r.addView(text(line, 14f, Color.WHITE), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            r.addView(text(trail, 12.5f, DIM).apply { setPadding(dp(8), 0, 0, 0) })
+            return r
         }
-        fun pill(t: String, color: Int, fn: () -> Unit) = TextView(act).apply {
-            text = t; textSize = 11.5f; setTextColor(color); typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(9), dp(4), dp(9), dp(4))
-            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x22FFFFFF) }
-            setOnClickListener { fn() }
-        }
+        fun divider() = View(act).apply { setBackgroundColor(0x14FFFFFF) }
+        val tiles = ArrayList<View>()
+        val body = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        fun addTile(v: View) { tiles += v; body.addView(v, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }) }
+        fun caption(t: String) = body.addView(text(t, 14f, DIM, true).apply { setPadding(dp(6), dp(14), 0, 0) })
 
-        // What he's holding.
-        section("HELD QUIETLY FOR YOU")
-        if (held.isEmpty()) body.addView(TextView(act).apply { text = "Nothing waiting."; textSize = 14f; setTextColor(0x80FFFFFF.toInt()) })
-        for ((pkg, n) in held.entries.reversed()) {
-            val info = appInfo(pkg)
-            row(info?.first, info?.second ?: pkg, "$n", { close(); openApp(pkg) })
-        }
-        if (held.isNotEmpty()) body.addView(LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(6), 0, 0)
-            addView(pill("Open Inbox", 0xFF0A84FF.toInt()) { close(); openInbox() })
-            addView(View(act), LinearLayout.LayoutParams(dp(8), 1))
-            addView(pill("Clear", 0xFFFF453A.toInt()) { clearHeld(); close() })
+        // ---- Header: orb · "Gilbert" · menu + close
+        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), 0, 0, dp(2)) }
+        head.addView(FrameLayout(act).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(maxOf(1, dp(1)), 0x33FFFFFF) }
+            addView(IslandFace(act).apply { configure(s) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(12) })
+        head.addView(LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(text("Gilbert", 24f, Color.WHITE, true))
+            addView(text("Your ally · ${java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())}", 12.5f, DIM))
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        head.addView(roundBtn("☰") { close(); openTools() }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
+        head.addView(roundBtn("✕") { close() }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        card.addView(head)
+
+        // ---- Status tile (like "Flux · Ready"): mood + two meters
+        caption("Active now")
+        val hc = heldCount()
+        addTile(tile().apply {
+            val (cTxt, cCol) = when {
+                mentions.isNotEmpty() -> "Mentions" to RED
+                hc > 0 -> "Holding $hc" to AMBER
+                (h.tempC ?: 0f) >= 42f || (h.battery in 0..15 && !h.charging) -> "Check" to AMBER
+                else -> "Ready" to GREEN
+            }
+            addView(tileHead(iconBox(null, "✦"), "Status", chip(cTxt, cCol), mood(act, h)))
+            addView(divider(), LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(1))).apply { topMargin = dp(10); bottomMargin = dp(4) })
+            val bat = h.battery.coerceAtLeast(0)
+            addView(meter("Battery", bat, if (bat <= 20) RED else if (bat <= 45) AMBER else GREEN, if (h.battery >= 0) "$bat%${if (h.charging) " ⚡" else ""}" else "—"))
+            val calm = (100 - hc * 12).coerceIn(0, 100)
+            addView(meter("Calm", calm, if (calm < 40) AMBER else GREEN))
         })
 
-        // Mentions of you (from any app).
-        val allNotes = notes(act)
-        val mentions = allNotes.filter { it.mention }.take(5)
-        if (mentions.isNotEmpty()) {
-            section("MENTIONS")
-            for (n in mentions) { val info = appInfo(n.pkg); row(info?.first, "${n.title}: ${n.text}".take(60), ago(n.time), { close(); openApp(n.pkg) }) }
-        }
-        // Gilbert's notes: what came in lately, in one line each.
-        if (allNotes.isNotEmpty()) {
-            section("GILBERT'S NOTES")
-            for (n in allNotes.take(8)) {
-                val info = appInfo(n.pkg)
-                row(info?.first, listOf(n.title, n.text).filter { it.isNotBlank() }.joinToString(": ").take(60), ago(n.time), { close(); openApp(n.pkg) })
+        // ---- Held notifications: expandable checklist (like the task list)
+        caption("Held for you")
+        addTile(tile().apply {
+            val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+            val chev = roundBtn("⌃") {}.apply { textSize = 14f }
+            var open = true
+            chev.setOnClickListener {
+                SoundFX.play(act, "tick"); open = !open
+                list.visibility = if (open) View.VISIBLE else View.GONE
+                chev.animate().rotation(if (open) 0f else 180f).setDuration(220).start()
             }
+            addView(tileHead(iconBox(null, "📬"), "Notifications",
+                chip(if (hc > 0) "$hc waiting" else "Clear", if (hc > 0) AMBER else GREEN),
+                if (held.isEmpty()) "Nothing waiting — all quiet" else "${held.size} app${if (held.size > 1) "s" else ""} · tap one to see what it sent",
+                chev.apply { layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)) }))
+            if (held.isNotEmpty()) {
+                // The "1.5 of 4"-style progress bar: how much of the day's noise he kept away from you.
+                val total = countsToday(act).sumOf { it.second }.coerceAtLeast(hc)
+                list.addView(meter("Kept quiet", if (total > 0) hc * 100 / total else 0, AMBER, "$hc of $total"))
+                for ((pkg, n) in held.entries.reversed()) {
+                    val info = appInfo(pkg)
+                    list.addView(checkRow(false, info?.first, info?.second ?: pkg, "$n", { close(); openApp(pkg) }))
+                }
+                list.addView(LinearLayout(act).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END; setPadding(0, dp(8), 0, 0)
+                    addView(bigPill("◐ Open Inbox", AMBER) { close(); openInbox() })
+                    addView(View(act), LinearLayout.LayoutParams(dp(8), 1))
+                    addView(bigPill("!!! Clear", RED) { clearHeld(); close() })
+                })
+            }
+            addView(list)
+        })
+
+        // ---- Mentions + notes
+        if (mentions.isNotEmpty() || allNotes.isNotEmpty()) {
+            caption("Notes")
+            addTile(tile().apply {
+                addView(tileHead(iconBox(null, "✎"), "Gilbert's notes",
+                    if (mentions.isNotEmpty()) chip("${mentions.size} mention${if (mentions.size > 1) "s" else ""}", RED) else chip("Live", GREEN),
+                    "Every message, one line each"))
+                for (n in mentions) {
+                    val info = appInfo(n.pkg)
+                    addView(checkRow(false, info?.first, "@ ${n.title}: ${n.text}", ago(n.time), { close(); openApp(n.pkg) }))
+                }
+                for (n in allNotes.filter { !it.mention }.take(6)) {
+                    val info = appInfo(n.pkg)
+                    addView(checkRow(true, info?.first, listOf(n.title, n.text).filter { it.isNotBlank() }.joinToString(": "), ago(n.time), { close(); openApp(n.pkg) }))
+                }
+            })
         }
 
-        // Noisiest apps today — make them Priority (always show) or Quiet (always hold).
+        // ---- Noisiest apps: chip cycles Normal → Priority → Quiet
         val counts = countsToday(act).take(4)
         if (counts.isNotEmpty()) {
-            section("NOISIEST TODAY")
-            for ((pkg, n) in counts) {
-                val info = appInfo(pkg)
-                val pri = pkg in s.gilbertPriority; val quiet = pkg in s.gilbertQuiet
-                val tag = pill(when { pri -> "★ Priority"; quiet -> "Quiet"; else -> "Normal" },
-                    when { pri -> 0xFFFFD60A.toInt(); quiet -> 0xFF8E8E93.toInt(); else -> Color.WHITE }) {}
-                tag.setOnClickListener {
-                    // Normal → Priority → Quiet → Normal
-                    when {
-                        pkg in s.gilbertPriority -> { s.gilbertPriority = s.gilbertPriority - pkg; s.gilbertQuiet = s.gilbertQuiet + pkg }
-                        pkg in s.gilbertQuiet -> s.gilbertQuiet = s.gilbertQuiet - pkg
-                        else -> s.gilbertPriority = s.gilbertPriority + pkg
+            caption("Noisiest today")
+            addTile(tile().apply {
+                val max = counts.maxOf { it.second }.coerceAtLeast(1)
+                counts.forEachIndexed { i, (pkg, n) ->
+                    if (i > 0) addView(divider(), LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(1))).apply { topMargin = dp(6); bottomMargin = dp(6) })
+                    val info = appInfo(pkg)
+                    fun label() = when { pkg in s.gilbertPriority -> "★ Priority"; pkg in s.gilbertQuiet -> "Quiet"; else -> "Normal" }
+                    fun col() = when { pkg in s.gilbertPriority -> AMBER; pkg in s.gilbertQuiet -> 0xFF8E8E93.toInt(); else -> GREEN }
+                    val c = chip(label(), col())
+                    c.setOnClickListener {
+                        SoundFX.play(act, "pop")
+                        when {
+                            pkg in s.gilbertPriority -> { s.gilbertPriority = s.gilbertPriority - pkg; s.gilbertQuiet = s.gilbertQuiet + pkg }
+                            pkg in s.gilbertQuiet -> s.gilbertQuiet = s.gilbertQuiet - pkg
+                            else -> s.gilbertPriority = s.gilbertPriority + pkg
+                        }
+                        c.text = label(); c.setTextColor(col())
+                        (c.background as GradientDrawable).setColor((col() and 0x00FFFFFF) or 0x2E000000)
+                        c.scaleX = 0.85f; c.scaleY = 0.85f; Motion.scaleTo(c, 1f, Motion.BOUNCY)
                     }
-                    tag.text = when { pkg in s.gilbertPriority -> "★ Priority"; pkg in s.gilbertQuiet -> "Quiet"; else -> "Normal" }
-                    tag.setTextColor(when { pkg in s.gilbertPriority -> 0xFFFFD60A.toInt(); pkg in s.gilbertQuiet -> 0xFF8E8E93.toInt(); else -> Color.WHITE })
+                    addView(tileHead(iconBox(info?.first, null, 36), info?.second ?: pkg, c, "$n notification${if (n > 1) "s" else ""} today"))
+                    addView(SegBar(act, n / max.toFloat(), col()), LinearLayout.LayoutParams(MATCH_PARENT, dp(14)).apply { topMargin = dp(6) })
                 }
-                row(info?.first, info?.second ?: pkg, "$n", null, tag)
-            }
+            })
         }
 
-        // The phone.
-        section("PHONE CHECK")
-        row(null, "🔋  Battery", if (h.battery >= 0) "${h.battery}%${if (h.charging) " ⚡" else ""}" else "—", null)
-        row(null, "🌡️  Temperature", h.tempC?.let { "${it.roundToInt()}°C" } ?: "—", null)
-        row(null, "💾  Storage free", if (h.storageTotalGb > 0) "${"%.1f".format(h.storageFreeGb)} of ${"%.0f".format(h.storageTotalGb)} GB" else "—", null)
-        row(null, "🧠  Memory free", if (h.ramFreePct >= 0) "${h.ramFreePct}%" else "—", null)
+        // ---- Phone check: segmented meters
+        caption("Phone check")
+        addTile(tile().apply {
+            addView(tileHead(iconBox(null, "⚙︎"), "System", chip(if ((h.tempC ?: 0f) >= 42f) "Hot" else "Healthy",
+                if ((h.tempC ?: 0f) >= 42f) RED else GREEN), "Battery, heat, storage and memory"))
+            addView(divider(), LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(1))).apply { topMargin = dp(10); bottomMargin = dp(4) })
+            val t = h.tempC
+            addView(meter("Temperature", t?.let { ((it - 20f) / 30f * 100).roundToInt() } ?: 0,
+                if ((t ?: 0f) >= 42f) RED else if ((t ?: 0f) >= 37f) AMBER else GREEN, t?.let { "${it.roundToInt()}°C" } ?: "—"))
+            val stPct = if (h.storageTotalGb > 0) (h.storageFreeGb / h.storageTotalGb * 100).roundToInt() else 0
+            addView(meter("Storage free", stPct, if (stPct < 10) RED else if (stPct < 25) AMBER else GREEN,
+                if (h.storageTotalGb > 0) "${"%.0f".format(h.storageFreeGb)} GB" else "—"))
+            addView(meter("Memory free", h.ramFreePct.coerceAtLeast(0), if (h.ramFreePct in 0..15) AMBER else GREEN,
+                if (h.ramFreePct >= 0) "${h.ramFreePct}%" else "—"))
+        })
+        body.addView(View(act), LinearLayout.LayoutParams(1, dp(4)))
 
         val scroll = object : ScrollView(act) {
             override fun onMeasure(w: Int, hs: Int) = super.onMeasure(w,
-                View.MeasureSpec.makeMeasureSpec((act.resources.displayMetrics.heightPixels * 0.55f).toInt(), View.MeasureSpec.AT_MOST))
-        }.apply { isVerticalScrollBarEnabled = false; addView(body) }
+                View.MeasureSpec.makeMeasureSpec((act.resources.displayMetrics.heightPixels * 0.66f).toInt(), View.MeasureSpec.AT_MOST))
+        }.apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; addView(body) }
         card.addView(scroll)
-        card.addView(LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(14), 0, 0)
-            addView(pill("Tools", Color.WHITE) { close(); openTools() })
-            addView(View(act), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(pill("Done", 0xFF0A84FF.toInt()) { close() })
-        })
         layer.setOnClickListener { close() }
         card.isClickable = true
         layer.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP).apply {
-            leftMargin = dp(14); rightMargin = dp(14); topMargin = dp(70)
+            leftMargin = dp(12); rightMargin = dp(12); topMargin = dp(64)
         })
+        var closing = false
         close = {
-            card.animate().alpha(0f).translationY(-dp(20).toFloat()).setDuration(180).start()
-            layer.animate().alpha(0f).setDuration(220).withEndAction { root.removeView(layer) }.start()
+            if (!closing) {
+                closing = true
+                SoundFX.play(act, "close")
+                card.animate().alpha(0f).scaleX(0.92f).scaleY(0.6f).translationY(-dp(24).toFloat()).setDuration(200)
+                    .setInterpolator(android.view.animation.AccelerateInterpolator()).start()
+                layer.animate().alpha(0f).setDuration(240).withEndAction { root.removeView(layer) }.start()
+            }
         }
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        // Grows out of the island at the top.
-        layer.alpha = 0f; layer.animate().alpha(1f).setDuration(200).start()
+        SoundFX.play(act, "open")
+        // Grows out of the island at the top, then the tiles rise in one after another.
+        layer.alpha = 0f; layer.animate().alpha(1f).setDuration(220).start()
         card.pivotX = act.resources.displayMetrics.widthPixels / 2f; card.pivotY = 0f
-        card.scaleX = 0.3f; card.scaleY = 0.2f; card.alpha = 0f
+        card.scaleX = 0.3f; card.scaleY = 0.15f; card.alpha = 0f
         card.animate().alpha(1f).setDuration(200).start()
         Motion.scaleTo(card, 1f, Motion.FLUID)
+        tiles.forEachIndexed { i, v ->
+            v.alpha = 0f; v.translationY = dpf(26f)
+            v.animate().alpha(1f).translationY(0f).setStartDelay(90L + i * 55L).setDuration(380)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(2.2f)).start()
+        }
+    }
+
+    /** The striped meter: rounded vertical sticks, lit up to [frac] and growing in when shown. */
+    private class SegBar(ctx: Context, private val frac: Float, private val color: Int) : View(ctx) {
+        private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private var shown = 0f
+        private val rect = android.graphics.RectF()
+        init {
+            android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 700; startDelay = 250; interpolator = android.view.animation.DecelerateInterpolator(1.8f)
+                addUpdateListener { shown = it.animatedValue as Float; invalidate() }
+            }.start()
+        }
+        override fun onDraw(c: android.graphics.Canvas) {
+            val d = resources.displayMetrics.density
+            val w = 3.2f * d; val gap = 3f * d
+            val n = ((width + gap) / (w + gap)).toInt().coerceAtLeast(1)
+            val lit = (n * frac * shown).roundToInt()
+            for (i in 0 until n) {
+                val x = i * (w + gap)
+                rect.set(x, 0f, x + w, height.toFloat())
+                p.color = if (i < lit) color else 0x2EFFFFFF
+                c.drawRoundRect(rect, w / 2, w / 2, p)
+            }
+        }
     }
 }
