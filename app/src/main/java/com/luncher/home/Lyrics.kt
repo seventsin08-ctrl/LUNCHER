@@ -98,7 +98,7 @@ object Lyrics {
  */
 class LyricsView(ctx: android.content.Context, private val big: Boolean = false) : android.widget.LinearLayout(ctx) {
     private val d = ctx.resources.displayMetrics.density
-    private fun mk(size: Float, alpha: Float, blur: Float) = android.widget.TextView(ctx).apply {
+    private fun mk(size: Float, alpha: Float, blur: Float) = android.widget.TextView(context).apply {
         textSize = size; maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
         typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
         this.alpha = alpha
