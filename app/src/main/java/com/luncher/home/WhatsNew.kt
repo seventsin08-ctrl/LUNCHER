@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        119 to listOf("Fixed: lyrics and the time froze in the open island after a few seconds",
+            "Fixed: the small island flickered while music played",
+            "The small island now widens smoothly to show the whole lyric line — no more scrolling back and forth"),
         118 to listOf("Fixed: the island flickered every 2–3 seconds while music played (it rebuilt itself on every music update)",
             "Lyrics Timing slider (Settings › Home Screen & Widgets): choose how far ahead of the singer the lyrics show",
             "The island over other apps always takes taps now",

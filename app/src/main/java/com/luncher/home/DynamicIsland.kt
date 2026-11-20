@@ -918,7 +918,13 @@ class DynamicIsland(
     }
 
     private fun compactWidth(a: IslandActivity): Int {
-        if (a.media != null) return dp(172) + (if (visibleList().size > 1) dp(10) else 0)
+        if (a.media != null) {
+            val dots = if (visibleList().size > 1) dp(10) else 0
+            val text = label.text?.toString().orEmpty()
+            if (text.isEmpty()) return dp(172) + dots
+            val need = dp(8) + dp(22) + dp(8) + label.paint.measureText(text).toInt() + dp(28) + dots
+            return need.coerceIn(dp(172) + dots, screenW() - dp(40))
+        }
         val textW = label.paint.measureText(a.title).toInt().coerceAtMost(dp(150))
         val trailW = a.trailing?.let { trailing.paint.measureText(it).toInt() + dp(6) } ?: 0
         val barsW = if (a.showBars) dp(28) else 0
@@ -941,9 +947,9 @@ class DynamicIsland(
         } else {
             val key = "${a.title}|${a.subtitle}"
             if (key != lyricSongKey) { lyricSongKey = key; label.text = "" }
-            // Long lines glide sideways so you can read the whole sentence.
-            label.ellipsize = TextUtils.TruncateAt.MARQUEE; label.marqueeRepeatLimit = -1
-            label.isSingleLine = true; label.isSelected = true
+            // The island widens to fit the whole lyric line (no sideways scrolling back and forth,
+            // and nothing re-set on every music update — that caused the flicker).
+            if (label.ellipsize != TextUtils.TruncateAt.END) { label.ellipsize = TextUtils.TruncateAt.END; label.isSelected = false }
             if (Lyrics.enabled && !lyricRunning) { lyricRunning = true; pill.post(compactLyrics) }
         }
         trailing.text = a.trailing ?: ""
@@ -975,10 +981,16 @@ class DynamicIsland(
                         // Old line drifts up and out, the new one rises in — no jump.
                         label.animate().cancel()
                         label.animate().alpha(0f).translationY(-dp(5).toFloat()).setDuration(120).withEndAction {
-                            label.text = show; label.isSelected = true
+                            label.text = show
                             label.translationY = dp(5).toFloat()
                             label.animate().alpha(1f).translationY(0f).setDuration(240)
                                 .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+                            // Grow / shrink smoothly so the whole line fits.
+                            val c = current()
+                            if (!expanded && c?.media != null) {
+                                val w = compactWidth(c)
+                                if (abs(w - pill.width) > dp(6)) animateSize(w, dp(36), dp(18).toFloat())
+                            }
                         }.start()
                     }
                 }
@@ -1090,7 +1102,11 @@ class DynamicIsland(
         var wasPlaying: Boolean? = null
         val t = object : Runnable {
             override fun run() {
-                if (!expanded || current()?.media !== m) return
+                // The music app sends a fresh player object on every update — follow the newest one
+                // for this song instead of stopping (that froze the time and lyrics).
+                val cur = current()
+                if (!expanded || cur == null || cur.id != a.id || cur.title != a.title) return
+                val m = cur.media ?: return
                 val pos = m.position().coerceIn(0, if (m.duration > 0) m.duration else Long.MAX_VALUE)
                 elapsed.text = fmtTime(pos)
                 if (m.duration > 0) bar.fraction = pos.toFloat() / m.duration
