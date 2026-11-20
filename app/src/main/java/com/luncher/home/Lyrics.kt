@@ -19,7 +19,7 @@ object Lyrics {
     /** Settings › Widgets › Lyrics (player widget and island). */
     @Volatile var enabled = true
     /** Lyrics run this far ahead of the song, so you can read the next words before they're sung. */
-    const val LEAD_MS = 900L
+    @Volatile var LEAD_MS = 900L
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val cache = HashMap<String, Song?>()

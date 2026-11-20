@@ -316,6 +316,10 @@ class Settings(ctx: Context) {
     var musicStyle: String
         get() = p.getString("s_music_style", "classic") ?: "classic"
         set(v) = put("s_music_style", v)
+    /** How far ahead of the singer the lyrics show, in ms (Settings › Widgets › Lyrics Timing). */
+    var lyricsLead: Int
+        get() = p.getInt("s_lyrics_lead", 900)
+        set(v) = put("s_lyrics_lead", v)
     var lyrics: Boolean
         get() = p.getBoolean("s_lyrics", true)
         set(v) = put("s_lyrics", v)

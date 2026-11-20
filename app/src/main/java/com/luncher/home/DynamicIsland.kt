@@ -461,6 +461,8 @@ class DynamicIsland(
     var overlayMode = false
     /** Called when the island appears (true) or goes away (false). */
     var onShownChanged: ((Boolean) -> Unit)? = null
+    /** Is the island on screen right now? */
+    fun shownNow() = pill.visibility == View.VISIBLE
 
     fun snapshot(): List<IslandActivity> = activities.values.toList()
 
@@ -471,9 +473,16 @@ class DynamicIsland(
         putLocal(a)
     }
 
+    /** Music apps hand over a fresh copy of the same album art every update — treat it as the same picture. */
+    private fun sameIcon(x: Bitmap?, y: Bitmap?): Boolean {
+        if (x === y) return true
+        if (x == null || y == null || x.width != y.width || x.height != y.height) return false
+        return runCatching { x.sameAs(y) }.getOrDefault(false)
+    }
+
     /** Same layout as before (only text/time changed)? Then we can update in place. */
     private fun sameShape(o: IslandActivity, a: IslandActivity) =
-        o.icon === a.icon && o.iconRes == a.iconRes && o.title == a.title && o.showBars == a.showBars &&
+        sameIcon(o.icon, a.icon) && o.iconRes == a.iconRes && o.title == a.title && o.showBars == a.showBars &&
             (o.media == null) == (a.media == null) && o.actions.map { it.first } == a.actions.map { it.first }
 
     private fun putLocal(a: IslandActivity) {
@@ -919,14 +928,15 @@ class DynamicIsland(
             .coerceIn(dp(120), screenW().coerceAtLeast(dp(300)) - dp(60))
     }
 
+    private var boundIcon: Bitmap? = null
     private fun bind(a: IslandActivity) {
-        if (a.icon != null) { icon.setImageBitmap(a.icon); icon.clearColorFilter() }
-        else { icon.setImageResource(a.iconRes); icon.setColorFilter(a.iconTint) }
+        if (a.icon != null) { if (!sameIcon(boundIcon, a.icon)) { icon.setImageBitmap(a.icon); icon.clearColorFilter(); boundIcon = a.icon } }
+        else { icon.setImageResource(a.iconRes); icon.setColorFilter(a.iconTint); boundIcon = null }
         // Music: keep the lyric that's showing (the island is re-bound on every music update —
         // clearing it each time made it flicker).
         if (a.media == null) {
             label.text = a.title
-            label.ellipsize = TextUtils.TruncateAt.END; label.isSelected = false
+            if (label.ellipsize != TextUtils.TruncateAt.END) { label.ellipsize = TextUtils.TruncateAt.END; label.isSelected = false }
             pill.removeCallbacks(compactLyrics); lyricSongKey = null; lyricRunning = false
         } else {
             val key = "${a.title}|${a.subtitle}"

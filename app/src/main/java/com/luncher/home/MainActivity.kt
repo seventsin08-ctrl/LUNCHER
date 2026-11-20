@@ -858,6 +858,7 @@ class MainActivity : Activity() {
         Glass.glass = settings.glass
         IconFactory.CORNER = settings.iconCorner / 100f
         Lyrics.enabled = settings.lyrics
+        Lyrics.LEAD_MS = settings.lyricsLead.toLong()
         // Theme: colours follow the wallpaper (or system / your pick) unless set to Mono.
         ThemeEngine.resolve(this, settings)
         if (ThemeEngine.colorful) {
@@ -998,6 +999,8 @@ class MainActivity : Activity() {
         if (GameState.playing) holder.visibility = View.GONE
         island.mirror = ov
         for (a in island.snapshot()) ov.put(a)
+        // It may already be showing (Gilbert, music…): make sure it takes taps over other apps right away.
+        holder.post { ov.onShownChanged?.invoke(ov.shownNow()) }
     }
 
     private fun detachOverlayIsland() {
