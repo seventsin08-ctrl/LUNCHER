@@ -424,6 +424,10 @@ class MainActivity : Activity() {
         island.configureFace(settings)
         island.onFaceTap = { openGilbert() }
         island.beatsOn = settings.islandBeats
+        island.onBeatsToggle = { on ->
+            settings.islandBeats = on; overlayIsland?.beatsOn = on
+            if (on && !Beats.allowed(this)) runCatching { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 7710) }
+        }
         Gilbert.onHeldChanged = { mainHandler.post { refreshHeld() } }
         island.onHeldTap = { pkg ->
             // Tap a logo beside Gilbert: what that app sent.
@@ -959,6 +963,7 @@ class MainActivity : Activity() {
         ov.faceOn = island.faceOn
         ov.configureFace(settings)
         ov.beatsOn = settings.islandBeats
+        ov.onBeatsToggle = { on -> settings.islandBeats = on; island.beatsOn = on }
         // Over other apps, tapping Gilbert opens his inbox (Notifications history).
         ov.onFaceTap = { if (::sideHud.isInitialized) sideHud.openHistory() }
         ov.camera = island.camera

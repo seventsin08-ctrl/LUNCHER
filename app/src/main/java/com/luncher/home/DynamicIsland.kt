@@ -1036,6 +1036,8 @@ class DynamicIsland(
         beatsUsing = want
         if (want) { Beats.listeners += onBeat; Beats.start(act) } else { Beats.listeners -= onBeat; Beats.stop() }
     }
+    /** Told when you switch the beat on/off from the player (so Settings remembers it). */
+    var onBeatsToggle: ((Boolean) -> Unit)? = null
     /** Settings › Dynamic Island › Beat Animation. */
     var beatsOn = true
         set(v) { field = v; if (!v) useBeats(false) }
@@ -1145,6 +1147,24 @@ class DynamicIsland(
             ellipsize = TextUtils.TruncateAt.END
         })
         head.addView(texts, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(14) })
+        // Beat Animation on/off, right in the player (also in Settings › Dynamic Island).
+        head.addView(TextView(act).apply {
+            text = "♫"; textSize = 18f; gravity = Gravity.CENTER
+            fun paint() {
+                setTextColor(if (beatsOn) Color.BLACK else Color.WHITE)
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (beatsOn) Color.WHITE else 0x33FFFFFF) }
+                contentDescription = if (beatsOn) "Beat animation on" else "Beat animation off"
+            }
+            paint()
+            setOnClickListener {
+                buzz(); SoundFX.play(act, "tick")
+                beatsOn = !beatsOn
+                if (beatsOn) useBeats(current()?.media?.playing() == true)
+                onBeatsToggle?.invoke(beatsOn)
+                paint()
+                scaleX = 0.8f; scaleY = 0.8f; Motion.scaleTo(this, 1f, Motion.BOUNCY)
+            }
+        }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP; topMargin = dp(2); marginEnd = dp(10) })
         head.addView(ImageView(act).apply {
             setImageResource(m.outputIconRes)
             setOnClickListener { buzz(); m.onOutput() }
