@@ -312,13 +312,15 @@ class HeadsetPopup private constructor(private val app: Context) {
         val c = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(18), dp(22), dp(18))
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+            // Small, minimal card (like iPhone's AirPods card), tinted with your wallpaper / theme colour.
+            val tint = if (ThemeEngine.colorful) ThemeEngine.accent else 0xFF8E8E93.toInt()
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(Color.argb(250, 30, 30, 32), Color.argb(252, 22, 22, 24))
+                intArrayOf(IconFactory.blend(Color.argb(250, 34, 34, 36), tint, 0.16f), IconFactory.blend(Color.argb(252, 22, 22, 24), tint, 0.08f))
             ).apply {
-                cornerRadius = dp(38).toFloat()
-                setStroke(maxOf(1, dp(1)), Color.argb(60, 255, 255, 255))
+                cornerRadius = dp(32).toFloat()
+                setStroke(maxOf(1, dp(1)), ThemeEngine.alpha(IconFactory.blend(Color.WHITE, tint, 0.4f), 60))
             }
             elevation = dp(24).toFloat()
             isClickable = true
@@ -329,7 +331,7 @@ class HeadsetPopup private constructor(private val app: Context) {
         header.addView(TextView(act).apply {
             text = h.name
             setTextColor(Color.WHITE)
-            textSize = 20f
+            textSize = 18f
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             gravity = Gravity.CENTER
             maxLines = 1
@@ -350,7 +352,8 @@ class HeadsetPopup private constructor(private val app: Context) {
 
         // Spinning 3D model of what's connected (earbuds, headphones, wired earphones, speaker).
         val art = Headset3DView(act, h.kind)
-        c.addView(art, LinearLayout.LayoutParams(MATCH_PARENT, dp(220)).apply { topMargin = dp(4) })
+        val landscape = act.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        c.addView(art, LinearLayout.LayoutParams(MATCH_PARENT, dp(if (landscape) 110 else 150)).apply { topMargin = dp(2) })
 
         // Battery ring + label (Bluetooth only, once the level is known).
         // iPhone-style battery: a ring, the percentage under it, then what it is.
@@ -394,8 +397,10 @@ class HeadsetPopup private constructor(private val app: Context) {
         permissionHint = hint
 
 
-        l.addView(c, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
-            setMargins(dp(10), 0, dp(10), navInset + dp(10))
+        // Never wider than a phone card — it no longer stretches across the whole screen (landscape / games).
+        val cardW = minOf(act.resources.displayMetrics.widthPixels - dp(20), dp(340))
+        l.addView(c, FrameLayout.LayoutParams(cardW, WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            setMargins(0, 0, 0, navInset + dp(12))
         })
         root.addView(l, FrameLayout.LayoutParams(MATCH_PARENT, if (useApp) MATCH_PARENT else WRAP_CONTENT))
         layer = l
