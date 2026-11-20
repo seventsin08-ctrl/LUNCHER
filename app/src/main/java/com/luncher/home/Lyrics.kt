@@ -146,14 +146,26 @@ class LyricsView(ctx: android.content.Context, private val big: Boolean = false)
         val p = song.synced.getOrNull(i - 1)?.text ?: ""
         val c = song.synced.getOrNull(i)?.text?.ifBlank { "♪" } ?: "♪"
         val n = song.synced.getOrNull(i + 1)?.text ?: ""
+        if (cur.text.toString() == c) { prev.text = p; next.text = n; return }
+        // Apple Music–style: the whole block glides up one line, the new line sharpens out of a blur.
+        val ease = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
         prev.text = p; next.text = n
-        if (cur.text.toString() == c) return
         cur.animate().cancel()
         cur.text = c
-        cur.alpha = 0.3f; cur.translationY = 8 * d; cur.scaleX = 0.97f; cur.scaleY = 0.97f
-        cur.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(240)
-            .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
-        next.translationY = 6 * d; next.animate().translationY(0f).setDuration(240).start()
+        cur.alpha = 0.25f; cur.translationY = 14 * d; cur.scaleX = 0.96f; cur.scaleY = 0.96f
+        cur.pivotX = 0f
+        cur.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(ease).start()
+        for (v in listOf(prev, next)) { v.translationY = 12 * d; v.animate().translationY(0f).setDuration(420).setInterpolator(ease).start() }
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            android.animation.ValueAnimator.ofFloat(8f, 0f).apply {
+                duration = 380; interpolator = ease
+                addUpdateListener {
+                    val r = (it.animatedValue as Float) * d
+                    cur.setRenderEffect(if (r < 0.5f) null else android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.DECAL))
+                }
+                start()
+            }
+        }
     }
 }
 

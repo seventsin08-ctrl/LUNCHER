@@ -604,6 +604,11 @@ class SettingsActivity : Activity() {
         islandPreview?.load(s)
         val pv = islandPreview
         toggle(isl, "Dynamic Island", "Live activities at the top: music, timers, charging. Swipe sideways to switch, long-press for volume", s.island) { s.island = it; updatePreviewVisibility() }
+        toggle(isl, "Beat Animation", "The island pops to the beat and its bars follow the real music. Needs the Microphone permission " +
+            "(it only listens to what the phone plays, nothing is recorded); without it the island gives a soft pulse", s.islandBeats) {
+            s.islandBeats = it
+            if (it && !Beats.allowed(this)) runCatching { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 7710) }
+        }
         info(isl, "While you edit, a preview island shows at the top of the screen.")
         toggle(isl, "Show Over Other Apps", "Keep the island on top while you use other apps", s.islandOverApps) { s.islandOverApps = it; rebuild() }
         if (s.islandOverApps && !HeadsetPopup.canShowOverApps(this)) {

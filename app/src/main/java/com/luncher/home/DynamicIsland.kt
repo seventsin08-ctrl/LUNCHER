@@ -612,6 +612,7 @@ class DynamicIsland(
 
     private fun refresh() {
         val a = current()
+        if (a?.media == null) useBeats(false)
         if (!enabled || (a == null && !alwaysShow && !toolsOn && !faceOn)) {
             toolsRow.visibility = View.GONE
             if (expanded) collapse(animate = false)
@@ -986,7 +987,9 @@ class DynamicIsland(
             label.text = a.title
             if (label.ellipsize != TextUtils.TruncateAt.END) { label.ellipsize = TextUtils.TruncateAt.END; label.isSelected = false }
             pill.removeCallbacks(compactLyrics); lyricSongKey = null; lyricRunning = false
+            useBeats(false)
         } else {
+            useBeats(a.media.playing())
             val key = "${a.title}|${a.subtitle}"
             if (key != lyricSongKey) { lyricSongKey = key; label.text = "" }
             // The island widens to fit the whole lyric line (no sideways scrolling back and forth,
@@ -1004,8 +1007,51 @@ class DynamicIsland(
     private var ticker: Runnable? = null
     private var expSubtitle: TextView? = null
 
+    private var expArt: View? = null
+    private var beatsUsing = false
+    /** On every beat: the island gives a small "pop" (and the album art bounces when open). */
+    private val onBeat: (Float) -> Unit = { s ->
+        if (pill.visibility == View.VISIBLE && !dragging && current()?.media != null && Motion.scale > 0f) {
+            if (expanded) {
+                expArt?.let { v ->
+                    v.animate().cancel()
+                    v.scaleX = 1f + 0.06f * s; v.scaleY = 1f + 0.06f * s
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.8f)).start()
+                }
+            } else if (widthSpring?.isRunning != true) {
+                val k = sizeScale * (1f + 0.045f * s)
+                pill.scaleX = k; pill.scaleY = k
+                pill.animate().scaleX(sizeScale).scaleY(sizeScale).setDuration(240)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(1.8f)).start()
+            }
+        }
+    }
+    /** Listen for beats only while music is playing in the island. */
+    private fun useBeats(on: Boolean) {
+        val want = on && beatsOn
+        if (want == beatsUsing) return
+        beatsUsing = want
+        if (want) { Beats.listeners += onBeat; Beats.start(act) } else { Beats.listeners -= onBeat; Beats.stop() }
+    }
+    /** Settings › Dynamic Island › Beat Animation. */
+    var beatsOn = true
+        set(v) { field = v; if (!v) useBeats(false) }
+
     private var lyricSongKey: String? = null
     private var lyricRunning = false
+
+    /** A soft blur that clears as the new words arrive (Android 12+). */
+    private fun blurIn(v: View) {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        android.animation.ValueAnimator.ofFloat(7f, 0f).apply {
+            duration = 320; interpolator = android.view.animation.DecelerateInterpolator(2f)
+            addUpdateListener {
+                val r = (it.animatedValue as Float) * act.resources.displayMetrics.density
+                v.setRenderEffect(if (r < 0.5f) null else android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.DECAL))
+            }
+            start()
+        }
+    }
 
     /** Small island + music: show the current lyric line next to the art (fades as lines change). */
     private val compactLyrics: Runnable = object : Runnable {
@@ -1024,9 +1070,10 @@ class DynamicIsland(
                         label.animate().cancel()
                         label.animate().alpha(0f).translationY(-dp(5).toFloat()).setDuration(120).withEndAction {
                             label.text = show
-                            label.translationY = dp(5).toFloat()
-                            label.animate().alpha(1f).translationY(0f).setDuration(240)
-                                .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+                            label.translationY = dp(6).toFloat()
+                            label.animate().alpha(1f).translationY(0f).setDuration(320)
+                                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)).start()
+                            blurIn(label)
                             // Grow / shrink smoothly so the whole line fits.
                             val c = current()
                             if (!expanded && c?.media != null) {
@@ -1061,6 +1108,7 @@ class DynamicIsland(
         }
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val artFrame = FrameLayout(act)
+        expArt = artFrame
         artFrame.addView(ImageView(act).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             if (a.icon != null) setImageBitmap(a.icon) else { setImageResource(a.iconRes); setColorFilter(a.iconTint)
@@ -1358,7 +1406,9 @@ class BarsView(ctx: android.content.Context) : View(ctx) {
         val gap = width / (n * 2f)
         val bw = gap
         for (i in 0 until n) {
-            val amp = 0.35 + 0.65 * abs(sin(t * (3.1 + i * 0.9) + i * 1.3))
+            // Real music bands when we can hear the song; otherwise the gentle wave.
+            val amp = if (Beats.live) (0.22 + 0.78 * Beats.bands[i].toDouble()).coerceIn(0.2, 1.0)
+                else 0.35 + 0.65 * abs(sin(t * (3.1 + i * 0.9) + i * 1.3))
             val bh = (height * amp).toFloat()
             val x = i * (bw + gap) + gap / 2f
             canvas.drawRoundRect(x, (height - bh) / 2f, x + bw, (height + bh) / 2f, bw / 2f, bw / 2f, paint)

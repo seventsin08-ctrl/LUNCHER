@@ -422,6 +422,7 @@ class MainActivity : Activity() {
         island.faceOn = settings.islandFace
         island.configureFace(settings)
         island.onFaceTap = { openGilbert() }
+        island.beatsOn = settings.islandBeats
         Gilbert.onHeldChanged = { mainHandler.post { refreshHeld() } }
         island.onHeldTap = { pkg ->
             // Tap a logo beside Gilbert: what that app sent.
@@ -956,6 +957,7 @@ class MainActivity : Activity() {
         ov.idleTools = island.idleTools
         ov.faceOn = island.faceOn
         ov.configureFace(settings)
+        ov.beatsOn = settings.islandBeats
         // Over other apps, tapping Gilbert opens his inbox (Notifications history).
         ov.onFaceTap = { if (::sideHud.isInitialized) sideHud.openHistory() }
         ov.camera = island.camera

@@ -320,6 +320,10 @@ class Settings(ctx: Context) {
     var lyricsLead: Int
         get() = p.getInt("s_lyrics_lead", 900)
         set(v) = put("s_lyrics_lead", v)
+    /** The island pops to the beat of the music (and the bars follow the real sound). */
+    var islandBeats: Boolean
+        get() = p.getBoolean("s_isl_beats", true)
+        set(v) = put("s_isl_beats", v)
     var lyrics: Boolean
         get() = p.getBoolean("s_lyrics", true)
         set(v) = put("s_lyrics", v)
