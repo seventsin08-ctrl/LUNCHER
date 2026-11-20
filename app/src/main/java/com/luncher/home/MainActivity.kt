@@ -411,6 +411,8 @@ class MainActivity : Activity() {
         setupSidebar()
         GameState.listen(gameListener)
         root.postDelayed({ setupTapZone() }, 600)
+        InfoData.listen(infoListener)
+        mainHandler.postDelayed(infoTicker, 1500)
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
         ContextCompat.registerReceiver(this, ringerReceiver, IntentFilter(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION), ContextCompat.RECEIVER_EXPORTED)
         // "hello" only when the launcher is set up fresh: first install, or after a reset / imported setup.
@@ -577,6 +579,55 @@ class MainActivity : Activity() {
         return super.dispatchTouchEvent(ev)
     }
 
+    // ================================================================ island info (weather, steps, date…)
+    private val infoIcons = HashMap<String, android.graphics.Bitmap>()
+    private var infoCycle = 0
+    private val infoListener: () -> Unit = { updateInfoIsland(advance = false) }
+    private val infoTicker = object : Runnable {
+        override fun run() { updateInfoIsland(advance = true); mainHandler.postDelayed(this, 10_000) }
+    }
+    private fun infoIcon(key: String, e: String, bg: Int = 0) = infoIcons.getOrPut(key) { InfoViews.emoji(this, e, bg) }
+
+    private fun updateInfoIsland(advance: Boolean) {
+        if (!::island.isInitialized) return
+        val mode = settings.islandInfo
+        if (mode == "off" || !settings.island) { island.remove("info"); return }
+        InfoData.startSteps(this)
+        InfoData.refreshWeather(this)
+        val kinds = listOf("weather", "date", "steps", "events", "calories")
+        var a: IslandActivity? = null
+        if (mode == "cycle") {
+            if (advance) infoCycle++
+            for (t in 0 until kinds.size) { a = infoActivity(kinds[(infoCycle + t) % kinds.size]); if (a != null) break }
+        } else a = infoActivity(mode)
+        if (a == null) island.remove("info") else island.put(a)
+    }
+
+    private fun infoActivity(kind: String): IslandActivity? = when (kind) {
+        "weather" -> InfoData.loadWeather(this)?.let { w ->
+            val (e, cond) = InfoData.condition(w.code)
+            IslandActivity("info", infoIcon("w$e", e), 0, 0, "${w.temp}°", "$cond · feels like ${w.feels}°",
+                "${w.hi}/${w.lo}", false, 0xFFFF9F68.toInt(), custom = { InfoViews.weatherGauge(it, InfoData.weather) })
+        }
+        "date" -> {
+            val cal = java.util.Calendar.getInstance()
+            val mon = java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault()).format(cal.time).uppercase()
+            IslandActivity("info", infoIcon("cal", "📅"), 0, 0, mon, "Today", "${cal.get(java.util.Calendar.DAY_OF_MONTH)}",
+                false, 0xFFFF453A.toInt(), custom = { InfoViews.monthCard(it, InfoData.eventsToday(this)) })
+        }
+        "steps" -> if (InfoData.stepsToday < 0) null else IslandActivity("info", infoIcon("steps", "🚶", 0xFF30D158.toInt()), 0, 0, "",
+            "Steps today", String.format(java.util.Locale.getDefault(), "%,d", InfoData.stepsToday), false, 0xFF30D158.toInt(),
+            custom = { InfoViews.stepsCard(it) })
+        "events" -> InfoData.eventsToday(this).takeIf { it >= 0 }?.let { n ->
+            IslandActivity("info", infoIcon("ev", "🗓️"), 0, 0, "Events", "Today", "$n", false, Color.WHITE,
+                custom = { InfoViews.monthCard(it, n) })
+        }
+        "calories" -> if (InfoData.stepsToday < 0) null else IslandActivity("info", infoIcon("cal2", "🔥", 0xFFFF9500.toInt()), 0, 0, "kcal",
+            "Burned today", String.format(java.util.Locale.getDefault(), "%.1f", InfoData.calories()), false, 0xFFFF9F0A.toInt(),
+            custom = { InfoViews.stepsCard(it) })
+        else -> null
+    }
+
     /** The tap strip at the camera (above the status bar) that opens the island tools. */
     private var tapZone: CameraTapZone? = null
     private var searchingNow = false
@@ -604,6 +655,8 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         GameState.unlisten(gameListener)
         tapZone?.detach(); tapZone = null
+        InfoData.unlisten(infoListener)
+        mainHandler.removeCallbacks(infoTicker)
         cancelHomeHold()
         dockWidthAnimator?.cancel()
         dockWidthAnimator = null
@@ -2353,6 +2406,17 @@ class MainActivity : Activity() {
                     "iPod", { }, null, remove)
             WidgetType.TIMER ->
                 widgetFrame(TimerWidget.create(this), "Timer", { v -> showTimerPicker(v) }, null, remove)
+            WidgetType.WEATHER -> {
+                InfoData.loadWeather(this); InfoData.refreshWeather(this)
+                widgetFrame(InfoViews.todayWeather(this), "Weather", { InfoData.refreshWeather(this, force = true); toast("Updating weather…") }, null, remove)
+            }
+            WidgetType.STEPS -> {
+                InfoData.startSteps(this)
+                widgetFrame(FrameLayout(this).apply {
+                    setPadding(dp(16), dp(14), dp(16), dp(14))
+                    addView(InfoViews.stepsCard(this@MainActivity), FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.CENTER_VERTICAL))
+                }, "Steps", { }, null, remove)
+            }
             WidgetType.STACK -> {
                 // Smart Stack: swipe up/down between date, batteries, timer and clock.
                 val stack = SmartStackView(this, listOf(
@@ -2862,7 +2926,7 @@ class MainActivity : Activity() {
         val width = when (type) {
             WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
             WidgetType.CALENDAR, WidgetType.MUSIC, WidgetType.PHOTO_WIDE,
-            WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK -> cols
+            WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK, WidgetType.WEATHER, WidgetType.STEPS -> cols
             else -> (cols / 2).coerceAtLeast(1)
         }
         val height = when (type) {
@@ -2894,7 +2958,9 @@ class MainActivity : Activity() {
             Triple(WidgetType.MUSIC, "Now Playing", "What's playing, with controls"),
             Triple(WidgetType.STACK, "Smart Stack", "Swipe up and down between widgets"),
             Triple(WidgetType.TIMER, "Timer", "Start a timer; it counts down live in the island"),
-            Triple(WidgetType.IPOD, "iPod", "Classic click wheel: spin for volume, tap to play, skip and open music")
+            Triple(WidgetType.IPOD, "iPod", "Classic click wheel: spin for volume, tap to play, skip and open music"),
+            Triple(WidgetType.WEATHER, "Weather", "Today's temperature, high/low and the next two days"),
+            Triple(WidgetType.STEPS, "Steps", "Today's steps and calories with your last 7 days")
         )
         val layer = FrameLayout(this).apply { setBackgroundColor(Color.argb(110, 0, 0, 0)); isClickable = true }
         val sheet = LinearLayout(this).apply {
@@ -3044,6 +3110,8 @@ class MainActivity : Activity() {
         items += "Now Playing" to { addBuiltInWidget(WidgetType.MUSIC) }
         items += "Smart Stack (swipe between widgets)" to { addBuiltInWidget(WidgetType.STACK) }
         items += "Timer (Live Activity)" to { addBuiltInWidget(WidgetType.TIMER) }
+        items += "Weather" to { addBuiltInWidget(WidgetType.WEATHER) }
+        items += "Steps" to { addBuiltInWidget(WidgetType.STEPS) }
         val hidden = settings.hiddenWidgets.toList().sorted()
         for (key in hidden) {
             val parts = key.split(':')

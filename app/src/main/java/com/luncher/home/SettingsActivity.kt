@@ -699,6 +699,10 @@ class SettingsActivity : Activity() {
         segment(content, "Pop-up Length", listOf("2500" to "Short", "4500" to "Normal", "8000" to "Long"),
             s.islandPopupMs.toString()) { s.islandPopupMs = it.toInt() }
 
+        segment(isl, "Island Info", listOf("off" to "Off", "cycle" to "All", "weather" to "Weather", "steps" to "Steps", "date" to "Date"),
+            s.islandInfo) { s.islandInfo = it }
+        info(isl, "Live info in the island when nothing else is playing: weather (tap for the temperature gauge), steps, " +
+            "calories, the date and today's events. “All” switches between them.")
         toggle(isl, "Always Show Island", "A small island stays at the top",
             s.islandAlways) { s.islandAlways = it; previewChanged() }
 

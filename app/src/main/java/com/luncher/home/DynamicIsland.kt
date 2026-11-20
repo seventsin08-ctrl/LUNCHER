@@ -44,7 +44,9 @@ class IslandActivity(
     val accent: Int,
     val actions: List<Pair<String, () -> Unit>> = emptyList(),
     /** When set, the expanded island shows the full iPhone-style music player. */
-    val media: IslandMedia? = null
+    val media: IslandMedia? = null,
+    /** Custom big view for the expanded island (weather gauge, steps, calendar…). */
+    val custom: ((Activity) -> View)? = null
 )
 
 /** A round button in the island's pull-down quick controls. */
@@ -373,7 +375,8 @@ class DynamicIsland(
         activities[a.id] = a
         if (isNew) {
             hidden.remove(a.id)
-            index = activities.keys.indexOf(a.id)
+            // Info (weather, steps…) never takes the spot of music, timers or calls.
+            if (a.id != "info" || activities.size == 1) index = activities.keys.indexOf(a.id)
         }
         while (activities.size > 3) activities.remove(activities.keys.first())
         refresh()
@@ -447,6 +450,8 @@ class DynamicIsland(
         val list = visibleList()
         if (list.isEmpty()) return null
         index = index.coerceIn(0, list.size - 1)
+        // The info pill (weather, steps…) steps aside while the tools are open.
+        if (toolsOpen && list[index].id == "info") return null
         return list[index]
     }
 
@@ -578,7 +583,7 @@ class DynamicIsland(
     private var toolsOpen = false
     private val closeTools = Runnable { if (toolsOpen) { toolsOpen = false; refresh() } }
     fun toggleTools() {
-        if (!toolsOn || expanded || current() != null) return
+        if (!toolsOn || expanded || (current() != null && current()?.id != "info")) return
         toolsOpen = !toolsOpen
         buzz()
         pill.removeCallbacks(closeTools)
@@ -911,6 +916,11 @@ class DynamicIsland(
     private fun bindExpanded(a: IslandActivity) {
         expandedView.removeAllViews()
         a.media?.let { bindMusic(a, it); return }
+        a.custom?.let { build ->
+            expandedView.setPadding(dp(20), dp(16), dp(20), dp(16))
+            expandedView.addView(build(act), LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            return
+        }
         expandedView.setPadding(dp(20), dp(18), dp(20), dp(16))
         val head = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL

@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        99 to listOf("Dynamic Info in the island: weather (tap for a temperature gauge with low/high and feels-like), steps, calories, date and today's events",
+            "New Weather and Steps widgets",
+            "Settings › Dynamic Island › Island Info to choose what shows"),
         98 to listOf("Shorter tap line at the camera, with a Tap Line Length slider in Settings › Island Tools"),
         97 to listOf("Tap the status bar strip just left of the camera to open the tools — it works even on the status bar",
             "A faint ring and line at the camera show where to tap (Settings › Island Tools › Show Tap Spot)"),

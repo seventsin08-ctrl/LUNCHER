@@ -348,6 +348,10 @@ class Settings(ctx: Context) {
     var tapZoneLen: Int
         get() = p.getInt("s_tap_len", 66)
         set(v) = put("s_tap_len", v)
+    /** What the island shows when nothing else is on: off, cycle, weather, steps, date, events, calories. */
+    var islandInfo: String
+        get() = p.getString("s_island_info", "cycle") ?: "cycle"
+        set(v) = put("s_island_info", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

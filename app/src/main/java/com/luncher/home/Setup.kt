@@ -91,6 +91,12 @@ object Setup {
         list += Item("dnd", "Do Not Disturb Access", "Lets Focus modes silence notifications",
             { it.getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted },
             open = { a -> go(a, Intent(SysSettings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) })
+        list += Item("location", "Location (approximate)", "Weather in the Dynamic Island and the Weather widget",
+            { granted(it, Manifest.permission.ACCESS_COARSE_LOCATION) }, runtime = Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (Build.VERSION.SDK_INT >= 29) list += Item("steps", "Physical Activity", "Steps and calories in the island and the Steps widget",
+            { granted(it, Manifest.permission.ACTIVITY_RECOGNITION) }, runtime = Manifest.permission.ACTIVITY_RECOGNITION)
+        list += Item("calendar", "Calendar", "How many events you have today, in the island",
+            { granted(it, Manifest.permission.READ_CALENDAR) }, runtime = Manifest.permission.READ_CALENDAR)
         list += Item("contacts", "Contacts", "Find people in Search",
             { granted(it, Manifest.permission.READ_CONTACTS) }, runtime = Manifest.permission.READ_CONTACTS)
         if (Build.VERSION.SDK_INT >= 31) list += Item("bt", "Nearby Devices", "Headphone battery in the AirPods-style pop-up",
