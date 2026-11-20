@@ -55,7 +55,7 @@ class Settings(ctx: Context) {
         set(v) = put("s_anim_speed", v)
     /** zoom | fade | slide | none */
     var launchAnim: String
-        get() = p.getString("s_launch_anim", "zoom") ?: "zoom"
+        get() = p.getString("s_launch_anim", "match") ?: "match"
         set(v) = put("s_launch_anim", v)
     /** depth | flat | cube | zoom | roll | flip | card | tilt | stack | fade */
     var pageEffect: String

@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        136 to listOf("Fixed page transitions: pages are never left half-turned or see-through after opening an app",
+            "Opening and closing apps now matches your Page Swipe style (Settings › Animations › Opening Apps › Match Page Swipe)"),
         135 to listOf("Headphones card: smaller and minimal like iPhone's AirPods card, never stretches across the screen (even in games / landscape), and takes your wallpaper / theme colour"),
         134 to listOf("Gilbert follows your wallpaper: his particles, his ring and his card take your wallpaper / theme colour and change when you change the wallpaper (Settings › Gilbert › Colours › Wallpaper)"),
         133 to listOf("The waiting-app logos next to Gilbert now pop up like a reminder for 5 seconds when something new arrives, then tuck away (Gilbert's red badge and his card still have them)"),

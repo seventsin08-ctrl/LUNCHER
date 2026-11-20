@@ -544,8 +544,8 @@ class SettingsActivity : Activity() {
             segment(anim, "Speed", listOf("slow" to "Slow", "normal" to "Normal", "fast" to "Fast", "instant" to "Instant"), s.animSpeed) {
                 s.animSpeed = it
             }
-            segment(anim, "Opening Apps", listOf(
-                "zoom" to "Zoom", "fade" to "Fade", "slide" to "Slide Up", "none" to "None"
+            chips(anim, "Opening Apps", listOf(
+                "match" to "Match Page Swipe", "zoom" to "Zoom", "fade" to "Fade", "slide" to "Slide Up", "none" to "None"
             ), s.launchAnim) { s.launchAnim = it }
             chips(anim, "Page Swipe Transition", listOf(
                 "depth" to "Depth", "flat" to "Flat", "stack" to "Android", "cube" to "Cube", "roll" to "Roll",

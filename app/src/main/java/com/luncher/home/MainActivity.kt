@@ -572,6 +572,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         GameState.leftApps()   // back on the Home Screen: no game on screen
+        if (::pager.isInitialized) pager.post { runCatching { pager.requestTransform() } }
         mainHandler.post { updateGilbertMood() }
         if (::island.isInitialized) root.post { setupTapZone() }
         // "Show hello again" from Settings › General.
@@ -629,10 +630,10 @@ class MainActivity : Activity() {
 
     override fun onRestart() {
         super.onRestart()
-        if (anim > 0f && settings.launchAnim == "zoom") {
-            content.scaleX = 1.12f
-            content.scaleY = 1.12f
-            content.alpha = 0f
+        if (anim > 0f) when (launchStyle()) {
+            "zoom" -> { content.scaleX = 1.12f; content.scaleY = 1.12f; content.alpha = 0f }
+            "fade" -> content.alpha = 0f
+            "slide" -> { content.alpha = 0f; content.translationY = dp(36).toFloat() }
         }
         restoreHome(animated = true)
     }
@@ -1486,10 +1487,18 @@ class MainActivity : Activity() {
             page.scaleX = 1f
             page.scaleY = 1f
             page.rotationY = 0f
+            page.rotationX = 0f
             page.rotation = 0f
             page.translationX = 0f
+            page.translationY = 0f
+            page.cameraDistance = 8000f * resources.displayMetrics.density
             page.pivotX = page.width / 2f
             page.pivotY = page.height / 2f
+            // Pages further than one screen away are simply hidden-normal (no half-turned leftovers).
+            if (abs(position) >= 1f && effect != "flat" && effect != "depth" && effect != "cube" && effect != "tilt" && effect != "roll") {
+                page.alpha = if (abs(position) >= 1f) 0f else 1f
+                return@setPageTransformer
+            }
             val p = abs(position).coerceAtMost(1f)
             when (effect) {
                 "depth" -> {
@@ -1750,11 +1759,12 @@ class MainActivity : Activity() {
         content.animate().cancel()
         if (!animated || anim == 0f) {
             Motion.cancel(content)
-            content.scaleX = 1f; content.scaleY = 1f; content.alpha = 1f
+            content.scaleX = 1f; content.scaleY = 1f; content.alpha = 1f; content.translationY = 0f
             return
         }
         Motion.scaleTo(content, 1f, Motion.CALM)
         Motion.alphaTo(content, 1f, Motion.CALM)
+        if (content.translationY != 0f) content.animate().translationY(0f).setDuration(dur(320)).setInterpolator(EASE).start()
         if (currentBlur > 0f && menuLayer == null && searchOverlay.visibility != View.VISIBLE) {
             animateBlur(0f, dur(380))
         }
@@ -2072,6 +2082,8 @@ class MainActivity : Activity() {
         badgeViews.clear()
         musicViews = null
         pagesAdapter.notifyDataSetChanged()
+        // Re-apply the swipe effect so no page is left rotated / see-through after a rebuild.
+        pager.post { runCatching { pager.requestTransform() } }
     }
 
     private fun dockKeys(): List<String> =
@@ -5424,9 +5436,22 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * How apps open/close. "match" (default) follows your Page Swipe style so every animation in
+     * the launcher feels like one family.
+     */
+    private fun launchStyle(): String = when (val l = settings.launchAnim) {
+        "match" -> when (settings.pageEffect) {
+            "fade", "flip" -> "fade"
+            "stack", "flat", "roll", "cube" -> "slide"
+            else -> "zoom"   // depth, zoom, card, tilt
+        }
+        else -> l
+    }
+
     private fun launchOptions(from: View?): Bundle? {
         if (anim == 0f) return ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle()
-        return when (settings.launchAnim) {
+        return when (launchStyle()) {
             "zoom" -> from?.let { ActivityOptions.makeScaleUpAnimation(it, 0, 0, it.width, it.height).toBundle() }
             "fade" -> ActivityOptions.makeCustomAnimation(this, android.R.anim.fade_in, android.R.anim.fade_out).toBundle()
             "slide" -> ActivityOptions.makeCustomAnimation(this, R.anim.slide_up_in, R.anim.hold).toBundle()
@@ -5438,7 +5463,7 @@ class MainActivity : Activity() {
         runCatching { startActivity(intent, launchOptions(from)) }
             .onSuccess {
                 onStarted()
-                if (anim > 0f && settings.launchAnim == "zoom") {
+                if (anim > 0f && launchStyle() == "zoom") {
                     contentAnimate().scaleX(1.12f).scaleY(1.12f).alpha(0f)
                         .setDuration(dur(320)).setInterpolator(EASE).withLayer().start()
                     animateBlur(dp(18).toFloat(), dur(300))
