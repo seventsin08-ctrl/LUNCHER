@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        100 to listOf("The island is a cute round face  °~°  when nothing is happening — it blinks, looks around and wiggles",
+            "New messages, notifications and app updates pop their app's logo in the face"),
         99 to listOf("Dynamic Info in the island: weather (tap for a temperature gauge with low/high and feels-like), steps, calories, date and today's events",
             "New Weather and Steps widgets",
             "Settings › Dynamic Island › Island Info to choose what shows"),

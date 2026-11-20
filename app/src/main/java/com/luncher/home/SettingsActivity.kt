@@ -699,6 +699,8 @@ class SettingsActivity : Activity() {
         segment(content, "Pop-up Length", listOf("2500" to "Short", "4500" to "Normal", "8000" to "Long"),
             s.islandPopupMs.toString()) { s.islandPopupMs = it.toInt() }
 
+        toggle(isl, "Cute Face  °~°", "When nothing is happening the island is a little round face that blinks and looks " +
+            "around — and pops the app's logo when a message, notification or update arrives", s.islandFace) { s.islandFace = it; previewChanged() }
         segment(isl, "Island Info", listOf("off" to "Off", "cycle" to "All", "weather" to "Weather", "steps" to "Steps", "date" to "Date"),
             s.islandInfo) { s.islandInfo = it }
         info(isl, "Live info in the island when nothing else is playing: weather (tap for the temperature gauge), steps, " +

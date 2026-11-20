@@ -350,8 +350,12 @@ class Settings(ctx: Context) {
         set(v) = put("s_tap_len", v)
     /** What the island shows when nothing else is on: off, cycle, weather, steps, date, events, calories. */
     var islandInfo: String
-        get() = p.getString("s_island_info", "cycle") ?: "cycle"
+        get() = p.getString("s_island_info", "off") ?: "off"
         set(v) = put("s_island_info", v)
+    /** Round island with a cute face  °~°  when nothing is happening. */
+    var islandFace: Boolean
+        get() = p.getBoolean("s_island_face", true)
+        set(v) = put("s_island_face", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

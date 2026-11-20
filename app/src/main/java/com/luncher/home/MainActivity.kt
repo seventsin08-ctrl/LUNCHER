@@ -223,7 +223,23 @@ class MainActivity : Activity() {
     private fun dur(ms: Long): Long = (ms * anim).toLong()
 
     private val packageReceiver = object : BroadcastReceiver() {
-        override fun onReceive(c: Context, i: Intent) = reloadApps()
+        override fun onReceive(c: Context, i: Intent) {
+            reloadApps()
+            // An app was installed or updated: the face shows its logo.
+            if (i.action == Intent.ACTION_PACKAGE_ADDED || i.action == Intent.ACTION_PACKAGE_REPLACED)
+                i.data?.schemeSpecificPart?.let { pkg -> mainHandler.postDelayed({ peekApp(pkg) }, 600) }
+        }
+    }
+
+    /** Pop this app's logo in the island's round face. */
+    private fun peekApp(pkg: String) {
+        if (!::island.isInitialized || !settings.islandFace) return
+        val bmp = allApps.firstOrNull { it.packageName == pkg }?.icon ?: runCatching {
+            val d = packageManager.getApplicationIcon(pkg)
+            val b = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
+            val cv = android.graphics.Canvas(b); d.setBounds(0, 0, 96, 96); d.draw(cv); b
+        }.getOrNull()
+        island.peekIcon(bmp)
     }
     /** Zoom the home screen in when the phone is unlocked. */
     private val unlockReceiver = object : BroadcastReceiver() {
@@ -329,6 +345,7 @@ class MainActivity : Activity() {
         island.enabled = settings.island
         island.popupMs = settings.islandPopupMs.toLong()
         island.alwaysShow = settings.islandAlways
+        island.faceOn = settings.islandFace
         // The tools live in the island: hidden around the camera, tap it to open them.
         island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
         island.quickActions = null // only one tools bar (ToolsBar) — none inside the island
@@ -379,7 +396,11 @@ class MainActivity : Activity() {
         })
 
         NotificationService.onChange = { updateBadges() }
-        NotificationService.onPosted = { pkg, title, text -> showNotificationInIsland(pkg, title, text) }
+        NotificationService.onPosted = { pkg, title, text ->
+            // The round face pops the app's logo (messages, notifications, updates from Play Store / system).
+            peekApp(pkg)
+            showNotificationInIsland(pkg, title, text)
+        }
         NotificationService.onOngoing = { refreshOngoing() }
         startPrivacyWatch()
         sideHud = SideHud(this, settings)
@@ -766,6 +787,8 @@ class MainActivity : Activity() {
             island.enabled = settings.island
             island.popupMs = settings.islandPopupMs.toLong()
             island.alwaysShow = settings.islandAlways
+            island.faceOn = settings.islandFace
+            overlayIsland?.faceOn = settings.islandFace
             island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
             root.post { setupTapZone() }
             overlayIsland?.idleTools = island.idleTools
@@ -820,6 +843,7 @@ class MainActivity : Activity() {
         ov.alwaysShow = island.alwaysShow
         ov.quickActions = island.quickActions
         ov.idleTools = island.idleTools
+        ov.faceOn = island.faceOn
         ov.camera = island.camera
         applyToolsStyle(ov)
         ov.allow = island.allow

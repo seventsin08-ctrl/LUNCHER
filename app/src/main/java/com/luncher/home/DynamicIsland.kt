@@ -157,6 +157,25 @@ class DynamicIsland(
         setPadding(dp(20), dp(18), dp(20), dp(16))
         visibility = View.GONE
     }
+    /** The cute face  °~°  shown in a round island when nothing else is happening. */
+    private val face = IslandFace(act).apply { visibility = View.GONE }
+    var faceOn = false
+    private fun showFace(show: Boolean) {
+        if (show == (face.visibility == View.VISIBLE)) return
+        if (show) {
+            face.visibility = View.VISIBLE
+            face.alpha = 0f; face.scaleX = 0.5f; face.scaleY = 0.5f
+            face.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(80).setDuration(320)
+                .setInterpolator(android.view.animation.OvershootInterpolator(1.5f)).start()
+        } else face.animate().alpha(0f).scaleX(0.5f).scaleY(0.5f).setDuration(140)
+            .withEndAction { face.visibility = View.GONE }.start()
+    }
+    /** Pop an app's logo in the round island (new message, notification, app update…). */
+    fun peekIcon(icon: android.graphics.Bitmap?) {
+        mirror?.peekIcon(icon)
+        if (face.visibility == View.VISIBLE) face.peek(icon)
+    }
+
     /** The oblong tool strip shown when idle. */
     private val toolsRow = object : LinearLayout(act) {
         override fun onInterceptTouchEvent(e: MotionEvent) = toolsTouch(e)
@@ -184,6 +203,7 @@ class DynamicIsland(
         pill.addView(compact, FrameLayout.LayoutParams(MATCH_PARENT, dp(36), Gravity.TOP))
         pill.addView(expandedView, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
         pill.addView(toolsRow, FrameLayout.LayoutParams(MATCH_PARENT, dp(36), Gravity.TOP))
+        pill.addView(face, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(pill, FrameLayout.LayoutParams(dp(120), dp(36), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
 
         val detector = GestureDetector(act, object : GestureDetector.SimpleOnGestureListener() {
@@ -457,7 +477,7 @@ class DynamicIsland(
 
     private fun refresh() {
         val a = current()
-        if (!enabled || (a == null && !alwaysShow && !toolsOn)) {
+        if (!enabled || (a == null && !alwaysShow && !toolsOn && !faceOn)) {
             toolsRow.visibility = View.GONE
             if (expanded) collapse(animate = false)
             if (pill.visibility == View.VISIBLE) {
@@ -513,10 +533,11 @@ class DynamicIsland(
         }
         if (quickMode) return
         showTools(a == null && !expanded && toolsOn && toolsOpen)
+        showFace(a == null && !expanded && faceOn && !(toolsOn && toolsOpen))
         if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), if (a == null) idleH() else dp(36),
             (if (a == null) idleH() else dp(36)) / 2f)
         else if (a != null) bindExpanded(a) else collapse()
-        parkAtCamera(a == null && !expanded && toolsOn && !toolsOpen)
+        parkAtCamera(a == null && !expanded && toolsOn && !toolsOpen && !faceOn)
     }
 
     /** While Search is open the island (tools) fades away, and comes back when it closes. */
@@ -532,10 +553,11 @@ class DynamicIsland(
 
     private fun idleW() = when {
         toolsOn && toolsOpen -> dp(16) + toolCount * dp(34)
+        faceOn -> dp(40)                 // a round island with the face
         toolsOn -> camera?.let { maxOf(dp(46), it.width() + dp(22)) } ?: dp(48)   // tucked around the front camera
         else -> dp(118)
     }
-    private fun idleH() = if (toolsOn && !toolsOpen) camera?.let { maxOf(dp(32), it.height() + dp(14)) } ?: dp(36) else dp(36)
+    private fun idleH() = if (faceOn && !(toolsOn && toolsOpen)) dp(40) else if (toolsOn && !toolsOpen) camera?.let { maxOf(dp(32), it.height() + dp(14)) } ?: dp(36) else dp(36)
 
     /**
      * A bigger invisible tap area around and below the camera pill: the status bar takes taps
@@ -724,6 +746,7 @@ class DynamicIsland(
         quickMode = true
         expanded = true
         buzz()
+        showFace(false)
         showTools(false)
         bindQuick(acts)
         compact.animate().alpha(0f).setDuration(160).start()
@@ -976,6 +999,7 @@ class DynamicIsland(
         if (expanded) return
         expanded = true
         buzz()
+        showFace(false)
         showTools(false)
         bindExpanded(a)
         Motion.scaleTo(pill, 1f, Motion.FLUID)
@@ -1016,11 +1040,12 @@ class DynamicIsland(
         pill.animate().translationX(offsetX).setDuration((260 * Motion.scale).toLong()).start()
         val cur = current()
         if (cur != null) animateSize(compactWidth(cur), dp(36), dp(18).toFloat())
-        else if ((alwaysShow || toolsOn) && enabled) {
+        else if ((alwaysShow || toolsOn || faceOn) && enabled) {
             compact.visibility = View.INVISIBLE
             showTools(toolsOn && toolsOpen)
+            showFace(faceOn && !(toolsOn && toolsOpen))
             animateSize(idleW(), idleH(), idleH() / 2f)
-            parkAtCamera(toolsOn && !toolsOpen)
+            parkAtCamera(toolsOn && !toolsOpen && !faceOn)
         }
         else refresh()
     }
