@@ -352,6 +352,37 @@ class Settings(ctx: Context) {
     var islandInfo: String
         get() = p.getString("s_island_info", "off") ?: "off"
         set(v) = put("s_island_info", v)
+    // ---- Gilbert (the living orb)
+    /** ember, ocean, aurora, rose, mono, theme */
+    var gilbertColors: String
+        get() = p.getString("s_gil_colors", "ember") ?: "ember"
+        set(v) = put("s_gil_colors", v)
+    /** classic °~°, happy ^‿^, dots •‿•, sleepy -o- */
+    var gilbertFace: String
+        get() = p.getString("s_gil_face", "classic") ?: "classic"
+        set(v) = put("s_gil_face", v)
+    var gilbertDensity: Int
+        get() = p.getInt("s_gil_density", 240)
+        set(v) = put("s_gil_density", v)
+    var gilbertSpeed: Int
+        get() = p.getInt("s_gil_speed", 100)
+        set(v) = put("s_gil_speed", v)
+    var gilbertSize: Int
+        get() = p.getInt("s_gil_size", 46)
+        set(v) = put("s_gil_size", v)
+    /** Calm Mode: only priority apps pop up; Gilbert holds the rest. */
+    var gilbertCalm: Boolean
+        get() = p.getBoolean("s_gil_calm", true)
+        set(v) = put("s_gil_calm", v)
+    var gilbertMaxPerMin: Int
+        get() = p.getInt("s_gil_max", 3)
+        set(v) = put("s_gil_max", v)
+    var gilbertPriority: Set<String>
+        get() = p.getStringSet("s_gil_priority", emptySet())?.toSet() ?: emptySet()
+        set(v) = putSet("s_gil_priority", v)
+    var gilbertQuiet: Set<String>
+        get() = p.getStringSet("s_gil_quiet", emptySet())?.toSet() ?: emptySet()
+        set(v) = putSet("s_gil_quiet", v)
     /** Round island with a cute face  °~°  when nothing is happening. */
     var islandFace: Boolean
         get() = p.getBoolean("s_island_face", true)

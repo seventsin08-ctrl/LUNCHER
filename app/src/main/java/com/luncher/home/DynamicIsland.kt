@@ -160,6 +160,12 @@ class DynamicIsland(
     /** The cute face  °~°  shown in a round island when nothing else is happening. */
     private val face = IslandFace(act).apply { visibility = View.GONE }
     var faceOn = false
+    /** Gilbert's size in dp, and what tapping him does. */
+    var faceSize = 46
+    var onFaceTap: (() -> Unit)? = null
+    fun configureFace(s: Settings) { face.configure(s); faceSize = s.gilbertSize; mirror?.configureFace(s); if (face.visibility == View.VISIBLE) refresh() }
+    /** How many notifications Gilbert is holding (red bubble). */
+    fun setFaceBadge(n: Int) { face.badge = n; mirror?.setFaceBadge(n) }
     private fun showFace(show: Boolean) {
         if (show == (face.visibility == View.VISIBLE)) return
         if (show) {
@@ -209,7 +215,12 @@ class DynamicIsland(
         val detector = GestureDetector(act, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
-                if (expanded) collapse() else if (current() == null) { if (toolsOn) toggleTools() else showQuick() } else expand()
+                if (expanded) collapse() else if (current() == null) {
+                    // Tap Gilbert: his card. (The tools still open from the camera strip.)
+                    val gil = onFaceTap
+                    if (faceOn && face.visibility == View.VISIBLE && gil != null) { buzz(); gil() }
+                    else if (toolsOn) toggleTools() else showQuick()
+                } else expand()
                 return true
             }
             override fun onLongPress(e: MotionEvent) {
@@ -553,11 +564,11 @@ class DynamicIsland(
 
     private fun idleW() = when {
         toolsOn && toolsOpen -> dp(16) + toolCount * dp(34)
-        faceOn -> dp(46)                 // a round island with the living orb / face
+        faceOn -> dp(faceSize)           // a round island with Gilbert
         toolsOn -> camera?.let { maxOf(dp(46), it.width() + dp(22)) } ?: dp(48)   // tucked around the front camera
         else -> dp(118)
     }
-    private fun idleH() = if (faceOn && !(toolsOn && toolsOpen)) dp(46) else if (toolsOn && !toolsOpen) camera?.let { maxOf(dp(32), it.height() + dp(14)) } ?: dp(36) else dp(36)
+    private fun idleH() = if (faceOn && !(toolsOn && toolsOpen)) dp(faceSize) else if (toolsOn && !toolsOpen) camera?.let { maxOf(dp(32), it.height() + dp(14)) } ?: dp(36) else dp(36)
 
     /**
      * A bigger invisible tap area around and below the camera pill: the status bar takes taps

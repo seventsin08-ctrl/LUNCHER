@@ -53,11 +53,33 @@ class IslandFace(ctx: Context) : View(ctx) {
     private var logoK = 0f
     private var logoUntil = 0L
 
-    init {
-        val n = 240
+    // ---- Settings (Gilbert › colours, face, particles, speed)
+    private var topCol = 0xFFFFA24C.toInt()
+    private var botCol = Color.WHITE
+    private var speedK = 1f
+    private var style = "classic"
+    /** Held notifications: a little count bubble on Gilbert. */
+    var badge = 0
+        set(v) { field = v; invalidate() }
+    private val badgeP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF3B30.toInt() }
+    private val badgeT = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+
+    init { build(240) }
+
+    /** Apply Gilbert's settings (colours, face style, how many particles, how fast). */
+    fun configure(s: Settings) {
+        val (a, b) = Gilbert.colors(s)
+        topCol = a; botCol = b
+        speedK = s.gilbertSpeed / 100f
+        val st = s.gilbertFace
+        if (s.gilbertDensity != ps.size || st != style) { style = st; build(s.gilbertDensity) }
+        invalidate()
+    }
+
+    private fun build(n: Int) {
+        ps.clear()
         // Fibonacci sphere: evenly spread points.
         val golden = PI * (3 - sqrt(5.0))
-        var eyeL = 0; var eyeR = 0; var mouth = 0
         for (i in 0 until n) {
             val y = 1 - (i / (n - 1f)) * 2
             val rad = sqrt(1 - y * y)
@@ -65,15 +87,27 @@ class IslandFace(ctx: Context) : View(ctx) {
             val x = (cos(th) * rad).toFloat(); val z = (sin(th) * rad).toFloat()
             val part = when { i % 5 == 1 -> 1; i % 5 == 2 -> 2; i % 5 == 3 -> 3; else -> 0 }
             ps += P(x, y, z, 0f, 0f, part, (Math.random() * 6.28).toFloat(), (0.55f + Math.random().toFloat() * 0.6f))
-            when (part) { 1 -> eyeL++; 2 -> eyeR++; 3 -> mouth++ }
         }
-        // Face targets: two ring eyes, a wavy mouth, the rest form the round outline.
-        var a = 0; var b = 0; var m = 0; var o = 0
+        val eyeL = ps.count { it.part == 1 }; val eyeR = ps.count { it.part == 2 }; val mouth = ps.count { it.part == 3 }
         val outlineCount = ps.count { it.part == 0 }
+        var a = 0; var b = 0; var m = 0; var o = 0
+        // Eye shape per style: rings °, happy arcs ^, dots •, sleepy lines -
+        fun eye(k: Float, cx: Float): Pair<Float, Float> = when (style) {
+            "happy" -> { val ang = PI + PI * k; (cx + 0.15f * cos(ang).toFloat()) to (-0.10f + 0.12f * sin(ang).toFloat()) }
+            "dots" -> { val ang = 2 * PI * k; (cx + 0.06f * cos(ang).toFloat()) to (-0.16f + 0.06f * sin(ang).toFloat()) }
+            "sleepy" -> (cx - 0.15f + 0.30f * k) to -0.14f
+            else -> { val ang = 2 * PI * k; (cx + 0.15f * cos(ang).toFloat()) to (-0.16f + 0.15f * sin(ang).toFloat()) }
+        }
+        // Mouth per style: wave ~, smile ‿, small o
+        fun mouthAt(k: Float): Pair<Float, Float> = when (style) {
+            "happy", "dots" -> { val ang = PI * k; (-0.30f * cos(ang).toFloat()) to (0.18f + 0.16f * sin(ang).toFloat()) }
+            "sleepy" -> { val ang = 2 * PI * k; (0.07f * cos(ang).toFloat()) to (0.32f + 0.07f * sin(ang).toFloat()) }
+            else -> (-0.34f + 0.68f * k) to 0.30f
+        }
         for (p in ps) when (p.part) {
-            1 -> { val ang = 2 * PI * a++ / eyeL; p.fx = -0.34f + 0.15f * cos(ang).toFloat(); p.fy = -0.16f + 0.15f * sin(ang).toFloat() }
-            2 -> { val ang = 2 * PI * b++ / eyeR; p.fx = 0.34f + 0.15f * cos(ang).toFloat(); p.fy = -0.16f + 0.15f * sin(ang).toFloat() }
-            3 -> { val k = m++ / (mouth - 1f); p.fx = -0.34f + 0.68f * k; p.fy = 0.30f }
+            1 -> { val (x, y) = eye(a++ / eyeL.toFloat(), -0.34f); p.fx = x; p.fy = y }
+            2 -> { val (x, y) = eye(b++ / eyeR.toFloat(), 0.34f); p.fx = x; p.fy = y }
+            3 -> { val (x, y) = mouthAt(m++ / (mouth - 1f).coerceAtLeast(1f)); p.fx = x; p.fy = y }
             else -> { val ang = 2 * PI * o++ / outlineCount; p.fx = 0.92f * cos(ang).toFloat(); p.fy = 0.92f * sin(ang).toFloat() }
         }
     }
@@ -138,7 +172,7 @@ class IslandFace(ctx: Context) : View(ctx) {
         val cx = w / 2f; val cy = h / 2f
         val R = minOf(w, h) * 0.42f
         val k = ease(morph)
-        val rot = t * (0.6f + spinBoost * 4f)
+        val rot = t * (0.6f + spinBoost * 4f) * speedK
         val cr = cos(rot); val sr = sin(rot)
         val tilt = 0.35f; val ct = cos(tilt); val st = sin(tilt)
         val breathe = 1f + 0.03f * sin(t * 1.6f)
@@ -154,7 +188,7 @@ class IslandFace(ctx: Context) : View(ctx) {
             var fx = p.fx; var fy = p.fy
             when (p.part) {
                 1, 2 -> { val ec = -0.16f; fy = ec + (fy - ec) * (1f - blink * 0.9f); fx += look * 0.07f }
-                3 -> fy += 0.08f * sin(fx * 9f + t * 3f) * (0.7f + 0.3f * sin(t))
+                3 -> if (style == "classic") fy += 0.08f * sin(fx * 9f + t * 3f * speedK) * (0.7f + 0.3f * sin(t))
             }
             val jx = sin(t * 1.3f + p.seed) * 0.02f; val jy = cos(t * 1.1f + p.seed * 1.7f) * 0.02f
             val fxp = cx + (fx + jx) * R * breathe
@@ -163,8 +197,8 @@ class IslandFace(ctx: Context) : View(ctx) {
             val py = syp + (fyp - syp) * k
             // Colour: warm orange on top, white below (like the reference); face lines turn bright white.
             val top = ((1f - p.sy) / 2f).coerceIn(0f, 1f)
-            val sphereCol = blend(Color.WHITE, 0xFFFFA24C.toInt(), top)
-            val faceCol = if (p.part == 0) blend(Color.WHITE, 0xFFFFB46B.toInt(), top * 0.8f) else Color.WHITE
+            val sphereCol = blend(botCol, topCol, top)
+            val faceCol = if (p.part == 0) blend(botCol, topCol, top * 0.8f) else Color.WHITE
             paint.color = blend(sphereCol, faceCol, k)
             val depth = (z + 1f) / 2f                  // 0 back … 1 front
             val alphaSphere = 0.25f + 0.75f * depth
@@ -172,6 +206,14 @@ class IslandFace(ctx: Context) : View(ctx) {
             paint.alpha = (255 * (alphaSphere + (alphaFace - alphaSphere) * k) * (1f - logoK * 0.35f)).toInt().coerceIn(0, 255)
             val size = p.size * d * (0.55f + 0.45f * (depth + (1f - depth) * k)) * (if (p.part != 0) 1f + 0.25f * k else 1f)
             c.drawCircle(px, py, size, paint)
+        }
+        if (badge > 0 && logoK < 0.5f) {
+            // Red bubble: how many notifications Gilbert is holding.
+            val br = minOf(w, h) * 0.17f
+            val bx = w - br; val by = br
+            c.drawCircle(bx, by, br, badgeP)
+            badgeT.textSize = br * 1.15f
+            c.drawText(if (badge > 9) "9+" else "$badge", bx, by - (badgeT.descent() + badgeT.ascent()) / 2, badgeT)
         }
         val lg = logo
         if (lg != null && logoK > 0.02f) {

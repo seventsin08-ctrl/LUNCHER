@@ -231,6 +231,19 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
+    private fun openGilbert() {
+        if (!isActive) { if (::sideHud.isInitialized) sideHud.openHistory(); return }
+        Gilbert.showPanel(this, root, settings,
+            appInfo = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } },
+            openApp = { pkg ->
+                Gilbert.held.remove(pkg); island.setFaceBadge(Gilbert.heldCount())
+                packageManager.getLaunchIntentForPackage(pkg)?.let { runCatching { startActivity(it) } }
+            },
+            openInbox = { if (::sideHud.isInitialized) sideHud.openHistory(); Gilbert.clearHeld() },
+            openTools = { island.toggleTools() })
+    }
+
     /** Pop this app's logo in the island's round face. */
     private fun peekApp(pkg: String) {
         if (!::island.isInitialized || !settings.islandFace) return
@@ -346,6 +359,9 @@ class MainActivity : Activity() {
         island.popupMs = settings.islandPopupMs.toLong()
         island.alwaysShow = settings.islandAlways
         island.faceOn = settings.islandFace
+        island.configureFace(settings)
+        island.onFaceTap = { openGilbert() }
+        Gilbert.onHeldChanged = { mainHandler.post { if (::island.isInitialized) island.setFaceBadge(Gilbert.heldCount()) } }
         // The tools live in the island: hidden around the camera, tap it to open them.
         island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
         island.quickActions = null // only one tools bar (ToolsBar) — none inside the island
@@ -397,9 +413,11 @@ class MainActivity : Activity() {
 
         NotificationService.onChange = { updateBadges() }
         NotificationService.onPosted = { pkg, title, text ->
-            // The round face pops the app's logo (messages, notifications, updates from Play Store / system).
-            peekApp(pkg)
-            showNotificationInIsland(pkg, title, text)
+            // Gilbert sees everything: counts it, pops the app's logo, and decides whether it may
+            // pop up now (priority apps / within the limit) or waits quietly with him.
+            Gilbert.record(this, pkg)
+            if (pkg !in settings.gilbertQuiet) peekApp(pkg)
+            if (Gilbert.shouldPop(this, settings, pkg)) showNotificationInIsland(pkg, title, text)
         }
         NotificationService.onOngoing = { refreshOngoing() }
         startPrivacyWatch()
@@ -789,6 +807,7 @@ class MainActivity : Activity() {
             island.alwaysShow = settings.islandAlways
             island.faceOn = settings.islandFace
             overlayIsland?.faceOn = settings.islandFace
+            island.configureFace(settings)
             island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
             root.post { setupTapZone() }
             overlayIsland?.idleTools = island.idleTools
@@ -844,6 +863,9 @@ class MainActivity : Activity() {
         ov.quickActions = island.quickActions
         ov.idleTools = island.idleTools
         ov.faceOn = island.faceOn
+        ov.configureFace(settings)
+        // Over other apps, tapping Gilbert opens his inbox (Notifications history).
+        ov.onFaceTap = { if (::sideHud.isInitialized) sideHud.openHistory() }
         ov.camera = island.camera
         applyToolsStyle(ov)
         ov.allow = island.allow

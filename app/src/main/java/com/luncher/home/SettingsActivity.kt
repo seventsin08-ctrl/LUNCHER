@@ -49,9 +49,10 @@ class SettingsActivity : Activity() {
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
         Category("phone", "Phone & Connections", 0xFF30D158.toInt(), R.drawable.ic_cc_wifi, listOf("PHONE & CONNECTIVITY", "CONNECTIONS")),
         Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
+        Category("gilbert", "Gilbert", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("GILBERT", "GILBERT · NOTIFICATIONS")),
         Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "RESET"))
     )
-    private val groups = listOf(listOf("setup"), listOf("look", "home", "island", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
+    private val groups = listOf(listOf("setup"), listOf("look", "home", "island", "gilbert", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
     /** null = the Settings home page. */
     private var page: String? = null
     private lateinit var scrollView: ScrollView
@@ -699,8 +700,6 @@ class SettingsActivity : Activity() {
         segment(content, "Pop-up Length", listOf("2500" to "Short", "4500" to "Normal", "8000" to "Long"),
             s.islandPopupMs.toString()) { s.islandPopupMs = it.toInt() }
 
-        toggle(isl, "Cute Face  °~°", "When nothing is happening the island is a little round face that blinks and looks " +
-            "around — and pops the app's logo when a message, notification or update arrives", s.islandFace) { s.islandFace = it; previewChanged() }
         segment(isl, "Island Info", listOf("off" to "Off", "cycle" to "All", "weather" to "Weather", "steps" to "Steps", "date" to "Date"),
             s.islandInfo) { s.islandInfo = it }
         info(isl, "Live info in the island when nothing else is playing: weather (tap for the temperature gauge), steps, " +
@@ -729,6 +728,32 @@ class SettingsActivity : Activity() {
             slider(tools, "Tap Area ↑ Up / Down ↓", -40, 40, s.hotspotDy, { "${it}dp" }) { s.hotspotDy = it }
             info(tools, "Tap the camera area at the top to open the tools; they tuck back around the camera after a few seconds (or tap the island again).")
         }
+
+        // ---------------- Gilbert: the living orb in the island
+        val gil = section("GILBERT")
+        toggle(gil, "Gilbert", "The living orb in the Dynamic Island: a sphere of particles that becomes a little face, " +
+            "blinks, looks around and pops app logos when something arrives. Tap him for his card", s.islandFace) { s.islandFace = it; rebuild() }
+        if (s.islandFace) {
+            segment(gil, "Colours", listOf("ember" to "Ember", "ocean" to "Ocean", "aurora" to "Aurora", "rose" to "Rose", "mono" to "Mono", "theme" to "Theme"),
+                s.gilbertColors) { s.gilbertColors = it }
+            segment(gil, "Face", listOf("classic" to "°~°", "happy" to "^‿^", "dots" to "•‿•", "sleepy" to "-o-"), s.gilbertFace) { s.gilbertFace = it }
+            slider(gil, "Size", 36, 64, s.gilbertSize, { "${it}dp" }) { s.gilbertSize = it }
+            slider(gil, "Particles", 120, 360, s.gilbertDensity, { "$it" }) { s.gilbertDensity = it }
+            slider(gil, "Speed", 40, 200, s.gilbertSpeed, { "$it%" }) { s.gilbertSpeed = it }
+        }
+        val gilN = section("GILBERT · NOTIFICATIONS")
+        toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; Gilbert quietly holds the rest (red bubble) " +
+            "until you tap him", s.gilbertCalm) { s.gilbertCalm = it }
+        slider(gilN, "Pop-ups per Minute (others)", 1, 10, s.gilbertMaxPerMin, { "$it" }) { s.gilbertMaxPerMin = it }
+        button(gilN, "Priority Apps… (${s.gilbertPriority.size})", 0xFF0A84FF.toInt()) {
+            chooseApps("Priority Apps", launchableApps(), s.gilbertPriority) { s.gilbertPriority = it; rebuild() }
+        }
+        button(gilN, "Quiet Apps… (${s.gilbertQuiet.size})", 0xFF0A84FF.toInt()) {
+            chooseApps("Quiet Apps (always held)", launchableApps(), s.gilbertQuiet) { s.gilbertQuiet = it; rebuild() }
+        }
+        info(gilN, "Priority apps always pop up. Quiet apps never do — Gilbert keeps them for you. Everything else pops up " +
+            "only within the per-minute limit (or never, in Calm Mode with Priority apps chosen). Tap Gilbert to see what he's holding, " +
+            "today's noisiest apps and a quick phone check.")
 
         // ---------------- Sounds
         val snd = section("SOUNDS")
