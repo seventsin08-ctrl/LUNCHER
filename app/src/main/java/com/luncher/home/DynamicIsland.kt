@@ -922,10 +922,20 @@ class DynamicIsland(
     private fun bind(a: IslandActivity) {
         if (a.icon != null) { icon.setImageBitmap(a.icon); icon.clearColorFilter() }
         else { icon.setImageResource(a.iconRes); icon.setColorFilter(a.iconTint) }
-        label.text = if (a.media != null) "" else a.title
-        // Music in the small island: the line being sung scrolls by right in the pill.
-        pill.removeCallbacks(compactLyrics)
-        if (a.media != null && Lyrics.enabled) pill.post(compactLyrics)
+        // Music: keep the lyric that's showing (the island is re-bound on every music update —
+        // clearing it each time made it flicker).
+        if (a.media == null) {
+            label.text = a.title
+            label.ellipsize = TextUtils.TruncateAt.END; label.isSelected = false
+            pill.removeCallbacks(compactLyrics); lyricSongKey = null; lyricRunning = false
+        } else {
+            val key = "${a.title}|${a.subtitle}"
+            if (key != lyricSongKey) { lyricSongKey = key; label.text = "" }
+            // Long lines glide sideways so you can read the whole sentence.
+            label.ellipsize = TextUtils.TruncateAt.MARQUEE; label.marqueeRepeatLimit = -1
+            label.isSingleLine = true; label.isSelected = true
+            if (Lyrics.enabled && !lyricRunning) { lyricRunning = true; pill.post(compactLyrics) }
+        }
         trailing.text = a.trailing ?: ""
         trailing.setTextColor(a.accent)
         trailing.visibility = if (a.trailing == null) View.GONE else View.VISIBLE
@@ -936,23 +946,30 @@ class DynamicIsland(
     private var ticker: Runnable? = null
     private var expSubtitle: TextView? = null
 
+    private var lyricSongKey: String? = null
+    private var lyricRunning = false
+
     /** Small island + music: show the current lyric line next to the art (fades as lines change). */
     private val compactLyrics: Runnable = object : Runnable {
         override fun run() {
-            val a = current() ?: return
-            val m = a.media ?: return
-            if (!Lyrics.enabled) return
+            val a = current()
+            val m = a?.media
+            if (a == null || m == null || !Lyrics.enabled) { lyricRunning = false; return }
             if (!expanded) {
                 val song = Lyrics.cached(a.title, a.subtitle)
                 if (song == null) Lyrics.fetch(a.title, a.subtitle, m.duration) { }
                 else {
-                    val line = if (song.synced.isNotEmpty()) Lyrics.lineAt(song, m.position() + 350) else ""
+                    val line = if (song.synced.isNotEmpty()) Lyrics.lineAt(song, m.position() + Lyrics.LEAD_MS) else ""
                     val show = if (line == "♪") "" else line
                     if (label.text.toString() != show) {
+                        // Old line drifts up and out, the new one rises in — no jump.
                         label.animate().cancel()
-                        label.alpha = 0f; label.translationY = dp(4).toFloat()
-                        label.text = show
-                        label.animate().alpha(1f).translationY(0f).setDuration(220).start()
+                        label.animate().alpha(0f).translationY(-dp(5).toFloat()).setDuration(120).withEndAction {
+                            label.text = show; label.isSelected = true
+                            label.translationY = dp(5).toFloat()
+                            label.animate().alpha(1f).translationY(0f).setDuration(240)
+                                .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+                        }.start()
                     }
                 }
             }

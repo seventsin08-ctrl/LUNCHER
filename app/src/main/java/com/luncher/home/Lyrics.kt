@@ -18,6 +18,8 @@ object Lyrics {
 
     /** Settings › Widgets › Lyrics (player widget and island). */
     @Volatile var enabled = true
+    /** Lyrics run this far ahead of the song, so you can read the next words before they're sung. */
+    const val LEAD_MS = 900L
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val cache = HashMap<String, Song?>()
@@ -106,7 +108,7 @@ class LyricsView(ctx: android.content.Context, private val big: Boolean = false)
             setRenderEffect(android.graphics.RenderEffect.createBlurEffect(blur * d, blur * d, android.graphics.Shader.TileMode.DECAL))
     }
     private val prev = mk(if (big) 13f else 11f, 0.35f, 2.2f)
-    private val cur = mk(if (big) 17f else 13.5f, 1f, 0f)
+    private val cur = mk(if (big) 17f else 13.5f, 1f, 0f).apply { maxLines = 3 }
     private val next = mk(if (big) 13f else 11f, 0.45f, 1.6f)
     private var lastIdx = -2
     var color: Int = android.graphics.Color.WHITE
@@ -126,7 +128,7 @@ class LyricsView(ctx: android.content.Context, private val big: Boolean = false)
             if (lastIdx != -1) { lastIdx = -1; prev.text = ""; cur.text = song.plain.firstOrNull() ?: ""; next.text = song.plain.getOrNull(1) ?: "" }
             return
         }
-        val t = posMs + 350   // a touch early, so it lands with the voice
+        val t = posMs + Lyrics.LEAD_MS   // a little ahead, so you can read what's coming
         var i = -1
         for ((k, l) in song.synced.withIndex()) { if (l.ms <= t) i = k else break }
         if (i == lastIdx) return
@@ -135,6 +137,7 @@ class LyricsView(ctx: android.content.Context, private val big: Boolean = false)
         val c = song.synced.getOrNull(i)?.text?.ifBlank { "♪" } ?: "♪"
         val n = song.synced.getOrNull(i + 1)?.text ?: ""
         prev.text = p; next.text = n
+        if (cur.text.toString() == c) return
         cur.animate().cancel()
         cur.text = c
         cur.alpha = 0.3f; cur.translationY = 8 * d; cur.scaleX = 0.97f; cur.scaleY = 0.97f

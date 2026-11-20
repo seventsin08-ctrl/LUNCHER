@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        117 to listOf("Lyrics no longer flicker in the island or the player — lines glide in smoothly",
+            "Whole lyric lines: long lines glide sideways in the small island, and the player shows up to 3 lines",
+            "Lyrics run a little ahead of the song so you can read what's coming next"),
         116 to listOf("Lyrics in the small island too: while music plays, the line being sung shows right next to the album art"),
         115 to listOf("Lyrics now land on time (shown a touch early, updated 5× a second)",
             "Spotify / ArchiveTune look: three lyric lines — the one being sung is bright, the ones around it are blurred — and the album art glows blurred behind the player",
