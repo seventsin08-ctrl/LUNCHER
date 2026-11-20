@@ -250,6 +250,7 @@ class MainActivity : Activity() {
             else -> "neutral"
         }
         island.setFaceMood(mood)
+        gilbertMood = mood
     }
 
     /** Watching (video), listening (music), chatting (happy), browsing/searching (curious)… */
@@ -269,9 +270,30 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Gilbert's red bubble + the logos of held apps next to him. */
+    private fun refreshHeld() {
+        if (!::island.isInitialized) return
+        island.setFaceBadge(Gilbert.heldCount())
+        island.setHeld(Gilbert.held.entries.reversed().map { (pkg, n) ->
+            Triple(allApps.firstOrNull { it.packageName == pkg }?.icon, n, pkg)
+        })
+    }
+
+    // ---- Gilbert talks now and then
+    private var nextTalk = System.currentTimeMillis() + 25_000
+    private var gilbertMood = "neutral"
+    private fun maybeTalk() {
+        if (!::island.isInitialized || !settings.islandFace || !settings.gilbertTalk || GameState.playing || searchingNow) return
+        val now = System.currentTimeMillis()
+        if (now < nextTalk) return
+        nextTalk = now + settings.gilbertTalkMin * 60_000L + (Math.random() * 90_000).toLong()
+        island.say(GilbertTalk.line(this, settings, gilbertMood))
+    }
+
     /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
     private fun openGilbert() {
         if (!isActive) { if (::sideHud.isInitialized) sideHud.openHistory(); return }
+        SoundFX.play(this, "open")
         Gilbert.showPanel(this, root, settings,
             appInfo = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } },
             openApp = { pkg ->
@@ -399,7 +421,12 @@ class MainActivity : Activity() {
         island.faceOn = settings.islandFace
         island.configureFace(settings)
         island.onFaceTap = { openGilbert() }
-        Gilbert.onHeldChanged = { mainHandler.post { if (::island.isInitialized) island.setFaceBadge(Gilbert.heldCount()) } }
+        Gilbert.onHeldChanged = { mainHandler.post { refreshHeld() } }
+        island.onHeldTap = { pkg ->
+            // Tap a logo beside Gilbert: what that app sent.
+            if (::sideHud.isInitialized) sideHud.openHistoryFor(pkg)
+            Gilbert.held.remove(pkg); refreshHeld()
+        }
         // The tools live in the island: hidden around the camera, tap it to open them.
         island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
         island.quickActions = null // only one tools bar (ToolsBar) — none inside the island
@@ -454,6 +481,7 @@ class MainActivity : Activity() {
             // Gilbert sees everything: counts it, pops the app's logo, and decides whether it may
             // pop up now (priority apps / within the limit) or waits quietly with him.
             Gilbert.record(this, pkg)
+            Gilbert.note(this, pkg, title, text)
             if (pkg !in settings.gilbertQuiet) peekApp(pkg)
             if (Gilbert.shouldPop(this, settings, pkg)) showNotificationInIsland(pkg, title, text)
         }
@@ -670,7 +698,7 @@ class MainActivity : Activity() {
     private var infoCycle = 0
     private val infoListener: () -> Unit = { updateInfoIsland(advance = false) }
     private val infoTicker = object : Runnable {
-        override fun run() { updateInfoIsland(advance = true); updateGilbertMood(); mainHandler.postDelayed(this, 10_000) }
+        override fun run() { updateInfoIsland(advance = true); updateGilbertMood(); maybeTalk(); mainHandler.postDelayed(this, 10_000) }
     }
     private fun infoIcon(key: String, e: String, bg: Int = 0) = infoIcons.getOrPut(key) { InfoViews.emoji(this, e, bg) }
 
@@ -1134,6 +1162,7 @@ class MainActivity : Activity() {
     /** The iPhone "hello" screen. */
     private fun showHello(then: (() -> Unit)? = null) {
         if (helloView != null) return
+        SoundFX.play(this, "hello")
         val v = HelloView(this) {
             helloView?.let { root.removeView(it) }
             helloView = null
@@ -5927,6 +5956,7 @@ class MainActivity : Activity() {
         batteryText?.text = "$batteryLevel%"
         if (::island.isInitialized && wasCharging == false && batteryCharging) {
             if (settings.gilbertEmotions) island.faceReact("excited", 3000)
+            if (settings.islandFace) { SoundFX.play(this, "happy"); island.say(listOf("Charging! ⚡ Thank you~", "Yay, power! 🔋", "Mmm, electricity 😋").random()) }
             island.flash(IslandActivity(
                 "charging", null, R.drawable.ic_bolt, 0xFF30D158.toInt(), "Charging", "Battery $batteryLevel%",
                 "$batteryLevel%", false, 0xFF30D158.toInt()

@@ -374,6 +374,20 @@ class Settings(ctx: Context) {
     var gilbertEmotions: Boolean
         get() = p.getBoolean("s_gil_emotions", true)
         set(v) = put("s_gil_emotions", v)
+    /** Gilbert says things now and then (check-ins, reminders, updates). */
+    var gilbertTalk: Boolean
+        get() = p.getBoolean("s_gil_talk", true)
+        set(v) = put("s_gil_talk", v)
+    var gilbertTalkMin: Int
+        get() = p.getInt("s_gil_talk_min", 12)
+        set(v) = put("s_gil_talk_min", v)
+    /** Soft sound effects (pops, chirps, the hello chime). */
+    var soundFx: Boolean
+        get() = p.getBoolean("s_sfx", true)
+        set(v) = put("s_sfx", v)
+    var soundFxVolume: Int
+        get() = p.getInt("s_sfx_vol", 60)
+        set(v) = put("s_sfx_vol", v)
     /** Calm Mode: only priority apps pop up; Gilbert holds the rest. */
     var gilbertCalm: Boolean
         get() = p.getBoolean("s_gil_calm", true)

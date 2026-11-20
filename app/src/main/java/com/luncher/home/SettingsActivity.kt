@@ -740,6 +740,9 @@ class SettingsActivity : Activity() {
             slider(gil, "Size", 36, 64, s.gilbertSize, { "${it}dp" }) { s.gilbertSize = it }
             slider(gil, "Particles", 120, 360, s.gilbertDensity, { "$it" }) { s.gilbertDensity = it }
             slider(gil, "Speed", 40, 200, s.gilbertSpeed, { "$it%" }) { s.gilbertSpeed = it }
+            toggle(gil, "Gilbert Talks", "Little check-ins in a bubble under the island: “Have you eaten?”, drink water, " +
+                "battery and heat warnings, steps, weather, held notifications and more", s.gilbertTalk) { s.gilbertTalk = it }
+            slider(gil, "Talks Every", 3, 60, s.gilbertTalkMin, { "$it min" }) { s.gilbertTalkMin = it }
             toggle(gil, "Emotions & Reactions", "Gilbert feels things: he watches with you during videos, bops to music, reads " +
                 "along when you search, smiles at chats, gets sleepy at night, sad when the battery is low, excited when " +
                 "charging, surprised at new messages — and his eyes follow your finger", s.gilbertEmotions) { s.gilbertEmotions = it }
@@ -760,6 +763,9 @@ class SettingsActivity : Activity() {
 
         // ---------------- Sounds
         val snd = section("SOUNDS")
+        toggle(snd, "Sound Effects", "Soft pops, ticks, Gilbert's chirps and the sparkly “hello” chime (silent when the phone is on silent)",
+            s.soundFx) { s.soundFx = it; if (it) SoundFX.play(this, "success") }
+        slider(snd, "Effects Volume", 10, 100, s.soundFxVolume, { "$it%" }) { s.soundFxVolume = it; SoundFX.play(this, "pop") }
         button(snd, "Use a Song as Ringtone…", 0xFF0A84FF.toInt()) { pickRingtone() }
         button(snd, "Sound & Vibration Settings…", 0xFF0A84FF.toInt()) {
             runCatching { startActivity(Intent(SysSettings.ACTION_SOUND_SETTINGS)) }

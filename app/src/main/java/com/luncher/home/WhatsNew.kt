@@ -21,6 +21,10 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        104 to listOf("Gilbert talks: check-ins like “Have you eaten?”, water and break reminders, battery/heat warnings, steps, weather and more",
+            "Held apps sit beside Gilbert with their own counts — tap a logo to see what it sent",
+            "Gilbert's card: Mentions of you and Gilbert's Notes of every message",
+            "Sound effects everywhere: pops, chirps, a sparkly hello chime (Settings › Sounds)"),
         103 to listOf("Gilbert has feelings: he watches videos with you, bops to music, reads along when you search, smiles at chats, gets sleepy at night, sad on low battery, excited when charging and surprised by new messages",
             "His eyes follow your finger on the Home Screen"),
         102 to listOf("Meet Gilbert — the living orb in the island. Tap him for his card: notifications he held, today's noisiest apps (make them Priority or Quiet) and a phone check",
@@ -221,7 +225,7 @@ object WhatsNew {
         lateinit var close: () -> Unit
         next.setOnClickListener {
             it.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
-            if (page < features.lastIndex) { page++; bind(true) } else close()
+            if (page < features.lastIndex) { page++; bind(true); SoundFX.play(act, "tick") } else { SoundFX.play(act, "success"); close() }
         }
         skip.setOnClickListener { close() }
         layer.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.CENTER).apply { leftMargin = dp(20); rightMargin = dp(20) })

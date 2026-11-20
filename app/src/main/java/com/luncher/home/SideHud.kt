@@ -270,6 +270,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         if (settings.sideReply && chat.reply != null) root.post { showClips() }
         resizeBy(chatGrip, root, l, scroll, "chat", minW = dp(220))
         me.restartTimer()
+        if (!preview) SoundFX.play(act, "pop")
         // Grows out of the side island (a soft slide when it's an extra window).
         root.pivotX = if (isRight) width.toFloat() else 0f
         root.pivotY = h / 2f
@@ -927,6 +928,8 @@ class SideHud(private val act: Activity, private val settings: Settings, private
 
     /** Open Message History from anywhere (e.g. Settings). */
     fun openHistory() { if (view == null) rest(); showHistory() }
+    /** Message History showing only one app (tapping its logo next to Gilbert). */
+    fun openHistoryFor(pkg: String) { if (view == null) rest(); showHistory(pkg) }
 
     private fun toggleHistory() {
         if (histPanel != null) hideHistory()

@@ -232,6 +232,7 @@ class Sidebar(
         }
         if (runCatching { w.addView(root, lp) }.isFailure) return
         panelRoot = root; panel = card
+        SoundFX.play(act, "open")
         // Make room for the island: when it opens at the top, the panel's top slides down
         // (its bottom stays put); when it closes, the panel grows back.
         val baseH = cardH
@@ -336,6 +337,7 @@ class Sidebar(
         val root = panelRoot ?: return
         val card = panel
         panelRoot = null; panel = null
+        if (!immediate) SoundFX.play(act, "close")
         zoneListener?.let { OverlayZones.unlisten(it) }; zoneListener = null
         OverlayZones.setSidebar(0, settings.sidebarRight)
         handle?.animate()?.alpha(1f)?.setDuration(200)?.start()

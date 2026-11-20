@@ -79,6 +79,36 @@ object Gilbert {
     }
 
     fun heldCount() = held.values.sum()
+
+    // ---------------------------------------------------------------- notes & mentions
+    class Note(val pkg: String, val title: String, val text: String, val time: Long, val mention: Boolean)
+
+    /** Gilbert writes down every message / notification (latest 80), and spots mentions of you. */
+    fun note(ctx: Context, pkg: String, title: String, text: String) {
+        val name = GilbertTalk.ownerName(ctx)?.lowercase()
+        val low = (title + " " + text).lowercase()
+        val mention = low.contains("mentioned you") || low.contains("tagged you") || low.contains("replied to you") ||
+            low.contains("@everyone") || (name != null && (low.contains("@$name") || Regex("\\b${Regex.escape(name)}\\b").containsMatchIn(low)))
+        val p = ctx.getSharedPreferences("luncher", Context.MODE_PRIVATE)
+        val arr = runCatching { org.json.JSONArray(p.getString("gil_notes", "[]")) }.getOrDefault(org.json.JSONArray())
+        arr.put(org.json.JSONObject().put("p", pkg).put("t", title).put("x", text).put("w", System.currentTimeMillis()).put("m", mention))
+        val keep = org.json.JSONArray(); val from = maxOf(0, arr.length() - 80)
+        for (i in from until arr.length()) keep.put(arr.get(i))
+        p.edit().putString("gil_notes", keep.toString()).apply()
+    }
+
+    fun notes(ctx: Context): List<Note> {
+        val arr = runCatching { org.json.JSONArray(ctx.getSharedPreferences("luncher", Context.MODE_PRIVATE).getString("gil_notes", "[]")) }
+            .getOrDefault(org.json.JSONArray())
+        return (0 until arr.length()).map { arr.getJSONObject(it) }.map {
+            Note(it.optString("p"), it.optString("t"), it.optString("x"), it.optLong("w"), it.optBoolean("m"))
+        }.reversed()
+    }
+
+    private fun ago(t: Long): String {
+        val m = ((System.currentTimeMillis() - t) / 60000).coerceAtLeast(0)
+        return when { m < 1 -> "now"; m < 60 -> "${m}m"; m < 1440 -> "${m / 60}h"; else -> "${m / 1440}d" }
+    }
     fun clearHeld() { held.clear(); onHeldChanged?.invoke() }
 
     // ---------------------------------------------------------------- system check
@@ -180,6 +210,22 @@ object Gilbert {
             addView(View(act), LinearLayout.LayoutParams(dp(8), 1))
             addView(pill("Clear", 0xFFFF453A.toInt()) { clearHeld(); close() })
         })
+
+        // Mentions of you (from any app).
+        val allNotes = notes(act)
+        val mentions = allNotes.filter { it.mention }.take(5)
+        if (mentions.isNotEmpty()) {
+            section("MENTIONS")
+            for (n in mentions) { val info = appInfo(n.pkg); row(info?.first, "${n.title}: ${n.text}".take(60), ago(n.time), { close(); openApp(n.pkg) }) }
+        }
+        // Gilbert's notes: what came in lately, in one line each.
+        if (allNotes.isNotEmpty()) {
+            section("GILBERT'S NOTES")
+            for (n in allNotes.take(8)) {
+                val info = appInfo(n.pkg)
+                row(info?.first, listOf(n.title, n.text).filter { it.isNotBlank() }.joinToString(": ").take(60), ago(n.time), { close(); openApp(n.pkg) })
+            }
+        }
 
         // Noisiest apps today — make them Priority (always show) or Quiet (always hold).
         val counts = countsToday(act).take(4)

@@ -183,7 +183,93 @@ class DynamicIsland(
     /** Pop an app's logo in the round island (new message, notification, app update…). */
     fun peekIcon(icon: android.graphics.Bitmap?) {
         mirror?.peekIcon(icon)
-        if (face.visibility == View.VISIBLE) face.peek(icon)
+        if (face.visibility == View.VISIBLE) { face.peek(icon); if (!overlayMode) SoundFX.play(act, "blip") }
+    }
+
+    // ---------------------------------------------------------------- Gilbert talks (speech bubble)
+    private val bubble by lazy {
+        TextView(act).apply {
+            setTextColor(Color.WHITE); textSize = 13.5f; maxWidth = dp(270)
+            setPadding(dp(14), dp(9), dp(14), dp(10))
+            background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0xF21C1C1E.toInt()); setStroke(maxOf(1, dp(1)), 0x2EFFFFFF) }
+            elevation = dp(8).toFloat()
+            visibility = View.GONE
+            setOnClickListener { hideBubble.run() }
+        }.also { root.addView(it, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
+    }
+    private val hideBubble = Runnable {
+        if (bubble.visibility == View.VISIBLE)
+            bubble.animate().alpha(0f).scaleX(0.85f).scaleY(0.85f).setDuration(180).withEndAction { bubble.visibility = View.GONE }.start()
+    }
+
+    /** Gilbert says something in a little bubble under the island. */
+    fun say(text: String) {
+        mirror?.say(text)
+        if (pill.visibility != View.VISIBLE || expanded || searching) return
+        bubble.text = text
+        (bubble.layoutParams as FrameLayout.LayoutParams).topMargin = topMargin + (pill.height.takeIf { it > 0 } ?: dp(40)) + dp(8)
+        bubble.requestLayout()
+        bubble.translationX = pill.translationX
+        bubble.pivotY = 0f
+        bubble.visibility = View.VISIBLE
+        bubble.alpha = 0f; bubble.scaleX = 0.6f; bubble.scaleY = 0.6f; bubble.translationY = -dp(8).toFloat()
+        bubble.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f).setDuration(320)
+            .setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
+        if (!overlayMode) SoundFX.play(act, "chirp")
+        bubble.removeCallbacks(hideBubble)
+        bubble.postDelayed(hideBubble, 6000)
+    }
+
+    // ---------------------------------------------------------------- held apps beside Gilbert
+    /** Tap an app logo beside Gilbert: see what that app sent. */
+    var onHeldTap: ((String) -> Unit)? = null
+    private val heldRow by lazy {
+        LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
+            .also { root.addView(it, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
+    }
+
+    /** Apps Gilbert is holding notifications for: (logo, count, package), shown next to him. */
+    fun setHeld(items: List<Triple<android.graphics.Bitmap?, Int, String>>) {
+        if (overlayMode) return
+        val row = heldRow
+        row.removeAllViews()
+        for ((icon, n, pkg) in items.take(4)) {
+            val f = FrameLayout(act).apply {
+                setOnClickListener { buzz(); SoundFX.play(act, "pop"); onHeldTap?.invoke(pkg) }
+            }
+            f.addView(ImageView(act).apply {
+                if (icon != null) setImageBitmap(icon) else { setImageResource(R.drawable.ic_chat); setColorFilter(Color.WHITE) }
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) = outline.setOval(0, 0, view.width, view.height)
+                }
+                clipToOutline = true
+            }, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER))
+            f.addView(TextView(act).apply {
+                text = if (n > 99) "99+" else "$n"; textSize = 9f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                typeface = Typeface.DEFAULT_BOLD; setPadding(dp(3), 0, dp(3), 0)
+                background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(0xFFFF3B30.toInt()) }
+                minWidth = dp(15)
+            }, FrameLayout.LayoutParams(WRAP_CONTENT, dp(15), Gravity.TOP or Gravity.END))
+            row.addView(f, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginStart = dp(3) })
+        }
+        val show = items.isNotEmpty() && pill.visibility == View.VISIBLE
+        if (show && row.visibility != View.VISIBLE) {
+            row.visibility = View.VISIBLE; row.alpha = 0f; row.scaleX = 0.6f; row.scaleY = 0.6f
+            row.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.OvershootInterpolator(1.3f)).start()
+        } else if (!show) row.visibility = View.GONE
+        row.post { positionSide() }
+    }
+
+    /** Keep the held-app logos just to the right of the island. */
+    private fun positionSide() {
+        if (overlayMode) return
+        val row = heldRow
+        if (row.visibility != View.VISIBLE) return
+        val w = (if (targetW > 0) targetW else pill.width) * pill.scaleX
+        val h = (if (targetH > 0) targetH else pill.height) * pill.scaleY
+        (row.layoutParams as FrameLayout.LayoutParams).topMargin = topMargin + ((h - dp(32)) / 2).toInt().coerceAtLeast(0)
+        row.requestLayout()
+        row.animate().translationX(pill.translationX + w / 2f + dp(8) + row.width / 2f).setDuration(220).start()
     }
 
     /** The oblong tool strip shown when idle. */
@@ -621,6 +707,7 @@ class DynamicIsland(
     private val closeTools = Runnable { if (toolsOpen) { toolsOpen = false; refresh() } }
     fun toggleTools() {
         if (!toolsOn || expanded || (current() != null && current()?.id != "info")) return
+        SoundFX.play(act, "pop")
         toolsOpen = !toolsOpen
         buzz()
         pill.removeCallbacks(closeTools)
@@ -1013,6 +1100,8 @@ class DynamicIsland(
         val a = current() ?: return
         if (expanded) return
         expanded = true
+        SoundFX.play(act, "open")
+        hideBubble.run()
         buzz()
         showFace(false)
         showTools(false)
@@ -1044,6 +1133,7 @@ class DynamicIsland(
     fun collapse(animate: Boolean = true) {
         if (!expanded) return
         expanded = false
+        if (animate) SoundFX.play(act, "close")
         quickMode = false
         catcher?.let { root.removeView(it) }
         catcher = null
@@ -1074,7 +1164,11 @@ class DynamicIsland(
     }
 
     /** Spring the pill's size like the island morphing. */
+    private var targetW = 0
+    private var targetH = 0
     private fun animateSize(w: Int, h: Int, radius: Float) {
+        targetW = w; targetH = h
+        pill.post { positionSide() }
         val lp = pill.layoutParams as FrameLayout.LayoutParams
         val startW = if (pill.width > 0) pill.width else lp.width
         val startH = if (pill.height > 0) pill.height else lp.height
