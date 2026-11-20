@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        139 to listOf("Gilbert talks like a professional personal assistant who's also your best friend — clear, helpful and warm",
+            "Say “report” (or “brief”, “summary”) for a daily briefing: messages, mentions, what's waiting, your song on repeat and your phone",
+            "Downloads and system notifications no longer count as messages; fixed stray “\\n” in his replies"),
         138 to listOf("Gilbert answers fast: time, “what did I miss?”, music, apps, battery and “who am I?” are answered instantly",
             "His brain now gets a short, proper chat prompt — quicker and real replies instead of repeating facts; it starts loading as soon as you open the chat, with typing dots while he thinks"),
         137 to listOf("Talk to Gilbert: tap him, then 💬 — ask “what did I miss?”, “what am I listening to?”, “who am I?” and more",

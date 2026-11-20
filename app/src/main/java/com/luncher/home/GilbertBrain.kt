@@ -81,6 +81,8 @@ object GilbertBrain {
         var t = raw
         for (stop in listOf("<|im_end|>", "<|im_start|>", "<end_of_turn>", "<start_of_turn>", "\nUser:", "\nuser", "\nGilbert:"))
             t = t.substringBefore(stop)
+        // Some answers come with a literal "\\n" — turn it into a space.
+        t = t.replace("\\n", " ").replace("\\t", " ")
         t = t.trim().removePrefix("Gilbert:").removePrefix("assistant").trim()
         // At most 3 sentences.
         val parts = t.split(Regex("(?<=[.!?])\\s+"))
@@ -98,10 +100,18 @@ object GilbertBrain {
         GilbertMemory.topArtists(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Loves: ${it.joinToString { a -> a.first }}. ") }
         GilbertMemory.topPeople(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Chats with: ${it.joinToString { p -> p.first }}. ") }
         facts.append("Time: ${java.text.SimpleDateFormat("EEE h:mm a", java.util.Locale.getDefault()).format(java.util.Date())}.")
-        val system = "You are Gilbert, the user's cute, caring best friend living in their phone. " +
-            "Reply in ONE or TWO short casual sentences, sometimes one emoji. Never list facts. Facts: $facts"
+        val name = GilbertTalk.ownerName(ctx) ?: "friend"
+        val unread = Gilbert.heldCount()
+        val system = "You are Gilbert, $name's personal assistant and best friend, living in their phone. " +
+            "Personality: professional, calm and capable like a great executive assistant, but warm and loyal like a best friend. " +
+            "Speak clearly in 1-2 short sentences. Be specific and helpful, offer a next step when useful, " +
+            "use their name now and then, at most one emoji. Never say \"How can I assist you today\". " +
+            "Facts: $facts" + (if (unread > 0) " They have $unread waiting notifications." else "")
         val sb = StringBuilder()
         sb.append("<|im_start|>system\n").append(system).append("<|im_end|>\n")
+        // One example so the small brain gets the tone right.
+        sb.append("<|im_start|>user\nhey<|im_end|>\n<|im_start|>assistant\n")
+            .append("Hey $name, good to see you. Everything's under control — want a quick rundown of your messages? 🙂<|im_end|>\n")
         for ((user, text) in history.takeLast(4)) {
             sb.append(if (user) "<|im_start|>user\n" else "<|im_start|>assistant\n").append(text.take(160)).append("<|im_end|>\n")
         }

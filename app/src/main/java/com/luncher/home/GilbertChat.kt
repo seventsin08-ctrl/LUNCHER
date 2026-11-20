@@ -27,7 +27,7 @@ object GilbertChat {
     /** Questions about facts are answered instantly from memory (fast and always correct). */
     fun isFactQuestion(q: String): Boolean {
         val t = q.lowercase()
-        return listOf("time", "date", "day is", "miss", "recap", "notif", "message", "mention", "song", "music", "listen",
+        return listOf("report", "brief", "summary", "summar", "rundown", "time", "date", "day is", "miss", "recap", "notif", "message", "mention", "song", "music", "listen",
             "artist", "app", "who am i", "about me", "know me", "battery", "storage", "temperature", "who texted", "talk to").any { t.contains(it) }
     }
 
@@ -35,6 +35,7 @@ object GilbertChat {
         val t = q.lowercase()
         fun has(vararg w: String) = w.any { t.contains(it) }
         return when {
+            has("report", "brief", "summary", "summar", "rundown") -> GilbertMemory.report(act)
             has("time", "date", "day is") -> "It's " + java.text.SimpleDateFormat("h:mm a, EEEE MMM d", java.util.Locale.getDefault()).format(java.util.Date()) + " ⏰"
             has("miss", "recap", "notif", "message", "what happened", "update") -> GilbertMemory.recap(act)
             has("mention", "tag") -> Gilbert.notes(act).filter { it.mention }.take(3).takeIf { it.isNotEmpty() }
@@ -48,7 +49,7 @@ object GilbertChat {
                 ?.let { "You talk most with ${it.joinToString { p -> p.first }} 💬" } ?: "I haven't seen many messages yet."
             has("battery", "phone", "storage", "hot", "temperature") -> Gilbert.health(act).let { h -> Gilbert.mood(act, h) +
                 " (battery ${h.battery}%, ${h.tempC?.roundToInt() ?: "?"}°C)" }
-            has("hi", "hello", "hey", "yo", "sup") -> "Hey ${GilbertTalk.ownerName(act) ?: "you"}! 👋 " + GilbertTalk.line(act, s, "happy")
+            has("hi", "hello", "hey", "yo", "sup") -> "Hey ${GilbertTalk.ownerName(act) ?: "there"}, good to see you. Want your briefing? Just say “report” 🙂"
             has("thank") -> "Anytime 🤍"
             has("how are you", "how r u") -> "I'm glowing ✨ How about you?"
             has("sad", "tired", "stress", "bad day") -> "I'm here with you 🤍 Take a breath, drink some water, and maybe put on your favourite song."
@@ -113,7 +114,8 @@ object GilbertChat {
             scroll.post { scroll.smoothScrollTo(0, list.height) }
             return tv
         }
-        if (history.isEmpty()) history += false to (GilbertMemory.recap(act) + "\nAsk me anything — “what did I miss?”, “what am I listening to?”, “who am I?” 🙂")
+        if (history.isEmpty()) history += false to ("Hi${GilbertTalk.ownerName(act)?.let { " $it" } ?: ""}, I'm here. " + GilbertMemory.recap(act) +
+            "\nSay “report” for your full briefing, or just talk to me 🙂")
         for ((u, t) in history) bubble(u, t)
         GilbertBrain.warmUp(act)   // start loading his brain now so he answers sooner
 

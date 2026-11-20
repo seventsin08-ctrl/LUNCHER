@@ -77,13 +77,37 @@ object GilbertMemory {
         return sb.toString().trim().ifEmpty { "I'm still getting to know you — give me a day or two 🙂" }
     }
 
+    /** Real messages only — not downloads, system or progress notifications. */
+    fun isMessage(n: Gilbert.Note): Boolean {
+        val p = n.pkg.lowercase(); val t = n.title.lowercase()
+        if (p == "android" || p.contains("systemui") || p.contains("download") || p.contains("providers") ||
+            p.contains("vending") || p.contains("packageinstaller") || p.startsWith("com.vivo.") || p.startsWith("com.bbk.")) return false
+        if (Regex("\\.(apk|task|pdf|zip|jpg|png|mp4|mp3|docx?)\\b").containsMatchIn(t)) return false
+        return n.title.isNotBlank()
+    }
+
+    /** Professional daily briefing: messages, mentions, music, phone. */
+    fun report(ctx: Context): String {
+        val name = GilbertTalk.ownerName(ctx)
+        val h = runCatching { Gilbert.health(ctx) }.getOrNull()
+        val lines = ArrayList<String>()
+        lines += (if (name != null) "Here's your briefing, $name 📋" else "Here's your briefing 📋")
+        lines += "• Messages: " + recap(ctx)
+        Gilbert.notes(ctx).filter { it.mention }.take(2).forEach { lines += "• Mention — ${it.title}: “${it.text.take(50)}”" }
+        if (Gilbert.heldCount() > 0) lines += "• Waiting quietly: ${Gilbert.heldCount()} notification${if (Gilbert.heldCount() > 1) "s" else ""}"
+        topSongs(ctx, 1).firstOrNull()?.let { lines += "• On repeat: ${it.first}" }
+        h?.let { lines += "• Phone: battery ${it.battery}%${if (it.charging) " (charging)" else ""}, ${it.tempC?.toInt() ?: "?"}°C, ${"%.0f".format(it.storageFreeGb)} GB free" }
+        lines += "Anything you'd like me to look into?"
+        return lines.joinToString("\n")
+    }
+
     /** Today's recap: what came in, who, mentions. */
     fun recap(ctx: Context): String {
         val notes = Gilbert.notes(ctx)
         val dayStart = java.util.Calendar.getInstance().apply {
             set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
         }.timeInMillis
-        val today = notes.filter { it.time >= dayStart }
+        val today = notes.filter { it.time >= dayStart && isMessage(it) }
         if (today.isEmpty()) {
             val last = notes.firstOrNull() ?: return "Nothing came in today yet — all quiet ✨"
             return "Nothing new today. Last one was from ${last.title}: “${last.text.take(50)}”"
