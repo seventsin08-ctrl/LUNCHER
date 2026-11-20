@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        138 to listOf("Gilbert answers fast: time, “what did I miss?”, music, apps, battery and “who am I?” are answered instantly",
+            "His brain now gets a short, proper chat prompt — quicker and real replies instead of repeating facts; it starts loading as soon as you open the chat, with typing dots while he thinks"),
         137 to listOf("Talk to Gilbert: tap him, then 💬 — ask “what did I miss?”, “what am I listening to?”, “who am I?” and more",
             "Gilbert's memory: he learns your favourite songs and artists, the apps you open most and who messages you — all kept on your phone (Settings › Gilbert › Brain & Memory, with Forget Everything)",
             "Gilbert's brain (optional): add a small offline AI model and he chats about anything — privately, on the phone, no internet needed"),

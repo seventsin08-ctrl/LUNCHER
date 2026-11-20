@@ -24,10 +24,18 @@ object GilbertChat {
     private val history = ArrayList<Pair<Boolean, String>>()   // (fromUser, text)
 
     /** Answers without the brain: memory + rules. */
+    /** Questions about facts are answered instantly from memory (fast and always correct). */
+    fun isFactQuestion(q: String): Boolean {
+        val t = q.lowercase()
+        return listOf("time", "date", "day is", "miss", "recap", "notif", "message", "mention", "song", "music", "listen",
+            "artist", "app", "who am i", "about me", "know me", "battery", "storage", "temperature", "who texted", "talk to").any { t.contains(it) }
+    }
+
     fun ruleAnswer(act: Activity, s: Settings, q: String): String {
         val t = q.lowercase()
         fun has(vararg w: String) = w.any { t.contains(it) }
         return when {
+            has("time", "date", "day is") -> "It's " + java.text.SimpleDateFormat("h:mm a, EEEE MMM d", java.util.Locale.getDefault()).format(java.util.Date()) + " ⏰"
             has("miss", "recap", "notif", "message", "what happened", "update") -> GilbertMemory.recap(act)
             has("mention", "tag") -> Gilbert.notes(act).filter { it.mention }.take(3).takeIf { it.isNotEmpty() }
                 ?.joinToString("\n") { "• ${it.title}: ${it.text.take(60)}" } ?: "No one mentioned you today 🙂"
@@ -107,6 +115,7 @@ object GilbertChat {
         }
         if (history.isEmpty()) history += false to (GilbertMemory.recap(act) + "\nAsk me anything — “what did I miss?”, “what am I listening to?”, “who am I?” 🙂")
         for ((u, t) in history) bubble(u, t)
+        GilbertBrain.warmUp(act)   // start loading his brain now so he answers sooner
 
         // Input
         val input = EditText(act).apply {
@@ -125,8 +134,12 @@ object GilbertChat {
             if (q.isEmpty() || GilbertBrain.busy) return
             input.setText(""); SoundFX.play(act, "tick")
             history += true to q; bubble(true, q)
-            if (GilbertBrain.installed(act)) {
-                val thinking = bubble(false, "…")
+            if (GilbertBrain.installed(act) && !isFactQuestion(q)) {
+                val thinking = bubble(false, "•")
+                // Typing dots while he thinks.
+                val dots = object : Runnable { var n = 0
+                    override fun run() { if (thinking.text.length <= 3 && thinking.text.all { it == '•' }) { n = n % 3 + 1; thinking.text = "•".repeat(n); thinking.postDelayed(this, 350) } } }
+                thinking.post(dots)
                 GilbertBrain.ask(act, history.dropLast(1), q) { ans ->
                     val a = ans ?: ruleAnswer(act, s, q)
                     history += false to a

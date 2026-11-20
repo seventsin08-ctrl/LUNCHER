@@ -50,10 +50,17 @@ object GilbertBrain {
         llm = runCatching {
             LlmInference.createFromOptions(ctx, LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(file(ctx).absolutePath)
-                .setMaxTokens(768)
+                .setMaxTokens(1024)
                 .build())
         }.getOrNull()
         return llm
+    }
+
+    /** Start loading the brain in the background (so the first answer comes quicker). */
+    fun warmUp(ctx: Context) {
+        if (!installed(ctx) || llm != null) return
+        val app = ctx.applicationContext
+        exec.execute { load(app) }
     }
 
     /** Ask Gilbert something. [done] gets his answer (or null if the brain couldn't run). */
@@ -63,30 +70,42 @@ object GilbertBrain {
         exec.execute {
             val answer = runCatching {
                 val m = load(app) ?: return@runCatching null
-                m.generateResponse(prompt(app, history, question)).trim()
-                    .substringBefore("User:").substringBefore("<end_of_turn>").trim()
+                clean(m.generateResponse(prompt(app, history, question)))
             }.getOrNull()
             main.post { busy = false; done(answer?.takeIf { it.isNotBlank() }) }
         }
     }
 
-    /** Who Gilbert is + what he knows about you + the chat so far. */
+    /** Cut the answer at any chat markers and keep it short. */
+    private fun clean(raw: String): String {
+        var t = raw
+        for (stop in listOf("<|im_end|>", "<|im_start|>", "<end_of_turn>", "<start_of_turn>", "\nUser:", "\nuser", "\nGilbert:"))
+            t = t.substringBefore(stop)
+        t = t.trim().removePrefix("Gilbert:").removePrefix("assistant").trim()
+        // At most 3 sentences.
+        val parts = t.split(Regex("(?<=[.!?])\\s+"))
+        return parts.take(3).joinToString(" ").trim()
+    }
+
+
+    /**
+     * A SHORT prompt in the chat format the model was trained on (long prompts made it slow and
+     * made it repeat the facts back instead of answering).
+     */
     private fun prompt(ctx: Context, history: List<Pair<Boolean, String>>, q: String): String {
-        val h = runCatching { Gilbert.health(ctx) }.getOrNull()
+        val facts = StringBuilder()
+        GilbertTalk.ownerName(ctx)?.let { facts.append("Their name: $it. ") }
+        GilbertMemory.topArtists(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Loves: ${it.joinToString { a -> a.first }}. ") }
+        GilbertMemory.topPeople(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Chats with: ${it.joinToString { p -> p.first }}. ") }
+        facts.append("Time: ${java.text.SimpleDateFormat("EEE h:mm a", java.util.Locale.getDefault()).format(java.util.Date())}.")
+        val system = "You are Gilbert, the user's cute, caring best friend living in their phone. " +
+            "Reply in ONE or TWO short casual sentences, sometimes one emoji. Never list facts. Facts: $facts"
         val sb = StringBuilder()
-        sb.append("You are Gilbert, a small glowing orb living in the user's phone launcher. ")
-        sb.append("You are their warm, playful best friend and helpful assistant. Answer in 1-3 short sentences, casual, kind, ")
-        sb.append("sometimes with one emoji. Never make things up about their messages — only use what is listed below.\n\n")
-        sb.append("What you know about them:\n").append(GilbertMemory.profile(ctx)).append("\n")
-        sb.append(GilbertMemory.recap(ctx)).append("\n")
-        Gilbert.notes(ctx).take(8).takeIf { it.isNotEmpty() }?.let { n ->
-            sb.append("Latest messages:\n")
-            for (x in n) sb.append("- ${x.title}: ${x.text.take(80)}\n")
+        sb.append("<|im_start|>system\n").append(system).append("<|im_end|>\n")
+        for ((user, text) in history.takeLast(4)) {
+            sb.append(if (user) "<|im_start|>user\n" else "<|im_start|>assistant\n").append(text.take(160)).append("<|im_end|>\n")
         }
-        h?.let { sb.append("Phone: battery ${it.battery}%${if (it.charging) " (charging)" else ""}, ${it.tempC?.toInt() ?: "?"}°C.\n") }
-        sb.append("Time: ${java.text.SimpleDateFormat("EEE h:mm a", java.util.Locale.getDefault()).format(java.util.Date())}\n\n")
-        for ((user, text) in history.takeLast(6)) sb.append(if (user) "User: " else "Gilbert: ").append(text).append("\n")
-        sb.append("User: ").append(q).append("\nGilbert:")
+        sb.append("<|im_start|>user\n").append(q.take(200)).append("<|im_end|>\n<|im_start|>assistant\n")
         return sb.toString()
     }
 }

@@ -84,7 +84,10 @@ object GilbertMemory {
             set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
         }.timeInMillis
         val today = notes.filter { it.time >= dayStart }
-        if (today.isEmpty()) return "Nothing came in today yet — all quiet ✨"
+        if (today.isEmpty()) {
+            val last = notes.firstOrNull() ?: return "Nothing came in today yet — all quiet ✨"
+            return "Nothing new today. Last one was from ${last.title}: “${last.text.take(50)}”"
+        }
         val who = today.groupingBy { it.title }.eachCount().entries.sortedByDescending { it.value }.take(4)
         val mentions = today.count { it.mention }
         val sb = StringBuilder("Today: ${today.size} message${if (today.size > 1) "s" else ""}")
