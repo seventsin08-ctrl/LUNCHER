@@ -145,8 +145,14 @@ object Gilbert {
      * chips, segmented meters, and checklists. Status, held notifications (tap to open), mentions
      * and notes, the noisiest apps (tap the chip: Normal → Priority → Quiet), and a phone check.
      */
+    /** Closes the card that's open right now (null when none is). */
+    var panelClose: (() -> Unit)? = null
+    fun isPanelOpen() = panelClose != null
+
     fun showPanel(act: Activity, root: FrameLayout, s: Settings, appInfo: (String) -> Pair<android.graphics.Bitmap?, String>?,
                   openApp: (String) -> Unit, openInbox: () -> Unit, openTools: () -> Unit) {
+        // Only ever one card: tapping Gilbert again while it's open closes it instead.
+        panelClose?.let { it(); return }
         fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
         fun dpf(v: Float) = v * act.resources.displayMetrics.density
         val GREEN = 0xFF30D158.toInt(); val AMBER = 0xFFFFC53D.toInt(); val RED = 0xFFFF453A.toInt()
@@ -405,13 +411,18 @@ object Gilbert {
         close = {
             if (!closing) {
                 closing = true
+                panelClose = null
                 SoundFX.play(act, "close")
                 card.animate().alpha(0f).scaleX(0.92f).scaleY(0.6f).translationY(-dp(24).toFloat()).setDuration(200)
                     .setInterpolator(android.view.animation.AccelerateInterpolator()).start()
                 layer.animate().alpha(0f).setDuration(240).withEndAction { root.removeView(layer) }.start()
             }
         }
+        // Clear out any card left behind (e.g. from an older open) before showing this one.
+        for (i in root.childCount - 1 downTo 0) root.getChildAt(i).takeIf { it.tag == "gilbert_card" }?.let { root.removeView(it) }
+        layer.tag = "gilbert_card"
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        panelClose = close
         SoundFX.play(act, "open")
         // Grows out of the island at the top, then the tiles rise in one after another.
         layer.alpha = 0f; layer.animate().alpha(1f).setDuration(220).start()

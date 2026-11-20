@@ -293,7 +293,6 @@ class MainActivity : Activity() {
     /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
     private fun openGilbert() {
         if (!isActive) { if (::sideHud.isInitialized) sideHud.openHistory(); return }
-        SoundFX.play(this, "open")
         Gilbert.showPanel(this, root, settings,
             appInfo = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } },
             openApp = { pkg ->
@@ -621,7 +620,7 @@ class MainActivity : Activity() {
     }
 
     @Deprecated("Launcher handles back itself")
-    override fun onBackPressed() = goHome()
+    override fun onBackPressed() { Gilbert.panelClose?.let { it(); return }; goHome() }
 
     private val holo by lazy {
         HoloSettings(this, root) { (0 until root.childCount).map { root.getChildAt(it) } }
@@ -629,6 +628,7 @@ class MainActivity : Activity() {
 
     private fun goHome() {
         when {
+            Gilbert.isPanelOpen() -> Gilbert.panelClose?.invoke()
             holo.isOpen -> holo.close()
             drag != null -> cancelDrag()
             widgetDrag != null -> cancelWidgetDrag()
