@@ -297,7 +297,8 @@ class MainActivity : Activity() {
 
     /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
     private fun openGilbert() {
-        if (!isActive) { if (::sideHud.isInitialized) sideHud.openHistory(); return }
+        // Over other apps: tapping Gilbert opens his chat right there.
+        if (!isActive) { GilbertLauncher.open(this); return }
         Gilbert.showPanel(this, root, settings,
             appInfo = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } },
             openApp = { pkg ->
@@ -507,7 +508,8 @@ class MainActivity : Activity() {
                 settings.notifStyle == "original"   // Android's own banners only
             if (!inThatApp && !gameHandled) {
                 if (pkg !in settings.gilbertQuiet) peekApp(pkg)
-                if (Gilbert.shouldPop(this, settings, pkg)) showNotificationInIsland(pkg, title, text)
+                val isMessage = NotificationService.lastChat[pkg] != null && title.isNotBlank()
+                if (Gilbert.shouldPop(this, settings, pkg, isMessage)) showNotificationInIsland(pkg, title, text)
             }
         }
         NotificationService.onOngoing = { refreshOngoing() }

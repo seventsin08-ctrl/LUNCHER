@@ -74,7 +74,7 @@ object GilbertChat {
         }
     }
 
-    fun show(act: Activity, root: FrameLayout, s: Settings) {
+    fun show(act: Activity, root: FrameLayout, s: Settings, onClosed: (() -> Unit)? = null) {
         fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
         val tint = if (ThemeEngine.colorful) ThemeEngine.accent else 0xFF8E8E93.toInt()
         val layer = FrameLayout(act).apply { setBackgroundColor(Color.argb(150, 0, 0, 0)); isClickable = true }
@@ -190,7 +190,7 @@ object GilbertChat {
         close = {
             SoundFX.play(act, "close")
             runCatching { act.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(input.windowToken, 0) }
-            layer.animate().alpha(0f).setDuration(200).withEndAction { root.removeView(layer) }.start()
+            layer.animate().alpha(0f).setDuration(200).withEndAction { root.removeView(layer); onClosed?.invoke() }.start()
         }
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         SoundFX.play(act, "open")

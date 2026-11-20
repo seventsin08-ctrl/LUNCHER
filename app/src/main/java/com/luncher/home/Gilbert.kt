@@ -62,9 +62,11 @@ object Gilbert {
      * May this notification pop up on screen now? Priority apps: yes. Others: only when Calm Mode
      * is off and the pop-up limit for the last minute isn't reached. Otherwise Gilbert holds it.
      */
-    fun shouldPop(ctx: Context, s: Settings, pkg: String): Boolean {
+    fun shouldPop(ctx: Context, s: Settings, pkg: String, isMessage: Boolean = false): Boolean {
         if (!s.islandFace) return true
         if (pkg in s.gilbertQuiet) { hold(pkg); return false }
+        // Real messages (chats from any app) always show — even on silent, vibrate or Calm Mode.
+        if (isMessage && s.alwaysShowMessages) return true
         val priority = pkg in s.gilbertPriority
         val now = System.currentTimeMillis()
         while (popTimes.isNotEmpty() && now - popTimes.first() > 60_000) popTimes.removeFirst()

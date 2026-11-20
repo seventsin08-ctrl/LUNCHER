@@ -1,0 +1,55 @@
+package com.luncher.home
+
+import android.app.Activity
+import android.graphics.Color
+import android.os.Bundle
+import android.widget.FrameLayout
+
+/**
+ * Talk to Gilbert from anywhere: a see-through window that opens over whatever app you're in
+ * (from Gilbert over apps, the Sidebar, or the Quick Settings tile). Close it and you're right
+ * back where you were.
+ */
+class GilbertChatActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        HighRefresh.apply(this)
+        window.setBackgroundDrawableResource(android.R.color.transparent)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        val root = FrameLayout(this)
+        setContentView(root)
+        val s = Settings(this)
+        runCatching { ThemeEngine.resolve(this, s) }
+        root.post { GilbertChat.show(this, root, s) { finish(); overridePendingTransition(0, android.R.anim.fade_out) } }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Leaving (home / another app): close quietly.
+        if (!isChangingConfigurations) finish()
+    }
+}
+
+/** Quick Settings tile: pull down the shade and tap "Gilbert" to chat from anywhere. */
+class GilbertTileService : android.service.quicksettings.TileService() {
+    override fun onStartListening() {
+        qsTile?.apply { label = "Gilbert"; state = android.service.quicksettings.Tile.STATE_INACTIVE; updateTile() }
+    }
+    override fun onClick() {
+        val i = android.content.Intent(this, GilbertChatActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            startActivityAndCollapse(android.app.PendingIntent.getActivity(this, 0, i,
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
+        } else @Suppress("DEPRECATION") startActivityAndCollapse(i)
+    }
+}
+
+object GilbertLauncher {
+    fun open(ctx: android.content.Context) {
+        runCatching {
+            ctx.startActivity(android.content.Intent(ctx, GilbertChatActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION))
+        }
+    }
+}

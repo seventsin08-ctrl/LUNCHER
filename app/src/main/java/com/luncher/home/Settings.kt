@@ -478,6 +478,10 @@ class Settings(ctx: Context) {
     var gilbertQuietInApp: Boolean
         get() = p.getBoolean("s_gil_inapp", true)
         set(v) = put("s_gil_inapp", v)
+    /** Messages from any chat app always pop up — even on silent / vibrate / Calm Mode. */
+    var alwaysShowMessages: Boolean
+        get() = p.getBoolean("s_always_msgs", true)
+        set(v) = put("s_always_msgs", v)
     /** Calm Mode: only priority apps pop up; Gilbert holds the rest. */
     var gilbertCalm: Boolean
         get() = p.getBoolean("s_gil_calm", true)
