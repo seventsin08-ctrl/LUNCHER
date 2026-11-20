@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        111 to listOf("Moving Gilbert to the top no longer pushes your apps down",
+            "Dock: turn it on/off, pick Glass, Dark, Light or Clear, and change roundness and icon size",
+            "App Library: turn it on/off, choose Folders or an A–Z list, and rename it (Settings › Home Screen & Widgets)"),
         110 to listOf("Fixed: the 4th column of apps could run off the right edge of the screen — the grid now measures the real screen width and icons never grow bigger than their space"),
         109 to listOf("Game Ball: while gaming, a little movable orb (like Gilbert) replaces the Sidebar handle — no more clashing with the phone's game panel",
             "Tap the ball: choose who may pop up during games (Everyone / ★ Priority / No one), see the messages you missed, and open your Sidebar apps in a small window",

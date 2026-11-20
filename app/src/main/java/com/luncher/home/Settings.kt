@@ -80,6 +80,32 @@ class Settings(ctx: Context) {
     var swipeDown: String
         get() = p.getString("s_swipe_down", "search") ?: "search"
         set(v) = put("s_swipe_down", v)
+    // ---- Dock & App Library
+    var dockOn: Boolean
+        get() = p.getBoolean("s_dock_on", true)
+        set(v) = put("s_dock_on", v)
+    /** "glass" (Liquid Glass), "dark", "light" or "clear" (no background). */
+    var dockStyle: String
+        get() = p.getString("s_dock_style", "glass") ?: "glass"
+        set(v) = put("s_dock_style", v)
+    /** Corner roundness of the dock, in dp (12..40). */
+    var dockRadius: Int
+        get() = p.getInt("s_dock_radius", 36)
+        set(v) = put("s_dock_radius", v)
+    /** Dock icon size as % of the Home Screen icons (70..110). */
+    var dockIconPct: Int
+        get() = p.getInt("s_dock_icon_pct", 100)
+        set(v) = put("s_dock_icon_pct", v)
+    var libraryOn: Boolean
+        get() = p.getBoolean("s_library_on", true)
+        set(v) = put("s_library_on", v)
+    /** "folders" (smart folders like iPhone) or "list" (A–Z list of every app). */
+    var libraryStyle: String
+        get() = p.getString("s_library_style", "folders") ?: "folders"
+        set(v) = put("s_library_style", v)
+    var libraryTitle: String
+        get() = p.getString("s_library_title", "App Library") ?: "App Library"
+        set(v) = put("s_library_title", v)
     /** library | none. Old recent-apps settings are treated as off. */
     var swipeUp: String
         get() = when (p.getString("s_swipe_up", "none")) {

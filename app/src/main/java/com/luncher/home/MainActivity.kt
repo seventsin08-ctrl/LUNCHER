@@ -1234,7 +1234,14 @@ class MainActivity : Activity() {
         scrim.alpha = ((settings.dim + Focus.extraDim(focusId)).coerceAtMost(95)) / 100f
         searchPill.background = Glass.panel(this, 16f)
         dots.background = Glass.panel(this, 16f)
-        dockRow.background = Glass.panel(this, 36f)
+        val dr = settings.dockRadius.toFloat()
+        dockRow.background = when (settings.dockStyle) {
+            "dark" -> GradientDrawable().apply { cornerRadius = dp(dr.toInt()).toFloat(); setColor(0xD9141416.toInt()); setStroke(maxOf(1, dp(1)), 0x22FFFFFF) }
+            "light" -> GradientDrawable().apply { cornerRadius = dp(dr.toInt()).toFloat(); setColor(0xCCF2F2F7.toInt()); setStroke(maxOf(1, dp(1)), 0x33FFFFFF) }
+            "clear" -> null
+            else -> Glass.panel(this, dr)
+        }
+        (dockRow.parent as? View)?.visibility = if (settings.dockOn) View.VISIBLE else View.GONE
         defaultBanner.background = Glass.panel(this, 18f)
         searchField.background = Glass.panel(this, 14f)
     }
@@ -1347,7 +1354,8 @@ class MainActivity : Activity() {
             val islandTop = (base + dp(settings.islandNudge)).coerceAtLeast(dp(2))
             // Only push the Home Screen down when the island sits near the top; lower down it floats.
             val islandBottom = islandTop + (dp(36) * settings.islandScale / 100f).toInt()
-            val islandRoom = if (settings.island && islandTop < bars.top + dp(70))
+            // Gilbert (the small orb) floats over the Home Screen — moving him never shifts your apps.
+            val islandRoom = if (settings.island && !settings.islandFace && islandTop < bars.top + dp(70))
                 (islandBottom + dp(6) - bars.top).coerceAtLeast(0) else 0
             if (::island.isInitialized) island.setTopInset(islandTop)
             // Where the front camera hole is, so the closed tools can hide right around it.
@@ -1933,7 +1941,7 @@ class MainActivity : Activity() {
             result += Page.Home(widgets, apps)
             page++
         }
-        result += Page.Library
+        if (settings.libraryOn) result += Page.Library
 
         pages = result
         refreshPages()
@@ -2124,7 +2132,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         head.addView(TextView(this).apply {
-            text = "App Library"
+            text = settings.libraryTitle.ifBlank { "App Library" }
             setTextColor(Color.WHITE)
             textSize = 30f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
@@ -2170,9 +2178,18 @@ class MainActivity : Activity() {
             isVerticalScrollBarEnabled = false
         }
         categories.addView(buildLibraryFolders())
+        // List style: every app A–Z instead of the smart folders.
+        val asList = settings.libraryStyle == "list"
+        if (asList) {
+            libAdapter.submit(allApps.sortedBy { it.label.lowercase() })
+            list.visibility = View.VISIBLE; categories.visibility = View.GONE
+        }
         field.addTextChangedListener(afterTextChanged = { s ->
             val q = s?.toString().orEmpty().trim()
-            if (q.isEmpty()) {
+            if (q.isEmpty() && asList) {
+                libAdapter.submit(allApps.sortedBy { it.label.lowercase() })
+                list.visibility = View.VISIBLE; categories.visibility = View.GONE
+            } else if (q.isEmpty()) {
                 list.visibility = View.GONE; categories.visibility = View.VISIBLE
             } else {
                 libAdapter.submit(allApps.filter { it.label.contains(q, true) }.sortedBy { !it.label.startsWith(q, true) })
@@ -2942,7 +2959,7 @@ class MainActivity : Activity() {
         val slot = if (dock.isEmpty()) 0 else minOf(dp(iconDp + 12),
             ((available - dp(16)) / dock.size).coerceAtLeast(1))
         val target = if (dock.isEmpty()) minOf(dp(230), available) else minOf(available, dp(16) + slot * dock.size)
-        val dockIcon = if (dock.isEmpty()) dp(iconDp) else minOf(dp(iconDp), (slot - dp(4)).coerceAtLeast(1))
+        val dockIcon = if (dock.isEmpty()) dp(iconDp) else minOf(dp(iconDp * settings.dockIconPct / 100), (slot - dp(4)).coerceAtLeast(1))
         dockRow.minimumHeight = dp(iconDp + 26)
         dockRow.removeAllViews()
         if (dock.isEmpty()) {
@@ -4555,7 +4572,7 @@ class MainActivity : Activity() {
 
     private fun onSwipeUp() {
         when (settings.swipeUp) {
-            "library" -> pager.setCurrentItem(pages.size - 1, anim > 0f)
+            "library" -> if (settings.libraryOn) pager.setCurrentItem(pages.size - 1, anim > 0f)
         }
     }
 

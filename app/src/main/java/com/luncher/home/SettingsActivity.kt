@@ -41,7 +41,7 @@ class SettingsActivity : Activity() {
     private val categories = listOf(
         Category("setup", "Permissions & Setup", 0xFF34C759.toInt(), R.drawable.ic_cc_lock, listOf("PERMISSIONS")),
         Category("look", "Appearance", 0xFF0A84FF.toInt(), R.drawable.ic_cc_contrast, listOf("APPEARANCE", "THEME", "WALLPAPER")),
-        Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "WIDGETS")),
+        Category("home", "Home Screen & Widgets", 0xFF5E5CE6.toInt(), R.drawable.ic_set_grid, listOf("APPS", "HOME SCREEN", "DOCK", "APP LIBRARY", "WIDGETS")),
         Category("island", "Dynamic Island", 0xFF1C1C1E.toInt(), R.drawable.ic_set_island,
             listOf("DYNAMIC ISLAND", "ISLAND TOOLS", "SIDE ISLAND", "CHAT WINDOW", "ISLAND CONTENT", "ISLAND SERVICES")),
         Category("sidebar", "Sidebar", 0xFFFF9F0A.toInt(), R.drawable.ic_set_sidebar, listOf("SIDEBAR")),
@@ -467,6 +467,26 @@ class SettingsActivity : Activity() {
             s.hiddenWidgets = emptySet()
             getSharedPreferences("luncher", MODE_PRIVATE).edit().remove("widget_positions").remove("home_page_count").apply()
             rebuild()
+        }
+
+        // ---------------- Dock
+        val dockSec = section("DOCK")
+        toggle(dockSec, "Dock", "The bar of favourite apps at the bottom", s.dockOn) { s.dockOn = it; rebuild() }
+        if (s.dockOn) {
+            segment(dockSec, "Style", listOf("glass" to "Glass", "dark" to "Dark", "light" to "Light", "clear" to "Clear"), s.dockStyle) { s.dockStyle = it }
+            slider(dockSec, "Roundness", 12, 40, s.dockRadius, { "$it" }) { s.dockRadius = it }
+            slider(dockSec, "Icon Size", 70, 110, s.dockIconPct, { "$it%" }) { s.dockIconPct = it }
+        }
+
+        // ---------------- App Library
+        val libSec = section("APP LIBRARY")
+        toggle(libSec, "App Library", "The last page: every app in smart folders (swipe past your last Home Screen page)", s.libraryOn) {
+            s.libraryOn = it; rebuild()
+        }
+        if (s.libraryOn) {
+            segment(libSec, "Style", listOf("folders" to "Folders", "list" to "A–Z List"), s.libraryStyle) { s.libraryStyle = it }
+            segment(libSec, "Title", listOf("App Library" to "App Library", "All Apps" to "All Apps", "Apps" to "Apps"),
+                s.libraryTitle) { s.libraryTitle = it }
         }
 
         // ---------------- Widgets
