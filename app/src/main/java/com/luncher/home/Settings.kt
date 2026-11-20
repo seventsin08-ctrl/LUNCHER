@@ -344,6 +344,10 @@ class Settings(ctx: Context) {
     var tapZoneHint: Boolean
         get() = p.getBoolean("s_tap_hint", true)
         set(v) = put("s_tap_hint", v)
+    /** How far the tap line reaches left of the camera, in dp. */
+    var tapZoneLen: Int
+        get() = p.getInt("s_tap_len", 66)
+        set(v) = put("s_tap_len", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)

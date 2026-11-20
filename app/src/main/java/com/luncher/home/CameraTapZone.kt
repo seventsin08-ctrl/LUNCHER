@@ -74,7 +74,7 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
         val portrait = act.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
         if (cam == null || !portrait || !settings.islandTools) { v.visibility = View.GONE; return }
         v.visibility = View.VISIBLE
-        val left = cam.left - dp(96) + dp(settings.hotspotDx)
+        val left = cam.left - dp(settings.tapZoneLen) + dp(settings.hotspotDx)
         val right = cam.right + dp(10) + dp(settings.hotspotDx)
         val top = maxOf(0, cam.top - dp(4) + dp(settings.hotspotDy))
         val bottom = cam.bottom + dp(10) + dp(settings.hotspotDy)

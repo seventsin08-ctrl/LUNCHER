@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        98 to listOf("Shorter tap line at the camera, with a Tap Line Length slider in Settings › Island Tools"),
         97 to listOf("Tap the status bar strip just left of the camera to open the tools — it works even on the status bar",
             "A faint ring and line at the camera show where to tap (Settings › Island Tools › Show Tap Spot)"),
         96 to listOf("Chat windows look more like Apple: iMessage-style reply bar (send arrow appears when you type), line icons instead of emoji, solid background and an iPadOS-style resize corner"),
