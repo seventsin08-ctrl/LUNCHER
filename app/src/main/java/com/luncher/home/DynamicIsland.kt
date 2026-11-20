@@ -224,8 +224,13 @@ class DynamicIsland(
     /** Tap an app logo beside Gilbert: see what that app sent. */
     var onHeldTap: ((String) -> Unit)? = null
     private val heldRow: LinearLayout by lazy {
-        LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
-            .also { root.addView(it, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
+        // A small black capsule (like a second island) holding the app logos and their counts.
+        LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE
+            setPadding(dp(5), 0, dp(9), 0)
+            background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.BLACK); setStroke(maxOf(1, dp(1)), 0x26FFFFFF) }
+            elevation = dp(4).toFloat()
+        }.also { root.addView(it, FrameLayout.LayoutParams(WRAP_CONTENT, dp(36), Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
     }
 
     /** Apps Gilbert is holding notifications for: (logo, count, package), shown next to him. */
@@ -233,25 +238,31 @@ class DynamicIsland(
         if (overlayMode) return
         val row = heldRow
         row.removeAllViews()
-        for ((icon, n, pkg) in items.take(4)) {
-            val f = FrameLayout(act).apply {
+        for ((i, item) in items.take(4).withIndex()) {
+            val (icon, n, pkg) = item
+            // Logo + its count side by side ("[logo] 2"), each tappable.
+            val f = LinearLayout(act).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(3), dp(3), dp(3), dp(3))
                 setOnClickListener { buzz(); SoundFX.play(act, "pop"); onHeldTap?.invoke(pkg) }
             }
             f.addView(ImageView(act).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
                 if (icon != null) setImageBitmap(icon) else { setImageResource(R.drawable.ic_chat); setColorFilter(Color.WHITE) }
                 outlineProvider = object : ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: Outline) = outline.setOval(0, 0, view.width, view.height)
+                    override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.26f)
                 }
                 clipToOutline = true
-            }, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(22), dp(22)))
             f.addView(TextView(act).apply {
-                text = if (n > 99) "99+" else "$n"; textSize = 9f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-                typeface = Typeface.DEFAULT_BOLD; setPadding(dp(3), 0, dp(3), 0)
-                background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(0xFFFF3B30.toInt()) }
-                minWidth = dp(15)
-            }, FrameLayout.LayoutParams(WRAP_CONTENT, dp(15), Gravity.TOP or Gravity.END))
-            row.addView(f, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginStart = dp(3) })
+                text = if (n > 99) "99+" else "$n"; textSize = 12f; setTextColor(Color.WHITE)
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(4) })
+            row.addView(f, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { if (i > 0) marginStart = dp(2) })
         }
+        if (items.size > 4) row.addView(TextView(act).apply {
+            text = "+${items.size - 4}"; textSize = 11f; setTextColor(0xB3FFFFFF.toInt())
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(4) })
         val show = items.isNotEmpty() && pill.visibility == View.VISIBLE
         if (show && row.visibility != View.VISIBLE) {
             row.visibility = View.VISIBLE; row.alpha = 0f; row.scaleX = 0.6f; row.scaleY = 0.6f
@@ -267,9 +278,16 @@ class DynamicIsland(
         if (row.visibility != View.VISIBLE) return
         val w = (if (targetW > 0) targetW else pill.width) * pill.scaleX
         val h = (if (targetH > 0) targetH else pill.height) * pill.scaleY
-        (row.layoutParams as FrameLayout.LayoutParams).topMargin = topMargin + ((h - dp(32)) / 2).toInt().coerceAtLeast(0)
+        (row.layoutParams as FrameLayout.LayoutParams).topMargin = topMargin + ((h - dp(36)) / 2).toInt().coerceAtLeast(0)
         row.requestLayout()
-        row.animate().translationX(pill.translationX + w / 2f + dp(8) + row.width / 2f).setDuration(220).start()
+        // Measure first (its width was 0 before layout, which put it in the wrong place).
+        row.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(dp(36), View.MeasureSpec.EXACTLY))
+        val rw = row.measuredWidth
+        val sw = screenW()
+        // Right of the island; if there's no room there, on its left.
+        var tx = pill.translationX + w / 2f + dp(8) + rw / 2f
+        if (sw / 2f + tx + rw / 2f > sw - dp(6)) tx = pill.translationX - w / 2f - dp(8) - rw / 2f
+        row.animate().translationX(tx).setDuration(220).start()
     }
 
     /** The oblong tool strip shown when idle. */
