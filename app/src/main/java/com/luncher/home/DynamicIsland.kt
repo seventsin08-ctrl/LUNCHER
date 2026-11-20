@@ -553,11 +553,11 @@ class DynamicIsland(
 
     private fun idleW() = when {
         toolsOn && toolsOpen -> dp(16) + toolCount * dp(34)
-        faceOn -> dp(40)                 // a round island with the face
+        faceOn -> dp(46)                 // a round island with the living orb / face
         toolsOn -> camera?.let { maxOf(dp(46), it.width() + dp(22)) } ?: dp(48)   // tucked around the front camera
         else -> dp(118)
     }
-    private fun idleH() = if (faceOn && !(toolsOn && toolsOpen)) dp(40) else if (toolsOn && !toolsOpen) camera?.let { maxOf(dp(32), it.height() + dp(14)) } ?: dp(36) else dp(36)
+    private fun idleH() = if (faceOn && !(toolsOn && toolsOpen)) dp(46) else if (toolsOn && !toolsOpen) camera?.let { maxOf(dp(32), it.height() + dp(14)) } ?: dp(36) else dp(36)
 
     /**
      * A bigger invisible tap area around and below the camera pill: the status bar takes taps
