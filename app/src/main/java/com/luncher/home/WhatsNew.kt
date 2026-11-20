@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        129 to listOf("When music is paused, the island goes back to Gilbert after a few seconds (press play and the player comes right back)"),
         128 to listOf("Smoother everywhere: the launcher asks the screen for its fastest refresh rate (90/120 Hz when your phone has it)",
             "Snappier animations by default, plus a new “Instant” speed (Settings › Animations › Speed)",
             "Gilbert's orb only animates while it's on screen, freeing the phone for everything else",

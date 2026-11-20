@@ -5544,14 +5544,29 @@ class MainActivity : Activity() {
     }
 
     /** Keep the island's music activity in sync with what's playing. */
+    private val pausedToGilbert: Runnable = object : Runnable {
+        override fun run() {
+            if (!::island.isInitialized) return
+            val st = mediaController?.playbackState?.state
+            if (st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_BUFFERING) return
+            if (island.isExpanded() || overlayIsland?.isExpanded() == true) { mainHandler.postDelayed(this, 3000); return }
+            island.remove("music")
+        }
+    }
+
     private fun refreshIslandMusic() {
         if (!::island.isInitialized) return
         val c = mediaController
         val meta = c?.metadata
         val state = c?.playbackState?.state
         val playing = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
-        // Like iOS, keep the player in the island while paused so you can resume from it.
-        if (c == null || meta == null || !(playing || state == PlaybackState.STATE_PAUSED)) { island.remove("music"); return }
+        if (c == null || meta == null || !(playing || state == PlaybackState.STATE_PAUSED)) {
+            mainHandler.removeCallbacks(pausedToGilbert); island.remove("music"); return
+        }
+        // Nothing playing (paused): after a few seconds the island goes back to being Gilbert.
+        // (Not while you have the player open — you might be about to press play.)
+        mainHandler.removeCallbacks(pausedToGilbert)
+        if (!playing) mainHandler.postDelayed(pausedToGilbert, 4000)
         val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE)
             ?: meta.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "Now Playing"
         val artist = meta.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""

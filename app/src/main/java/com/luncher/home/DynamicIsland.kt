@@ -484,6 +484,7 @@ class DynamicIsland(
     var overlayMode = false
     /** Called when the island appears (true) or goes away (false). */
     var onShownChanged: ((Boolean) -> Unit)? = null
+    fun isExpanded() = expanded
     /** Is the island on screen right now? */
     fun shownNow() = pill.visibility == View.VISIBLE
 
