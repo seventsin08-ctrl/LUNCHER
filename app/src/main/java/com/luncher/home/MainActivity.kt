@@ -410,6 +410,7 @@ class MainActivity : Activity() {
         root.post { runCatching { sideHud.rest() } }
         setupSidebar()
         GameState.listen(gameListener)
+        root.postDelayed({ setupTapZone() }, 600)
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
         ContextCompat.registerReceiver(this, ringerReceiver, IntentFilter(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION), ContextCompat.RECEIVER_EXPORTED)
         // "hello" only when the launcher is set up fresh: first install, or after a reset / imported setup.
@@ -441,6 +442,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (::island.isInitialized) root.post { setupTapZone() }
         // "Show hello again" from Settings › General.
         if (prefs.getBoolean("hello_force", false)) {
             prefs.edit().remove("hello_force").apply()
@@ -575,16 +577,33 @@ class MainActivity : Activity() {
         return super.dispatchTouchEvent(ev)
     }
 
+    /** The tap strip at the camera (above the status bar) that opens the island tools. */
+    private var tapZone: CameraTapZone? = null
+    private var searchingNow = false
+    private fun setupTapZone() {
+        if (!settings.islandTools) { tapZone?.detach(); tapZone = null; return }
+        val z = tapZone ?: CameraTapZone(this, settings) {
+            // Open the tools on whichever island is on screen (Home Screen, or over an app).
+            if (isActive && ::island.isInitialized) island.toggleTools()
+            else overlayIsland?.toggleTools() ?: island.toggleTools()
+        }.also { tapZone = it }
+        if (::island.isInitialized) z.camera = island.camera
+        z.attach()
+        z.setHidden(searchingNow || GameState.playing)
+    }
+
     /** A game came on screen (or left): hide / bring back the islands and pop-ups. */
     private val gameListener: () -> Unit = { mainHandler.post { applyGameState() } }
     private fun applyGameState() {
         val g = GameState.playing
         overlayRoot?.visibility = if (g) View.GONE else View.VISIBLE
+        tapZone?.setHidden(g || searchingNow)
         if (::sideHud.isInitialized) runCatching { if (g) sideHud.dismiss() else sideHud.rest() }
     }
 
     override fun onDestroy() {
         GameState.unlisten(gameListener)
+        tapZone?.detach(); tapZone = null
         cancelHomeHold()
         dockWidthAnimator?.cancel()
         dockWidthAnimator = null
@@ -695,6 +714,7 @@ class MainActivity : Activity() {
             island.popupMs = settings.islandPopupMs.toLong()
             island.alwaysShow = settings.islandAlways
             island.idleTools = if (settings.islandTools) ({ idleTools() }) else null
+            root.post { setupTapZone() }
             overlayIsland?.idleTools = island.idleTools
             applyIslandLook()
             island.applyFilter()
@@ -1139,6 +1159,7 @@ class MainActivity : Activity() {
                 ?.filter { it.top <= dp(4) && it.height() < dp(80) }?.minByOrNull { kotlin.math.abs(it.centerX() - root.width / 2) } else null
             if (::island.isInitialized) island.camera = cam
             overlayIsland?.camera = cam
+            tapZone?.camera = cam
             lastIslandTop = islandTop
             content.setPadding(0, bars.top + islandRoom, 0, bars.bottom)
             searchOverlay.setPadding(dp(16), bars.top + dp(10), dp(16), maxOf(bars.bottom, ime.bottom))
@@ -4727,6 +4748,7 @@ class MainActivity : Activity() {
     private fun openSearch() {
         if (::island.isInitialized) island.setSearching(true)
         ToolsBar.current?.setSearching(true)
+        searchingNow = true; tapZone?.setHidden(true)
         searchField.setText("")
         filterSearch("")
         searchOverlay.visibility = View.VISIBLE
@@ -4749,6 +4771,7 @@ class MainActivity : Activity() {
     private fun closeSearch(animate: Boolean = true) {
         if (::island.isInitialized) island.setSearching(false)
         ToolsBar.current?.setSearching(false)
+        searchingNow = false; tapZone?.setHidden(GameState.playing)
         imm().hideSoftInputFromWindow(searchField.windowToken, 0)
         searchField.clearFocus()
         val fast = !animate || anim == 0f

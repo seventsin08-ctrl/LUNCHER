@@ -578,6 +578,7 @@ class DynamicIsland(
     private var toolsOpen = false
     private val closeTools = Runnable { if (toolsOpen) { toolsOpen = false; refresh() } }
     fun toggleTools() {
+        if (!toolsOn || expanded || current() != null) return
         toolsOpen = !toolsOpen
         buzz()
         pill.removeCallbacks(closeTools)

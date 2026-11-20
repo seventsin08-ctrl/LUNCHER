@@ -340,6 +340,10 @@ class Settings(ctx: Context) {
     var hotspotDy: Int
         get() = p.getInt("s_hot_dy", -10)
         set(v) = put("s_hot_dy", v)
+    /** Faint ring + line at the camera showing where to tap for the tools. */
+    var tapZoneHint: Boolean
+        get() = p.getBoolean("s_tap_hint", true)
+        set(v) = put("s_tap_hint", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
         get() = p.getBoolean("s_sidebar_ai", true)
