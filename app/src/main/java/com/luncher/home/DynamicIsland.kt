@@ -606,7 +606,7 @@ class DynamicIsland(
         if (list.isEmpty()) return null
         index = index.coerceIn(0, list.size - 1)
         // The info pill (weather, steps…) steps aside while the tools are open.
-        if (toolsOpen && list[index].id == "info") return null
+        if (toolsOpen) return null
         return list[index]
     }
 
@@ -741,7 +741,9 @@ class DynamicIsland(
     private var toolsOpen = false
     private val closeTools = Runnable { if (toolsOpen) { toolsOpen = false; refresh() } }
     fun toggleTools() {
-        if (!toolsOn || expanded || (current() != null && current()?.id != "info")) return
+        // Works while music (or anything else) is in the island too: the tools step in for a few
+        // seconds, then the music comes back.
+        if (!toolsOn || expanded) return
         SoundFX.play(act, "pop")
         toolsOpen = !toolsOpen
         buzz()

@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        127 to listOf("Tools button by the camera: now a full circle with a ripple when you tap it",
+            "It opens the tools even while music is in the island (the music comes back after a few seconds)",
+            "Hold the button and drag it to move it — or move it in Settings › Adjust the Features"),
         126 to listOf("Beat Animation: the island pops to the beat of your music and its bars dance to the real sound (album art bounces when it's open)",
             "Sleeker lyrics: each new line glides up and sharpens out of a soft blur, Apple Music–style",
             "Settings › Dynamic Island › Beat Animation (asks for the Microphone permission so it can hear the music — nothing is recorded)"),

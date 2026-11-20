@@ -42,7 +42,7 @@ object FeatureLayoutEditor {
         head.addView(doneBtn)
         col.addView(head, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         col.addView(TextView(act).apply {
-            text = "Drag each part. Side parts snap to the nearest edge."; textSize = 13f; setTextColor(0x99FFFFFF.toInt())
+            text = "Drag each part (Island, Tools button, Sidebar, Side Island, Game Ball). Side parts snap to the nearest edge."; textSize = 13f; setTextColor(0x99FFFFFF.toInt())
             gravity = Gravity.CENTER; setPadding(dp(20f), 0, dp(20f), dp(12f))
         })
 
@@ -158,19 +158,35 @@ object FeatureLayoutEditor {
         }
         draggable(ball, placeBall) { x, y -> s.gameBallRight = x > W / 2f; s.gameBallY = ((y - bs / f / 2f) / H).coerceIn(0.03f, 0.9f) }
 
+        // 5) Tools button (the ring by the camera)
+        val tsz = dp(22f)
+        val tools = chip("◉", tsz, tsz, GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x33000000); setStroke(dp(2f), Color.WHITE) })
+        val toolsLabel = TextView(act).apply { text = "Tools"; textSize = 9f; setTextColor(Color.WHITE) }
+        phone.addView(toolsLabel, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        val placeTools = {
+            val x = (W / 2f + dp(s.hotspotDx.toFloat())) * f - tsz / 2f
+            val y = (dp(14f) + dp(s.hotspotDy.toFloat())) * f
+            tools.animate().x(x).y(y.coerceAtLeast(0f)).setDuration(220).start()
+            toolsLabel.animate().x(x + tsz + dp(3f)).y(y.coerceAtLeast(0f) + dp(3f)).setDuration(220).start(); Unit
+        }
+        draggable(tools, placeTools) { x, y ->
+            s.hotspotDx = ((x - W / 2f) / dm.density).roundToInt().coerceIn(-150, 150)
+            s.hotspotDy = ((y - dp(14f) - tsz / f / 2f) / dm.density).roundToInt().coerceIn(-30, 80)
+        }
+
         col.addView(phone, LinearLayout.LayoutParams(pw, ph))
         val reset = TextView(act).apply {
             text = "Reset Positions"; textSize = 14f; setTextColor(0xFFFF453A.toInt()); setPadding(dp(16f), dp(14f), dp(16f), dp(14f))
             setOnClickListener {
                 s.islandX = 0; s.islandNudge = 0; s.sidebarRight = true; s.sidebarY = 260; s.sideRight = false; s.sideY = 30
-                s.gameBallRight = true; s.gameBallY = 0.3f
-                placeIsland(); placeSide(); placeTab(); placeBall(); SoundFX.play(act, "pop")
+                s.gameBallRight = true; s.gameBallY = 0.3f; s.hotspotDx = -12; s.hotspotDy = -10
+                placeIsland(); placeSide(); placeTab(); placeBall(); placeTools(); SoundFX.play(act, "pop")
             }
         }
         col.addView(reset)
         layer.addView(android.widget.ScrollView(act).apply { addView(col) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        phone.post { placeIsland(); placeSide(); placeTab(); placeBall() }
+        phone.post { placeIsland(); placeSide(); placeTab(); placeBall(); placeTools() }
 
         close = {
             SoundFX.play(act, "close")

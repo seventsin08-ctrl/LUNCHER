@@ -74,12 +74,17 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
         val portrait = act.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
         if (cam == null || !portrait || !settings.islandTools) { v.visibility = View.GONE; return }
         v.visibility = View.VISIBLE
-        val left = cam.left - dp(settings.tapZoneLen) + dp(settings.hotspotDx)
-        val right = cam.right + dp(10) + dp(settings.hotspotDx)
-        val top = maxOf(0, cam.top - dp(4) + dp(settings.hotspotDy))
-        val bottom = cam.bottom + dp(10) + dp(settings.hotspotDy)
+        // The ring sits around the camera, moved by your nudge; the window always contains the
+        // WHOLE ring (it used to cut it in half) plus the tap strip to its left.
+        val dx = dp(settings.hotspotDx); val dy = dp(settings.hotspotDy)
+        val ringR = maxOf(cam.width(), cam.height()) / 2 + dp(5) + dp(16)   // room for the ripple too
+        val cx = cam.centerX() + dx; val cy = cam.centerY() + dy
+        val left = minOf(cam.left - dp(settings.tapZoneLen) + dx, cx - ringR)
+        val right = cx + ringR
+        val top = maxOf(0, cy - ringR)
+        val bottom = cy + ringR
         l.x = left; l.y = top; l.width = right - left; l.height = maxOf(dp(24), bottom - top)
-        v.camInView = RectF((cam.left - left).toFloat(), (cam.top - top).toFloat(), (cam.right - left).toFloat(), (cam.bottom - top).toFloat())
+        v.camInView = RectF((cam.left + dx - left).toFloat(), (cam.top + dy - top).toFloat(), (cam.right + dx - left).toFloat(), (cam.bottom + dy - top).toFloat())
         v.invalidate()
         runCatching { wm?.updateViewLayout(v, l) }
     }
@@ -90,17 +95,56 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
         private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND; strokeWidth = dp(4).toFloat() }
         private var glow = 0f
+        private var ripple = -1f
+        private var press = 0f
+        private var moving = false
+        private var downX = 0f; private var downY = 0f
+        private var startDx = 0; private var startDy = 0
+        // Hold for half a second, then drag: moves the button (saved as you let go).
+        private val lift = Runnable {
+            moving = true
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            glow = 1f; invalidate()
+        }
+
+        private fun playRipple() {
+            android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 420; interpolator = android.view.animation.DecelerateInterpolator(2f)
+                addUpdateListener { ripple = it.animatedValue as Float; invalidate() }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(a: android.animation.Animator) { ripple = -1f; glow = 0f; invalidate() }
+                })
+                start()
+            }
+        }
 
         init {
             setOnTouchListener { _, e ->
                 when (e.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> { glow = 1f; invalidate() }
-                    MotionEvent.ACTION_UP -> {
-                        performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                        animate().setDuration(1).withEndAction { glow = 0f; invalidate() }.start()
-                        onTap()
+                    MotionEvent.ACTION_DOWN -> {
+                        glow = 1f; press = 1f; invalidate()
+                        downX = e.rawX; downY = e.rawY; startDx = settings.hotspotDx; startDy = settings.hotspotDy
+                        moving = false; postDelayed(lift, 480)
                     }
-                    MotionEvent.ACTION_CANCEL -> { glow = 0f; invalidate() }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (moving) {
+                            val d = act.resources.displayMetrics.density
+                            settings.hotspotDx = (startDx + (e.rawX - downX) / d).roundToInt().coerceIn(-150, 150)
+                            settings.hotspotDy = (startDy + (e.rawY - downY) / d).roundToInt().coerceIn(-30, 80)
+                            place()
+                        } else if (kotlin.math.abs(e.rawX - downX) + kotlin.math.abs(e.rawY - downY) > dp(12)) removeCallbacks(lift)
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        removeCallbacks(lift)
+                        press = 0f
+                        if (moving) { moving = false; glow = 0f; invalidate() }
+                        else {
+                            performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                            playRipple()
+                            onTap()
+                        }
+                    }
+                    MotionEvent.ACTION_CANCEL -> { removeCallbacks(lift); moving = false; press = 0f; glow = 0f; invalidate() }
                 }
                 true
             }
@@ -113,7 +157,12 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
             ring.color = 0xFFFFFFFF.toInt(); ring.alpha = (70 * a).toInt()
             val cx = camInView.centerX(); val cy = camInView.centerY()
             val r = maxOf(camInView.width(), camInView.height()) / 2f + dp(5)
-            c.drawCircle(cx, cy, r, ring)
+            c.drawCircle(cx, cy, r * (if (press > 0f) 0.92f else 1f), ring)
+            // Tap: a soft ripple grows out of the ring.
+            if (ripple >= 0f) {
+                ring.alpha = (140 * (1f - ripple)).toInt()
+                c.drawCircle(cx, cy, r + dp(14) * ripple, ring)
+            }
             // Faint line from the camera towards the left: "tap here".
             line.color = 0xFFFFFFFF.toInt(); line.alpha = (55 * a).toInt()
             c.drawLine(dp(12).toFloat(), cy, cx - r - dp(8), cy, line)
