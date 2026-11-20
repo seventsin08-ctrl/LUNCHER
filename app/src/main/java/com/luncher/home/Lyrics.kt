@@ -109,9 +109,9 @@ class LyricsView(ctx: android.content.Context, private val big: Boolean = false)
     }
     private val prev = mk(if (big) 13f else 11f, 0.35f, 2.2f)
     private val cur = mk(if (big) 17f else 13.5f, 1f, 0f).apply {
-        maxLines = if (big) 3 else 2
-        // In the Home Screen player the line always fits: long lines shrink a little instead of being cut.
-        if (!big) setAutoSizeTextTypeUniformWithConfiguration(10, 14, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+        maxLines = 2
+        // Fixed 2-line space: long lines shrink a little instead of being cut, and the player never jumps in size.
+        setAutoSizeTextTypeUniformWithConfiguration(10, if (big) 17 else 14, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
     }
     private val next = mk(if (big) 13f else 11f, 0.45f, 1.6f)
     private var lastIdx = -2
@@ -122,8 +122,8 @@ class LyricsView(ctx: android.content.Context, private val big: Boolean = false)
         orientation = VERTICAL
         // Home Screen player (small): the current line (2 lines tall, fixed) + the next line, blurred.
         // Island (big): previous, current and next.
-        if (big) addView(prev)
-        addView(cur, LayoutParams(LayoutParams.MATCH_PARENT, if (big) LayoutParams.WRAP_CONTENT else (36 * d).toInt())
+        if (big) { prev.maxLines = 1; addView(prev) }
+        addView(cur, LayoutParams(LayoutParams.MATCH_PARENT, ((if (big) 46 else 36) * d).toInt())
             .apply { topMargin = (if (big) 3 else 0).times(d).toInt(); bottomMargin = (2 * d).toInt() })
         next.maxLines = 1
         addView(next)

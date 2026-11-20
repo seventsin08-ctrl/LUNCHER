@@ -1102,6 +1102,8 @@ class DynamicIsland(
         // Live lyrics (when the song is in the lyrics library).
         val lyr = if (Lyrics.enabled) LyricsView(act, big = true).also {
             it.clear("♪"); it.visibility = View.GONE
+            // Safety: if the lyrics ever change height, re-fit the open island so the buttons never get cut.
+            it.addOnLayoutChangeListener { _, _, t, _, b, _, ot, _, ob -> if (b - t != ob - ot && expanded) pill.post { relayoutExpanded() } }
             expandedView.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
         } else null
 
