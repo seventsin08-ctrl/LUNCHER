@@ -218,7 +218,9 @@ class MainActivity : Activity() {
     private val showSearchPill = Runnable { setPillMode(search = true) }
 
     private val cols: Int get() = settings.columns
-    private val iconDp: Int get() = settings.iconSize
+    /** Icon size, never bigger than a grid cell (so the 4th column always fits on screen). */
+    private val iconDp: Int get() = minOf(settings.iconSize,
+        (cellW() / resources.displayMetrics.density - 14f).toInt().coerceAtLeast(36))
     private val anim: Float get() = settings.animScale
     private fun dur(ms: Long): Long = (ms * anim).toLong()
 
@@ -1278,6 +1280,11 @@ class MainActivity : Activity() {
             offscreenPageLimit = 2
         }
         (pager.getChildAt(0) as? RecyclerView)?.overScrollMode = View.OVER_SCROLL_NEVER
+        // If the pages turn out narrower/wider than the screen size we guessed, lay the grid out again
+        // so every column (including the 4th) fits exactly.
+        pager.addOnLayoutChangeListener { _, l, _, r, _, _, ol, _, or, _ ->
+            if (r - l != or - ol && r - l > 0) pager.post { refreshPages() }
+        }
         content.addView(pager, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
         val pillHolder = FrameLayout(this)
@@ -2020,7 +2027,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun cellW(): Int = (resources.displayMetrics.widthPixels - dp(PAGE_PAD) * 2) / cols
+    /** The real width the pages get (the window can be narrower than the screen on some phones). */
+    private fun gridScreenW(): Int {
+        val pw = if (::pager.isInitialized) pager.width else 0
+        val rw = if (::root.isInitialized) root.width else 0
+        return when { pw > 0 -> pw; rw > 0 -> rw; else -> resources.displayMetrics.widthPixels }
+    }
+    private fun cellW(): Int = (gridScreenW() - dp(PAGE_PAD) * 2) / cols
 
     private fun place(col: Int, row: Int, w: Int, h: Int): FrameLayout.LayoutParams {
         val cw = cellW()
