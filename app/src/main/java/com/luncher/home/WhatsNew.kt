@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        140 to listOf("Gilbert's brain is crash-safe: too-heavy files (like the 2 GB “f32” ones) are refused, free memory and storage are checked first, your old brain is kept until the new one is fully copied, and a brain that ever crashes is switched off automatically"),
         139 to listOf("Gilbert talks like a professional personal assistant who's also your best friend — clear, helpful and warm",
             "Say “report” (or “brief”, “summary”) for a daily briefing: messages, mentions, what's waiting, your song on repeat and your phone",
             "Downloads and system notifications no longer count as messages; fixed stray “\\n” in his replies"),

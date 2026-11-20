@@ -26,33 +26,88 @@ object GilbertBrain {
     fun installed(ctx: Context) = file(ctx).let { it.exists() && it.length() > 10_000_000 }
     fun sizeMb(ctx: Context) = (file(ctx).length() / 1_000_000)
 
-    /** Copy the chosen brain file into the app (runs in the background). */
+    /** Biggest brain we allow — larger files (like the 2 GB "f32" ones) crash phones. */
+    private const val MAX_BYTES = 1_800_000_000L
+
+    /** Last problem with the brain (shown in the chat / Settings). */
+    @Volatile var lastError: String? = null
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("gil_brain", Context.MODE_PRIVATE)
+
+    /** Copy the chosen brain file into the app (runs in the background). Your old brain stays until the new one is fully copied. */
     fun install(ctx: Context, uri: Uri, done: (Boolean, String) -> Unit) {
+        val app = ctx.applicationContext
         exec.execute {
             val r = runCatching {
-                release()
-                val tmp = File(ctx.filesDir, "gilbert_brain.tmp")
-                ctx.contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 20) } }
+                var name = ""; var size = -1L
+                app.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        val ni = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        val si = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                        if (ni >= 0) name = c.getString(ni) ?: ""
+                        if (si >= 0 && !c.isNull(si)) size = c.getLong(si)
+                    }
+                }
+                val low = name.lowercase()
+                if (name.isNotEmpty() && !low.endsWith(".task"))
+                    error("That's not a brain file — pick one that ends in “.task”")
+                if (low.contains("f32") || size > MAX_BYTES)
+                    error("That brain is too heavy for this phone (${if (size > 0) "${size / 1_000_000} MB" else "f32"}) and would crash it. Pick the “q8” .task file (about 0.5–1.6 GB).")
+                val free = android.os.StatFs(app.filesDir.path).availableBytes
+                if (size > 0 && free < size + 300_000_000L)
+                    error("Not enough free storage — need about ${(size + 300_000_000L) / 1_000_000} MB free")
+                val tmp = File(app.filesDir, "gilbert_brain.tmp")
+                app.contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 20) } }
                 if (tmp.length() < 10_000_000) { tmp.delete(); error("That file is too small to be a brain (.task model)") }
-                file(ctx).delete(); tmp.renameTo(file(ctx))
+                if (tmp.length() > MAX_BYTES) { tmp.delete(); error("That brain is too heavy for this phone and would crash it. Pick a smaller “q8” .task file.") }
+                // Only now swap the old brain for the new one.
+                release()
+                file(app).delete(); tmp.renameTo(file(app))
+                prefs(app).edit().putBoolean("loading", false).putBoolean("crashed", false).apply()
+                lastError = null
             }
+            if (r.isFailure) File(app.filesDir, "gilbert_brain.tmp").delete()
             main.post { done(r.isSuccess, r.exceptionOrNull()?.message ?: "Gilbert's brain is ready 🧠") }
         }
     }
 
-    fun remove(ctx: Context) { exec.execute { release(); file(ctx).delete() } }
+    /** Did the last brain crash the launcher while loading? (Then it stays off until you pick another.) */
+    fun crashed(ctx: Context): Boolean {
+        val p = prefs(ctx)
+        // "loading" still set = the app died while loading the brain last time.
+        if (p.getBoolean("loading", false)) p.edit().putBoolean("loading", false).putBoolean("crashed", true).apply()
+        return p.getBoolean("crashed", false)
+    }
+
+    fun remove(ctx: Context) {
+        prefs(ctx).edit().putBoolean("loading", false).putBoolean("crashed", false).apply()
+        lastError = null
+        exec.execute { release(); file(ctx).delete() }
+    }
 
     private fun release() { runCatching { llm?.close() }; llm = null }
 
     private fun load(ctx: Context): LlmInference? {
         llm?.let { return it }
         if (!installed(ctx)) return null
+        if (crashed(ctx)) { lastError = "This brain crashed the launcher, so I switched it off. Pick a smaller “q8” .task file in Settings."; return null }
+        // Enough memory? (A brain needs roughly its own size in free RAM.)
+        val am = ctx.getSystemService(android.app.ActivityManager::class.java)
+        val mi = android.app.ActivityManager.MemoryInfo(); runCatching { am.getMemoryInfo(mi) }
+        if (mi.availMem > 0 && mi.availMem < file(ctx).length() * 0.9) {
+            lastError = "Not enough free memory right now (${mi.availMem / 1_000_000} MB). Close some apps and try again."
+            return null
+        }
+        val p = prefs(ctx)
+        p.edit().putBoolean("loading", true).commit()   // if we crash during this, next time we know
         llm = runCatching {
             LlmInference.createFromOptions(ctx, LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(file(ctx).absolutePath)
                 .setMaxTokens(1024)
                 .build())
-        }.getOrNull()
+        }.onFailure { lastError = "The brain couldn't start (${it.message?.take(60) ?: "unknown"}). Try the q8 .task file." }.getOrNull()
+        p.edit().putBoolean("loading", false).apply()
+        if (llm != null) lastError = null
         return llm
     }
 

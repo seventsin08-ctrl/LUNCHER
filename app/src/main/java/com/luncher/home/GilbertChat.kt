@@ -143,7 +143,7 @@ object GilbertChat {
                     override fun run() { if (thinking.text.length <= 3 && thinking.text.all { it == '•' }) { n = n % 3 + 1; thinking.text = "•".repeat(n); thinking.postDelayed(this, 350) } } }
                 thinking.post(dots)
                 GilbertBrain.ask(act, history.dropLast(1), q) { ans ->
-                    val a = ans ?: ruleAnswer(act, s, q)
+                    val a = ans ?: (ruleAnswer(act, s, q) + (GilbertBrain.lastError?.let { "\n\n⚠️ $it" } ?: ""))
                     history += false to a
                     thinking.text = a; SoundFX.play(act, "chirp")
                     scroll.post { scroll.smoothScrollTo(0, list.height) }

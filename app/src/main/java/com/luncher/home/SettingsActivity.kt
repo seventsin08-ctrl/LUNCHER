@@ -810,6 +810,8 @@ class SettingsActivity : Activity() {
         }
         val gilB = section("GILBERT · BRAIN & MEMORY")
         if (gilB.parent != null) {
+            if (GilbertBrain.installed(this) && GilbertBrain.crashed(this))
+                info(gilB, "⚠️ The current brain crashed the launcher, so it's switched off. Remove it and pick a smaller “q8” .task file (not “f32”).")
             info(gilB, if (GilbertBrain.installed(this)) "🧠 Brain on (${GilbertBrain.sizeMb(this)} MB). Gilbert chats freely — privately, on this phone, no internet needed."
                 else "Memory mode: Gilbert already learns your songs, apps and who messages you, and answers from that. " +
                     "Add his brain (a small offline AI model, .task file ~500 MB) to chat about anything.")
@@ -818,7 +820,7 @@ class SettingsActivity : Activity() {
                 button(gilB, "1. Get a Brain File (opens browser)…", 0xFF0A84FF.toInt()) {
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(GilbertBrain.DOWNLOAD_URL))) }
                 }
-                info(gilB, "Download a small “.task” model for phones, e.g. Gemma 3 1B or Qwen 2.5 0.5B (int4/int8, about 0.5 GB), then:")
+                info(gilB, "Download a small “.task” model for phones — pick the “q8” one, NOT “f32” (too heavy). E.g. Qwen2.5-0.5B-Instruct q8 (~0.5 GB) or Qwen2.5-1.5B-Instruct q8 (~1.6 GB, smarter, slower). Then:")
                 button(gilB, "2. Choose Brain File…", 0xFF0A84FF.toInt()) {
                     val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                     runCatching { startActivityForResult(i, REQ_BRAIN) }
