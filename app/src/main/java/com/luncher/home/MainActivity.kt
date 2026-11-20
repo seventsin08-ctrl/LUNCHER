@@ -2595,8 +2595,8 @@ class MainActivity : Activity() {
                 widgetFrame(batteryWidget(), "Batteries", { openIntent(Intent(Intent.ACTION_POWER_USAGE_SUMMARY), it) }, null, remove)
             WidgetType.MUSIC ->
                 widgetFrame(musicWidget(), "Now Playing",
-                    { if (settings.musicStyle.startsWith("vinyl")) vinylTapped(it) else musicTapped(it) }, null, remove,
-                    pill = settings.musicOblong && !settings.musicStyle.startsWith("vinyl"))
+                    { musicTapped(it) }, null, remove,
+                    pill = settings.musicOblong && settings.musicStyle == "classic")
             WidgetType.APPWIDGET -> buildAppWidget(w, remove)
             WidgetType.DIGITAL_CLOCK ->
                 widgetFrame(MoreWidgets.digitalClock(this, false), "Digital Clock",
@@ -2868,118 +2868,210 @@ class MainActivity : Activity() {
             setOnTouchListener(pressEffect(this, 0.82f))
         }
 
+    // ================================================================ Now Playing styles
     private var vinylSpin: android.animation.ObjectAnimator? = null
-    private var vinylControls: View? = null
-    private val hideVinylControls = Runnable { showVinylControls(false) }
-
-    /** Tap the vinyl player: its buttons slide in (and tuck away again after a few seconds). */
-    private fun showVinylControls(show: Boolean) {
-        val c = vinylControls ?: return
-        mainHandler.removeCallbacks(hideVinylControls)
-        if (show) {
-            c.visibility = View.VISIBLE
-            c.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
-            for (i in 0 until ((c as? android.view.ViewGroup)?.childCount ?: 0)) {
-                val b = (c as android.view.ViewGroup).getChildAt(i)
-                b.scaleX = 0.6f; b.scaleY = 0.6f
-                b.postDelayed({ Motion.scaleTo(b, 1f, Motion.BOUNCY) }, i * 50L)
-            }
-            mainHandler.postDelayed(hideVinylControls, 6000)
-        } else {
-            c.animate().alpha(0f).translationY(dp(10).toFloat()).setDuration(200).withEndAction { c.visibility = View.INVISIBLE }.start()
+    private var playerFrame: FrameLayout? = null
+    private var playerStyleNow: PlayerStyles.Style? = null
+    private var playerLyrics: TextView? = null
+    private var playerFg: ((Int) -> Unit)? = null
+    private var lastArtForTone: android.graphics.Bitmap? = null
+    private val lyricsTicker = object : Runnable {
+        override fun run() {
+            updateLyricsLine()
+            if (playerLyrics != null) mainHandler.postDelayed(this, 450)
         }
     }
 
-    private fun vinylTapped(from: View) {
-        val c = vinylControls
-        if (!hasNotificationAccess() || c == null) { musicTapped(from); return }
-        showVinylControls(c.visibility != View.VISIBLE || c.alpha < 0.5f)
+    /** Current song position, counting time since the music app last reported it. */
+    private fun songPosition(): Long {
+        val st = mediaController?.playbackState ?: return 0
+        if (st.state != PlaybackState.STATE_PLAYING) return st.position
+        val since = android.os.SystemClock.elapsedRealtime() - st.lastPositionUpdateTime
+        return st.position + (since * st.playbackSpeed).toLong()
     }
 
-    /** Record-player style Now Playing: a spinning vinyl with the album art in the middle and a tone arm. */
-    private fun vinylWidget(light: Boolean): View {
+    private fun updateLyricsLine() {
+        val tv = playerLyrics ?: return
+        val v = musicViews ?: return
+        val title = v.title.text.toString(); val artist = v.artist.text.toString()
+        if (title.isBlank() || v.body.visibility != View.VISIBLE) { tv.text = ""; return }
+        val song = Lyrics.cached(title, artist)
+        if (song == null) {
+            val dur = mediaController?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+            Lyrics.fetch(title, artist, dur) { }
+            if (tv.text.isNullOrEmpty()) tv.text = "♪"
+            return
+        }
+        val line = Lyrics.lineAt(song, songPosition())
+        if (tv.text.toString() != line) {
+            // Lines slide up softly, like Apple Music.
+            tv.animate().cancel()
+            tv.animate().alpha(0f).translationY(-dp(6).toFloat()).setDuration(140).withEndAction {
+                tv.text = line; tv.translationY = dp(6).toFloat()
+                tv.animate().alpha(1f).translationY(0f).setDuration(220).start()
+            }.start()
+        }
+    }
+
+    /** Album tone: the background takes the album art's average colour. */
+    private fun applyPlayerTone(art: android.graphics.Bitmap?) {
+        val st = playerStyleNow ?: return
+        val f = playerFrame ?: return
+        if (st.tone != "album" || art === lastArtForTone) return
+        lastArtForTone = art
+        val c = art?.let { runCatching { android.graphics.Bitmap.createScaledBitmap(it, 1, 1, true).getPixel(0, 0) }.getOrNull() } ?: 0xFF3A3A3C.toInt()
+        val dark = IconFactory.blend(c, Color.BLACK, 0.35f)
+        val lum = (Color.red(dark) * 0.3 + Color.green(dark) * 0.59 + Color.blue(dark) * 0.11)
+        val bgD = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(IconFactory.blend(c, Color.WHITE, 0.08f), dark)).apply {
+            cornerRadius = dp(22).toFloat() }
+        if (st.art == "poster") (f.getChildAt(1) as? View)?.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+            intArrayOf((dark and 0x00FFFFFF) or 0xE6000000.toInt(), 0x22000000)).apply { cornerRadius = dp(22).toFloat() }
+        else f.background = bgD
+        playerFg?.invoke(if (lum > 165) 0xFF1C1C1E.toInt() else Color.WHITE)
+    }
+
+    /** Builds the Now Playing widget in the chosen style (everything but "Classic"). */
+    private fun styledPlayer(st: PlayerStyles.Style): View {
         vinylSpin?.cancel(); vinylSpin = null
-        val fg = if (light) 0xFF1C1C1E.toInt() else Color.WHITE
+        lastArtForTone = null
+        val light = st.tone == "light"
+        var fg = if (light) 0xFF1C1C1E.toInt() else Color.WHITE
         val frame = FrameLayout(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                if (light) intArrayOf(0xFFF2F2F7.toInt(), 0xFFD8D8DE.toInt()) else intArrayOf(0xFF6E6E73.toInt(), 0xFF3A3A3C.toInt())).apply {
-                cornerRadius = dp(22).toFloat() }
+            background = when (st.tone) {
+                "light" -> GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFFF7F7FA.toInt(), 0xFFDCDCE2.toInt()))
+                "glass" -> null
+                "accent" -> GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
+                    IconFactory.blend(ThemeEngine.accent, Color.WHITE, 0.1f), IconFactory.blend(ThemeEngine.accent, Color.BLACK, 0.45f)))
+                "album" -> GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF5A5A60.toInt(), 0xFF2C2C2E.toInt()))
+                else -> GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF6E6E73.toInt(), 0xFF2C2C2E.toInt()))
+            }?.apply { (this as GradientDrawable).cornerRadius = dp(22).toFloat() }
         }
-        val bg = ImageView(this).apply { visibility = View.GONE }
-        frame.addView(bg, FrameLayout.LayoutParams(1, 1))
+        // Poster: the album art fills the widget behind a soft shade.
+        val bg = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = if (st.art == "poster") View.VISIBLE else View.GONE
+            if (st.art == "poster") { outlineProvider = roundedOutline(22f); clipToOutline = true }
+        }
+        frame.addView(bg, if (st.art == "poster") FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT) else FrameLayout.LayoutParams(1, 1))
+        frame.addView(View(this).apply {
+            visibility = if (st.art == "poster") View.VISIBLE else View.GONE
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+                if (light) intArrayOf(0xF2FFFFFF.toInt(), 0x66FFFFFF) else intArrayOf(0xF0000000.toInt(), 0x33000000)).apply { cornerRadius = dp(22).toFloat() }
+        }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
         val body = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(10), dp(12), dp(10))
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(10), dp(14), dp(10))
         }
-        // The record
-        val rec = FrameLayout(this)
-        val disc = FrameLayout(this).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF111111.toInt()); setStroke(dp(2), 0xFF2A2A2A.toInt()) }
-            elevation = dp(6).toFloat()
-        }
+        // The art
         val art = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            outlineProvider = object : android.view.ViewOutlineProvider() {
+            outlineProvider = if (st.art == "square") roundedOutline(14f) else object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setOval(0, 0, view.width, view.height)
             }
             clipToOutline = true
             setImageResource(R.drawable.ic_music); setColorFilter(0xB3FFFFFF.toInt())
         }
-        disc.addView(art, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.CENTER))
-        rec.addView(disc, FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER))
-        // Tone arm
-        rec.addView(View(this).apply {
-            background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(if (light) 0xFF8E8E93.toInt() else 0xFFD1D1D6.toInt()) }
-            rotation = 24f; pivotY = 0f; elevation = dp(8).toFloat()
-        }, FrameLayout.LayoutParams(dp(4), dp(62), Gravity.TOP or Gravity.END).apply { topMargin = dp(2); marginEnd = dp(8) })
-        rec.addView(View(this).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (light) 0xFFC7C7CC.toInt() else 0xFF8E8E93.toInt()) }
-            elevation = dp(8).toFloat()
-        }, FrameLayout.LayoutParams(dp(14), dp(14), Gravity.TOP or Gravity.END).apply { marginEnd = dp(3) })
-        body.addView(rec, LinearLayout.LayoutParams(dp(110), dp(104)))
-        vinylSpin = android.animation.ObjectAnimator.ofFloat(disc, View.ROTATION, 0f, 360f).apply {
-            duration = 6000; repeatCount = android.animation.ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
+        val artHolder: View? = when (st.art) {
+            "vinyl" -> {
+                val rec = FrameLayout(this)
+                val disc = FrameLayout(this).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF111111.toInt()); setStroke(dp(2), 0xFF2A2A2A.toInt()) }
+                    elevation = dp(6).toFloat()
+                }
+                // Grooves
+                disc.addView(View(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0); setStroke(dp(1), 0x22FFFFFF) } },
+                    FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
+                disc.addView(art, FrameLayout.LayoutParams(dp(50), dp(50), Gravity.CENTER))
+                rec.addView(disc, FrameLayout.LayoutParams(dp(92), dp(92), Gravity.CENTER))
+                // Tone arm resting on the edge of the record
+                rec.addView(View(this).apply {
+                    background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(if (light) 0xFF8E8E93.toInt() else 0xFFD1D1D6.toInt()) }
+                    pivotX = dp(2).toFloat(); pivotY = 0f; rotation = 28f; elevation = dp(8).toFloat()
+                }, FrameLayout.LayoutParams(dp(4), dp(56), Gravity.TOP or Gravity.END).apply { topMargin = dp(9); marginEnd = dp(9) })
+                rec.addView(View(this).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (light) 0xFFC7C7CC.toInt() else 0xFF8E8E93.toInt()) }
+                    elevation = dp(9).toFloat()
+                }, FrameLayout.LayoutParams(dp(16), dp(16), Gravity.TOP or Gravity.END).apply { topMargin = dp(2); marginEnd = dp(2) })
+                vinylSpin = android.animation.ObjectAnimator.ofFloat(disc, View.ROTATION, 0f, 360f).apply {
+                    duration = 6000; repeatCount = android.animation.ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
+                }
+                rec.layoutParams = LinearLayout.LayoutParams(dp(104), dp(104)); rec
+            }
+            "square" -> art.apply { elevation = dp(6).toFloat(); layoutParams = LinearLayout.LayoutParams(dp(88), dp(88)) }
+            "round" -> {
+                val r = FrameLayout(this).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor((fg and 0x00FFFFFF) or 0x22000000) } }
+                r.addView(art, FrameLayout.LayoutParams(dp(80), dp(80), Gravity.CENTER))
+                vinylSpin = android.animation.ObjectAnimator.ofFloat(art, View.ROTATION, 0f, 360f).apply {
+                    duration = 12000; repeatCount = android.animation.ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
+                }
+                r.layoutParams = LinearLayout.LayoutParams(dp(92), dp(92)); r
+            }
+            else -> null
         }
-        // Title, artist and the buttons
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        // Words, buttons and lyrics
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val source = TextView(this).apply { textSize = 11f; maxLines = 1 }
         val title = TextView(this).apply {
-            setTextColor(fg); textSize = 16f; typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-            setOnClickListener { musicTapped(this) }
+            textSize = 16f; typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
         }
-        val artist = TextView(this).apply { setTextColor((fg and 0x00FFFFFF) or 0x99000000.toInt()); textSize = 13f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        val source = TextView(this).apply { setTextColor((fg and 0x00FFFFFF) or 0x80000000.toInt()); textSize = 11f; maxLines = 1 }
+        val artist = TextView(this).apply { textSize = 13f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         texts.addView(source); texts.addView(title); texts.addView(artist)
-        val controls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            alpha = 0f; translationY = dp(10).toFloat(); visibility = View.INVISIBLE
-        }
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val ctlViews = ArrayList<ImageView>()
         fun ctl(res: Int, onClick: () -> Unit) = ImageView(this).apply {
-            setImageResource(res); scaleType = ImageView.ScaleType.CENTER_INSIDE; setColorFilter(fg)
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor((fg and 0x00FFFFFF) or 0x1F000000) }
-            setOnClickListener { haptic(this, HapticFeedbackConstants.CLOCK_TICK); onClick(); mainHandler.removeCallbacks(hideVinylControls); mainHandler.postDelayed(hideVinylControls, 6000) }
-        }
+            setImageResource(res); scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setOnClickListener {
+                haptic(this, HapticFeedbackConstants.CLOCK_TICK); SoundFX.play(this@MainActivity, "tick")
+                scaleX = 0.8f; scaleY = 0.8f; Motion.scaleTo(this, 1f, Motion.BOUNCY); onClick()
+            }
+        }.also { ctlViews += it }
         controls.addView(ctl(R.drawable.ic_prev) { mediaController?.transportControls?.skipToPrevious() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS) },
-            LinearLayout.LayoutParams(dp(36), dp(36)))
+            LinearLayout.LayoutParams(dp(34), dp(34)))
         val play = ctl(R.drawable.ic_play) { togglePlay() }
-        controls.addView(play, LinearLayout.LayoutParams(dp(42), dp(42)).apply { marginStart = dp(10); marginEnd = dp(10) })
+        controls.addView(play, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(10); marginEnd = dp(10) })
         controls.addView(ctl(R.drawable.ic_next) { mediaController?.transportControls?.skipToNext() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) },
-            LinearLayout.LayoutParams(dp(36), dp(36)))
-        texts.addView(controls, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(8) })
-        body.addView(texts, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        frame.addView(body, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        val hint = TextView(this).apply {
-            setTextColor(fg); textSize = 14f; gravity = Gravity.CENTER
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            LinearLayout.LayoutParams(dp(34), dp(34)))
+        texts.addView(controls, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+        val lyrics = TextView(this).apply {
+            textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
+        texts.addView(lyrics, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+
+        val textsLp = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
+        if (artHolder == null) { body.addView(texts, textsLp) }
+        else if (st.artRight) { body.addView(texts, textsLp.apply { marginEnd = dp(12) }); body.addView(artHolder) }
+        else { body.addView(artHolder); body.addView(texts, textsLp.apply { marginStart = dp(12) }) }
+        frame.addView(body, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        val hint = TextView(this).apply { textSize = 14f; gravity = Gravity.CENTER; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL) }
         frame.addView(hint, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        vinylControls = controls
+
+        // Colours that follow the background (light text on dark, dark text on light).
+        val paint: (Int) -> Unit = { c ->
+            fg = c
+            title.setTextColor(c); hint.setTextColor(c)
+            artist.setTextColor((c and 0x00FFFFFF) or 0xA6000000.toInt())
+            source.setTextColor((c and 0x00FFFFFF) or 0x80000000.toInt())
+            lyrics.setTextColor((c and 0x00FFFFFF) or 0xE6000000.toInt())
+            for (b in ctlViews) {
+                b.setColorFilter(c)
+                b.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor((c and 0x00FFFFFF) or 0x1F000000) }
+            }
+        }
+        paint(fg)
+        playerFg = paint
+        playerFrame = frame; playerStyleNow = st; playerLyrics = lyrics
         musicViews = MusicViews(art, bg, title, artist, source, play, hint, body)
         updateMusic()
+        mainHandler.removeCallbacks(lyricsTicker); mainHandler.post(lyricsTicker)
         return frame
     }
 
     private fun musicWidget(): View {
-        vinylControls = null; vinylSpin?.cancel(); vinylSpin = null
-        if (settings.musicStyle.startsWith("vinyl")) return vinylWidget(settings.musicStyle == "vinyl_light")
+        vinylSpin?.cancel(); vinylSpin = null
+        playerFrame = null; playerStyleNow = null; playerLyrics = null; playerFg = null
+        val st = PlayerStyles.playerStyle(settings.musicStyle)
+        if (st.art != "classic") return styledPlayer(st)
         val frame = FrameLayout(this)
         val bg = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -4892,6 +4984,7 @@ class MainActivity : Activity() {
                 val art = meta.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
                     ?: meta.getBitmap(MediaMetadata.METADATA_KEY_ART)
                     ?: meta.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+                applyPlayerTone(art)
                 if (art != null) {
                     v.art.clearColorFilter()
                     v.art.setImageBitmap(art)

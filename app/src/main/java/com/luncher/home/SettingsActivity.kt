@@ -510,9 +510,10 @@ class SettingsActivity : Activity() {
 
         // ---------------- Widgets
         val widgets = section("WIDGETS")
-        chips(widgets, "Music Player Style", listOf("classic" to "Classic", "vinyl" to "Vinyl", "vinyl_light" to "Vinyl Light"),
-            s.musicStyle) { s.musicStyle = it }
-        info(widgets, "Vinyl: a spinning record with the album art. Tap the player and its buttons slide in; tap the song name to open the app.")
+        chips(widgets, "Music Player Style (${PlayerStyles.all.size})", PlayerStyles.all.map { it.key to it.name },
+            PlayerStyles.playerStyle(s.musicStyle).key) { s.musicStyle = it }
+        info(widgets, "Vinyl, Album, Disc, Poster and Minimal players in dark, light, glass, album-colour and theme-colour looks. " +
+            "Every style has ⏮ ⏯ ⏭ buttons and live lyrics (from the free LRCLIB lyrics library, when the song is there).")
         toggle(widgets, "Photos", null, s.widgetEnabled("PHOTO")) { s.setWidgetEnabled("PHOTO", it) }
         toggle(widgets, "Clock & Calendar Icons", null, s.widgetEnabled("ICONS")) { s.setWidgetEnabled("ICONS", it) }
         toggle(widgets, "Calendar", null, s.widgetEnabled("CALENDAR")) { s.setWidgetEnabled("CALENDAR", it) }

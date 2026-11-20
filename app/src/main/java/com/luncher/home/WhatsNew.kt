@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        114 to listOf("31 Now Playing styles: Vinyl, Vinyl Right, Album, Album Right, Disc, Poster and Minimal — in Dark, Light, Glass, Album Color and Theme Color",
+            "Every player style now shows ⏮ ⏯ ⏭ buttons all the time",
+            "Live lyrics in the player: the line being sung, sliding up as the song plays (from the free LRCLIB library)"),
         113 to listOf("Adjust the Features (top of Settings): drag the Dynamic Island, Sidebar, Side Island and Game Ball on a live phone preview",
             "Page transitions: Android, Roll, Flip, Card, Tilt, Fade, Cube, Depth, Zoom",
             "Layouts: 4×5, 4×6, 4×7, 5×6, 5×7 or Auto",
