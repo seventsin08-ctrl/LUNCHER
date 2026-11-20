@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        116 to listOf("Lyrics in the small island too: while music plays, the line being sung shows right next to the album art"),
         115 to listOf("Lyrics now land on time (shown a touch early, updated 5× a second)",
             "Spotify / ArchiveTune look: three lyric lines — the one being sung is bright, the ones around it are blurred — and the album art glows blurred behind the player",
             "The island player has the same lyrics and blurred art too (it grows to fit them when the song has lyrics)",

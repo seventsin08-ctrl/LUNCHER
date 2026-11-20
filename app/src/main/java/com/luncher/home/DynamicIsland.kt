@@ -923,6 +923,9 @@ class DynamicIsland(
         if (a.icon != null) { icon.setImageBitmap(a.icon); icon.clearColorFilter() }
         else { icon.setImageResource(a.iconRes); icon.setColorFilter(a.iconTint) }
         label.text = if (a.media != null) "" else a.title
+        // Music in the small island: the line being sung scrolls by right in the pill.
+        pill.removeCallbacks(compactLyrics)
+        if (a.media != null && Lyrics.enabled) pill.post(compactLyrics)
         trailing.text = a.trailing ?: ""
         trailing.setTextColor(a.accent)
         trailing.visibility = if (a.trailing == null) View.GONE else View.VISIBLE
@@ -932,6 +935,30 @@ class DynamicIsland(
 
     private var ticker: Runnable? = null
     private var expSubtitle: TextView? = null
+
+    /** Small island + music: show the current lyric line next to the art (fades as lines change). */
+    private val compactLyrics: Runnable = object : Runnable {
+        override fun run() {
+            val a = current() ?: return
+            val m = a.media ?: return
+            if (!Lyrics.enabled) return
+            if (!expanded) {
+                val song = Lyrics.cached(a.title, a.subtitle)
+                if (song == null) Lyrics.fetch(a.title, a.subtitle, m.duration) { }
+                else {
+                    val line = if (song.synced.isNotEmpty()) Lyrics.lineAt(song, m.position() + 350) else ""
+                    val show = if (line == "♪") "" else line
+                    if (label.text.toString() != show) {
+                        label.animate().cancel()
+                        label.alpha = 0f; label.translationY = dp(4).toFloat()
+                        label.text = show
+                        label.animate().alpha(1f).translationY(0f).setDuration(220).start()
+                    }
+                }
+            }
+            pill.postDelayed(this, 250)
+        }
+    }
 
     private fun fmtTime(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)
