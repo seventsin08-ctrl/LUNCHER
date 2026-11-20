@@ -4,7 +4,7 @@ plugins {
 }
 
 // Update this number for every release; it also controls the installed app name.
-val launcherNumber = "136"
+val launcherNumber = "137"
 
 android {
     namespace = "com.luncher.home"
@@ -14,7 +14,7 @@ android {
         applicationId = "com.applelauncher.home"
         minSdk = 26
         targetSdk = 35
-        versionCode = 141
+        versionCode = 142
         versionName = launcherNumber
     }
 
@@ -70,5 +70,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.viewpager2:viewpager2:1.1.0")
     implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
+    // Gilbert's offline brain (runs a small language model on the phone).
+    implementation("com.google.mediapipe:tasks-genai:0.10.22")
     testImplementation("junit:junit:4.13.2")
 }

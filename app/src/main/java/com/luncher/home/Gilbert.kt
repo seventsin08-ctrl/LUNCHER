@@ -86,6 +86,7 @@ object Gilbert {
 
     /** Gilbert writes down every message / notification (latest 80), and spots mentions of you. */
     fun note(ctx: Context, pkg: String, title: String, text: String) {
+        GilbertMemory.person(ctx, title)
         val name = GilbertTalk.ownerName(ctx)?.lowercase()
         val low = (title + " " + text).lowercase()
         val mention = low.contains("mentioned you") || low.contains("tagged you") || low.contains("replied to you") ||
@@ -151,7 +152,7 @@ object Gilbert {
     fun isPanelOpen() = panelClose != null
 
     fun showPanel(act: Activity, root: FrameLayout, s: Settings, appInfo: (String) -> Pair<android.graphics.Bitmap?, String>?,
-                  openApp: (String) -> Unit, openInbox: () -> Unit, openTools: () -> Unit) {
+                  openApp: (String) -> Unit, openInbox: () -> Unit, openTools: () -> Unit, openChat: (() -> Unit)? = null) {
         // Only ever one card: tapping Gilbert again while it's open closes it instead.
         panelClose?.let { it(); return }
         fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
@@ -283,6 +284,7 @@ object Gilbert {
             addView(text("Gilbert", 24f, Color.WHITE, true))
             addView(text("Your ally · ${java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())}", 12.5f, DIM))
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        if (openChat != null) head.addView(roundBtn("💬") { close(); openChat() }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
         head.addView(roundBtn("☰") { close(); openTools() }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
         head.addView(roundBtn("✕") { close() }, LinearLayout.LayoutParams(dp(40), dp(40)))
         card.addView(head)

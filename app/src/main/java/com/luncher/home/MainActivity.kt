@@ -235,7 +235,10 @@ class MainActivity : Activity() {
 
     // ================================================================ Gilbert's feelings
     private var lastGazeAt = 0L
-    private val appMoodListener: (String) -> Unit = { pkg -> mainHandler.post { updateGilbertMood(pkg) } }
+    private val appMoodListener: (String) -> Unit = { pkg -> mainHandler.post {
+        updateGilbertMood(pkg)
+        allApps.firstOrNull { it.packageName == pkg }?.let { GilbertMemory.app(this, it.label) }
+    } }
 
     /** What Gilbert feels about what's on screen (and the time / phone state). */
     private fun updateGilbertMood(pkg: String? = GameState.foreground) {
@@ -302,7 +305,8 @@ class MainActivity : Activity() {
                 packageManager.getLaunchIntentForPackage(pkg)?.let { runCatching { startActivity(it) } }
             },
             openInbox = { if (::sideHud.isInitialized) sideHud.openHistory(); Gilbert.clearHeld() },
-            openTools = { island.toggleTools() })
+            openTools = { island.toggleTools() },
+            openChat = { GilbertChat.show(this, root, settings) })
     }
 
     /** Pop this app's logo in the island's round face. */
@@ -5098,6 +5102,7 @@ class MainActivity : Activity() {
 
     /** Remember the song so the widget can keep showing it after the music stops. */
     private fun rememberSong(title: String, artist: String, pkg: String, art: android.graphics.Bitmap?) {
+        GilbertMemory.song(this, title, artist)
         val changed = prefs.getString("last_song_title", null) != title || prefs.getString("last_song_pkg", null) != pkg
         if (!changed) return
         prefs.edit().putString("last_song_title", title).putString("last_song_artist", artist).putString("last_song_pkg", pkg).apply()

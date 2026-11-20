@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        137 to listOf("Talk to Gilbert: tap him, then 💬 — ask “what did I miss?”, “what am I listening to?”, “who am I?” and more",
+            "Gilbert's memory: he learns your favourite songs and artists, the apps you open most and who messages you — all kept on your phone (Settings › Gilbert › Brain & Memory, with Forget Everything)",
+            "Gilbert's brain (optional): add a small offline AI model and he chats about anything — privately, on the phone, no internet needed"),
         136 to listOf("Fixed page transitions: pages are never left half-turned or see-through after opening an app",
             "Opening and closing apps now matches your Page Swipe style (Settings › Animations › Opening Apps › Match Page Swipe)"),
         135 to listOf("Headphones card: smaller and minimal like iPhone's AirPods card, never stretches across the screen (even in games / landscape), and takes your wallpaper / theme colour"),

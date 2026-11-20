@@ -49,7 +49,7 @@ class SettingsActivity : Activity() {
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
         Category("phone", "Phone & Connections", 0xFF30D158.toInt(), R.drawable.ic_cc_wifi, listOf("PHONE & CONNECTIVITY", "CONNECTIONS")),
         Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
-        Category("gilbert", "Gilbert", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("GILBERT", "GILBERT · NOTIFICATIONS")),
+        Category("gilbert", "Gilbert", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("GILBERT", "GILBERT · BRAIN & MEMORY", "GILBERT · NOTIFICATIONS")),
         Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "RESET"))
     )
     private val groups = listOf(listOf("setup"), listOf("look", "home", "island", "gilbert", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
@@ -808,6 +808,25 @@ class SettingsActivity : Activity() {
                 "along when you search, smiles at chats, gets sleepy at night, sad when the battery is low, excited when " +
                 "charging, surprised at new messages — and his eyes follow your finger", s.gilbertEmotions) { s.gilbertEmotions = it }
         }
+        val gilB = section("GILBERT · BRAIN & MEMORY")
+        if (gilB.parent != null) {
+            info(gilB, if (GilbertBrain.installed(this)) "🧠 Brain on (${GilbertBrain.sizeMb(this)} MB). Gilbert chats freely — privately, on this phone, no internet needed."
+                else "Memory mode: Gilbert already learns your songs, apps and who messages you, and answers from that. " +
+                    "Add his brain (a small offline AI model, .task file ~500 MB) to chat about anything.")
+            button(gilB, "Talk to Gilbert", 0xFF0A84FF.toInt()) { rootFrame?.let { GilbertChat.show(this, it, s) } }
+            if (!GilbertBrain.installed(this)) {
+                button(gilB, "1. Get a Brain File (opens browser)…", 0xFF0A84FF.toInt()) {
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(GilbertBrain.DOWNLOAD_URL))) }
+                }
+                info(gilB, "Download a small “.task” model for phones, e.g. Gemma 3 1B or Qwen 2.5 0.5B (int4/int8, about 0.5 GB), then:")
+                button(gilB, "2. Choose Brain File…", 0xFF0A84FF.toInt()) {
+                    val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                    runCatching { startActivityForResult(i, REQ_BRAIN) }
+                }
+            } else button(gilB, "Remove Brain", 0xFFFF453A.toInt()) { GilbertBrain.remove(this); rebuild() }
+            info(gilB, "What Gilbert knows about you:\n" + GilbertMemory.profile(this))
+            button(gilB, "Forget Everything", 0xFFFF453A.toInt()) { GilbertMemory.forget(this); rebuild() }
+        }
         val gilN = section("GILBERT · NOTIFICATIONS")
         segment(gilN, "Notification Style", listOf("launcher" to "Launcher", "original" to "Original", "both" to "Both"), s.notifStyle) {
             s.notifStyle = it
@@ -994,6 +1013,13 @@ class SettingsActivity : Activity() {
                     val r = Backup.export(this, uri)
                     runOnUiThread { android.widget.Toast.makeText(this, r.message, android.widget.Toast.LENGTH_LONG).show() }
                 }.start()
+            }
+            REQ_BRAIN -> {
+                android.widget.Toast.makeText(this, "Adding Gilbert's brain… (this can take a minute)", android.widget.Toast.LENGTH_LONG).show()
+                GilbertBrain.install(this, uri) { ok, msg ->
+                    android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
+                    if (ok) rebuild()
+                }
             }
             REQ_IMPORT -> {
                 android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
@@ -1457,6 +1483,7 @@ class SettingsActivity : Activity() {
         const val REQ_MIC = 5104
         const val REQ_SETUP = 5105
         const val REQ_IMPORT = 5103
+        const val REQ_BRAIN = 5121
 
         fun usageAccessGranted(act: Activity): Boolean = runCatching {
             val ops = act.getSystemService(AppOpsManager::class.java)
