@@ -40,6 +40,19 @@ class SidebarService : Service() {
     }
 
     private var sidebar: Sidebar? = null
+    /** Game mode: the floating ball replaces the Sidebar handle while a game is on screen. */
+    private var ball: GameBall? = null
+    private val gameListener: () -> Unit = { main.post { applyGame() } }
+    private fun gaming() = GameState.playing && Settings(this).gameBall
+    private fun applyGame() {
+        if (gaming()) {
+            runCatching { sidebar?.detach() }
+            runCatching { ball?.attach() }
+        } else {
+            runCatching { ball?.detach() }
+            runCatching { sidebar?.attach() }
+        }
+    }
     private var tools: ToolsBar? = null
     @Volatile private var apps: List<AppInfo> = emptyList()
     private val io = Executors.newSingleThreadExecutor()
@@ -53,13 +66,15 @@ class SidebarService : Service() {
         val settings = Settings(this)
         // While gaming, apps open in a small window over the game.
         sidebar = Sidebar(this, null, settings, { apps }) { a -> GameState.launch(this, a.component) }
+        ball = GameBall(this) { apps }
+        GameState.listen(gameListener)
         loadApps()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         goForeground()
         // Settings changed (side, size, apps…): rebuild the handle.
-        main.post { runCatching { sidebar?.attach() } }
+        main.post { applyGame() }
         // The tools bar: always on screen, on the Home Screen and over every app.
         // (The tools now live inside the Dynamic Island, so no separate tools window.)
         main.post { runCatching { tools?.detach(); tools = null } }
@@ -98,7 +113,14 @@ class SidebarService : Service() {
         else startForeground(ID, n)
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        main.postDelayed({ runCatching { ball?.reposition() } }, 250)
+    }
+
     override fun onDestroy() {
+        GameState.unlisten(gameListener)
+        runCatching { ball?.detach() }; ball = null
         runCatching { sidebar?.detach() }
         runCatching { tools?.detach() }; tools = null
         sidebar = null

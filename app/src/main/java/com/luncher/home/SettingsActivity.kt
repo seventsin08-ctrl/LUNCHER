@@ -816,6 +816,9 @@ class SettingsActivity : Activity() {
             "and pop-ups disappear (the Sidebar stays). Needs the Accessibility Helper", s.gameHide) { s.gameHide = it }
         toggle(side, "Small Window While Gaming", "Apps you open from the Sidebar during a game open in a small floating " +
             "window over it (if your phone supports small windows)", s.gameSmallWindow) { s.gameSmallWindow = it }
+        toggle(side, "Game Ball", "While gaming, a small movable orb replaces the Sidebar handle (so it never clashes with " +
+            "the phone's own game panel). Tap it to choose who may pop up during games, see missed messages and open " +
+            "your Sidebar apps in a small window", s.gameBall) { s.gameBall = it; SidebarService.sync(this) }
         toggle(side, "Sidebar", "A handle on the edge of the screen: swipe it in for your favourite apps", s.sidebarOn) {
             s.sidebarOn = it; rebuild()
         }

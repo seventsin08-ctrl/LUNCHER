@@ -21,6 +21,10 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        109 to listOf("Game Ball: while gaming, a little movable orb (like Gilbert) replaces the Sidebar handle — no more clashing with the phone's game panel",
+            "Tap the ball: choose who may pop up during games (Everyone / ★ Priority / No one), see the messages you missed, and open your Sidebar apps in a small window",
+            "Allowed pop-ups show as a small banner beside the ball, never over your game",
+            "Better game detection: game engines, big game makers and the phone's own game helper are recognised automatically. Not a game? Turn it off from the ball"),
         108 to listOf("Simple Mode (top of Settings): one switch turns off Gilbert, the Dynamic Island, Sidebar, Side Island and pop-ups — your look, icons, widgets and theme stay. Switch it off to get everything back exactly as it was"),
         107 to listOf("Quiet in the app you're using: no pop-ups or chat windows from an app while it's open on screen — other apps still pop up (Settings › Gilbert)"),
         106 to listOf("Gilbert's card opens only once — tap Gilbert again, press Back or Home to close it"),

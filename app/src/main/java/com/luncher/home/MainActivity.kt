@@ -481,10 +481,14 @@ class MainActivity : Activity() {
             // pop up now (priority apps / within the limit) or waits quietly with him.
             Gilbert.record(this, pkg)
             Gilbert.note(this, pkg, title, text)
+            // Gaming: the game ball decides (Everyone / Priority / No one) and shows a small banner beside it.
+            val ballNow = GameBall.instance
+            val gameHandled = GameState.playing && ballNow != null && pkg != GameState.foreground
+            if (gameHandled) ballNow!!.onNotification(pkg, title, text, allApps.firstOrNull { it.packageName == pkg }?.icon)
             // You're already in that app: it can see its own messages, so nothing pops up for it.
             // Other apps keep popping up as usual.
             val inThatApp = settings.gilbertQuietInApp && !isActive && GameState.foreground == pkg
-            if (!inThatApp) {
+            if (!inThatApp && !gameHandled) {
                 if (pkg !in settings.gilbertQuiet) peekApp(pkg)
                 if (Gilbert.shouldPop(this, settings, pkg)) showNotificationInIsland(pkg, title, text)
             }
@@ -554,6 +558,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        GameState.leftApps()   // back on the Home Screen: no game on screen
         mainHandler.post { updateGilbertMood() }
         if (::island.isInitialized) root.post { setupTapZone() }
         // "Show hello again" from Settings › General.
@@ -1108,6 +1113,9 @@ class MainActivity : Activity() {
 
     /** Game Mode: Do Not Disturb while you play (tap again to turn it off). */
     private fun toggleGameMode() {
+        // Used over an app the launcher didn't know was a game: remember it as one.
+        val fg = GameState.foreground
+        if (!isActive && fg != null && !GameState.playing) { GameState.setGame(this, fg, true); toast("🎮 Marked as a game"); return }
         val nm = getSystemService(android.app.NotificationManager::class.java)
         if (!nm.isNotificationPolicyAccessGranted) {
             toast("Allow Do Not Disturb access for Game Mode")

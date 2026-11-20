@@ -329,6 +329,28 @@ class Settings(ctx: Context) {
     var gameHide: Boolean
         get() = p.getBoolean("s_game_hide", true)
         set(v) = put("s_game_hide", v)
+    /** While gaming: a movable ball (like Gilbert) with game tools, instead of the Sidebar handle. */
+    var gameBall: Boolean
+        get() = p.getBoolean("s_game_ball", true)
+        set(v) = put("s_game_ball", v)
+    /** Which pop-ups may show while gaming: "all", "priority" (Gilbert's Priority apps) or "off". */
+    var gamePopups: String
+        get() = p.getString("s_game_popups", "priority") ?: "priority"
+        set(v) { p.edit().putString("s_game_popups", v).apply() }
+    var gameBallRight: Boolean
+        get() = p.getBoolean("s_game_ball_right", true)
+        set(v) { p.edit().putBoolean("s_game_ball_right", v).apply() }
+    /** Ball position from the top, as a fraction of the screen height. */
+    var gameBallY: Float
+        get() = p.getFloat("s_game_ball_y", 0.3f)
+        set(v) { p.edit().putFloat("s_game_ball_y", v).apply() }
+    /** Apps you (or the phone's game helper) marked as games. */
+    var gameApps: Set<String>
+        get() = p.getStringSet("s_game_apps", emptySet())?.toSet() ?: emptySet()
+        set(v) { p.edit().putStringSet("s_game_apps", HashSet(v)).apply() }
+    var notGameApps: Set<String>
+        get() = p.getStringSet("s_not_game_apps", emptySet())?.toSet() ?: emptySet()
+        set(v) { p.edit().putStringSet("s_not_game_apps", HashSet(v)).apply() }
     /** While gaming, apps opened from the Sidebar open in a small floating window. */
     var gameSmallWindow: Boolean
         get() = p.getBoolean("s_game_small_window", true)
