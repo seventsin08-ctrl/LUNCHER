@@ -22,6 +22,8 @@ object GameState {
     private val listeners = LinkedHashSet<() -> Unit>()
     fun listen(fn: () -> Unit) { listeners += fn }
     fun unlisten(fn: () -> Unit) { listeners -= fn }
+    /** Told whenever a different app comes to the front (Gilbert reacts to what you're doing). */
+    val appListeners = LinkedHashSet<(String) -> Unit>()
 
     /** Called by the accessibility helper whenever another app's window comes to the front. */
     fun onForeground(ctx: Context, pkg: String?) {
@@ -29,7 +31,7 @@ object GameState {
         // Our own floating windows, the status bar and the keyboard don't change what's "on screen".
         if (pkg == ctx.packageName || pkg == "com.android.systemui" || pkg.contains("inputmethod") ||
             pkg.contains("keyboard") || pkg.startsWith("com.vivo.gamewatch") || pkg.contains("gamecube")) return
-        foreground = pkg
+        if (foreground != pkg) { foreground = pkg; for (l in appListeners.toList()) runCatching { l(pkg) } }
         val game = Settings(ctx).gameHide && isGame(ctx, pkg)
         if (game != playing) {
             playing = game

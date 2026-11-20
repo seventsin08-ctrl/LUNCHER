@@ -231,6 +231,44 @@ class MainActivity : Activity() {
         }
     }
 
+    // ================================================================ Gilbert's feelings
+    private var lastGazeAt = 0L
+    private val appMoodListener: (String) -> Unit = { pkg -> mainHandler.post { updateGilbertMood(pkg) } }
+
+    /** What Gilbert feels about what's on screen (and the time / phone state). */
+    private fun updateGilbertMood(pkg: String? = GameState.foreground) {
+        if (!::island.isInitialized) return
+        if (!settings.gilbertEmotions) { island.setFaceMood("neutral"); return }
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val h = runCatching { Gilbert.health(this) }.getOrNull()
+        val mood = when {
+            searchingNow -> "curious"
+            isActive && (hour >= 23 || hour < 6) -> "sleepy"
+            h != null && h.battery in 0..15 && !h.charging -> "sad"
+            isActive -> if (Gilbert.heldCount() > 0) "thinking" else "neutral"
+            pkg != null -> appMood(pkg)
+            else -> "neutral"
+        }
+        island.setFaceMood(mood)
+    }
+
+    /** Watching (video), listening (music), chatting (happy), browsing/searching (curious)… */
+    private fun appMood(pkg: String): String {
+        val p = pkg.lowercase()
+        val cat = if (Build.VERSION.SDK_INT >= 26) runCatching { packageManager.getApplicationInfo(pkg, 0).category }.getOrDefault(-1) else -1
+        return when {
+            listOf("youtube", "netflix", "tiktok", "musically", "ugc.trill", "video", "primevideo", "disney", "hbo", "iqiyi",
+                "viu", "twitch", "bilibili", "vlc", "mxtech").any { p.contains(it) } || cat == android.content.pm.ApplicationInfo.CATEGORY_VIDEO -> "watching"
+            listOf("spotify", "music", "soundcloud", "deezer", "podcast").any { p.contains(it) } || cat == android.content.pm.ApplicationInfo.CATEGORY_AUDIO -> "listening"
+            listOf("chrome", "browser", "firefox", "opera", "quicksearch", "googlequicksearchbox", "bing", "duckduckgo").any { p.contains(it) } -> "curious"
+            listOf("messenger", "orca", "whatsapp", "telegram", "viber", "messaging", "instagram", "snapchat", "discord").any { p.contains(it) } ||
+                cat == android.content.pm.ApplicationInfo.CATEGORY_SOCIAL -> "happy"
+            listOf("camera", "gallery", "photos", "albums").any { p.contains(it) } || cat == android.content.pm.ApplicationInfo.CATEGORY_IMAGE -> "love"
+            cat == android.content.pm.ApplicationInfo.CATEGORY_PRODUCTIVITY || cat == android.content.pm.ApplicationInfo.CATEGORY_NEWS -> "thinking"
+            else -> "neutral"
+        }
+    }
+
     /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
     private fun openGilbert() {
         if (!isActive) { if (::sideHud.isInitialized) sideHud.openHistory(); return }
@@ -449,6 +487,7 @@ class MainActivity : Activity() {
         root.post { runCatching { sideHud.rest() } }
         setupSidebar()
         GameState.listen(gameListener)
+        GameState.appListeners += appMoodListener
         root.postDelayed({ setupTapZone() }, 600)
         InfoData.listen(infoListener)
         mainHandler.postDelayed(infoTicker, 1500)
@@ -483,6 +522,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        mainHandler.post { updateGilbertMood() }
         if (::island.isInitialized) root.post { setupTapZone() }
         // "Show hello again" from Settings › General.
         if (prefs.getBoolean("hello_force", false)) {
@@ -582,6 +622,13 @@ class MainActivity : Activity() {
             (::controlCenter.isInitialized && controlCenter.isShowing)
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Gilbert's eyes follow your finger on the Home Screen.
+        if (settings.gilbertEmotions && ::island.isInitialized && (ev.actionMasked == MotionEvent.ACTION_DOWN ||
+                (ev.actionMasked == MotionEvent.ACTION_MOVE && ev.eventTime - lastGazeAt > 120))) {
+            lastGazeAt = ev.eventTime
+            val w = root.width.coerceAtLeast(1).toFloat(); val h = root.height.coerceAtLeast(1).toFloat()
+            island.faceLookAt((ev.rawX - w / 2) / (w / 2), (ev.rawY / h) * 1.6f - 0.2f)
+        }
         // A new touch means an earlier drag lost its UP/CANCEL event; never leave its image stuck.
         if (ev.actionMasked == MotionEvent.ACTION_DOWN && (drag != null || widgetDrag != null)) {
             if (drag != null) cancelDrag() else cancelWidgetDrag()
@@ -623,7 +670,7 @@ class MainActivity : Activity() {
     private var infoCycle = 0
     private val infoListener: () -> Unit = { updateInfoIsland(advance = false) }
     private val infoTicker = object : Runnable {
-        override fun run() { updateInfoIsland(advance = true); mainHandler.postDelayed(this, 10_000) }
+        override fun run() { updateInfoIsland(advance = true); updateGilbertMood(); mainHandler.postDelayed(this, 10_000) }
     }
     private fun infoIcon(key: String, e: String, bg: Int = 0) = infoIcons.getOrPut(key) { InfoViews.emoji(this, e, bg) }
 
@@ -693,6 +740,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         GameState.unlisten(gameListener)
+        GameState.appListeners -= appMoodListener
         tapZone?.detach(); tapZone = null
         InfoData.unlisten(infoListener)
         mainHandler.removeCallbacks(infoTicker)
@@ -4863,6 +4911,7 @@ class MainActivity : Activity() {
         if (::island.isInitialized) island.setSearching(true)
         ToolsBar.current?.setSearching(true)
         searchingNow = true; tapZone?.setHidden(true)
+        updateGilbertMood()
         searchField.setText("")
         filterSearch("")
         searchOverlay.visibility = View.VISIBLE
@@ -4886,6 +4935,7 @@ class MainActivity : Activity() {
         if (::island.isInitialized) island.setSearching(false)
         ToolsBar.current?.setSearching(false)
         searchingNow = false; tapZone?.setHidden(GameState.playing)
+        updateGilbertMood()
         imm().hideSoftInputFromWindow(searchField.windowToken, 0)
         searchField.clearFocus()
         val fast = !animate || anim == 0f
@@ -4901,6 +4951,10 @@ class MainActivity : Activity() {
     }
 
     private fun filterSearch(q: String) {
+        // Gilbert reads along as you type, and smiles when there are results.
+        if (::island.isInitialized && settings.gilbertEmotions && q.isNotEmpty()) {
+            island.faceLookAt(((q.length % 8) / 3.5f) - 1f, 0.4f)
+        }
         val query = q.trim()
         searchResults = if (query.isEmpty()) {
             val byKey = allApps.associateBy { it.key }
@@ -5872,6 +5926,7 @@ class MainActivity : Activity() {
         }
         batteryText?.text = "$batteryLevel%"
         if (::island.isInitialized && wasCharging == false && batteryCharging) {
+            if (settings.gilbertEmotions) island.faceReact("excited", 3000)
             island.flash(IslandActivity(
                 "charging", null, R.drawable.ic_bolt, 0xFF30D158.toInt(), "Charging", "Battery $batteryLevel%",
                 "$batteryLevel%", false, 0xFF30D158.toInt()

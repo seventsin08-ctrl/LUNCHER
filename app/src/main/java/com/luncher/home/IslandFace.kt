@@ -30,7 +30,8 @@ class IslandFace(ctx: Context) : View(ctx) {
         val sx: Float, val sy: Float, val sz: Float,     // point on the unit sphere
         var fx: Float, var fy: Float,                    // where it sits in the face (-1…1)
         val part: Int,                                   // 0 outline, 1 left eye, 2 right eye, 3 mouth
-        val seed: Float, val size: Float
+        val seed: Float, val size: Float,
+        var mk: Float = 0f                               // 0…1 along its eye / mouth (for mood shapes)
     )
     private val ps = ArrayList<P>()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -48,6 +49,27 @@ class IslandFace(ctx: Context) : View(ctx) {
     private var nextBlink = 0L
     private var nextLook = 0L
     private var nextThink = 0L
+
+    // ---- Emotions
+    /**
+     * neutral, happy, excited, love, curious (searching), watching (videos), listening (music),
+     * surprised, sad, sleepy, thinking. [baseMood] is how he feels about what's on screen;
+     * [react] shows a short reaction on top of it.
+     */
+    var baseMood = "neutral"
+    private var reaction: String? = null
+    private var reactionUntil = 0L
+    val mood get() = if (reaction != null && System.currentTimeMillis() < reactionUntil) reaction!! else baseMood
+    // Smoothly blended mood parameters.
+    private var mSmile = 0f; private var mSquint = 1f; private var mArc = 0f; private var mO = 0f
+    private var mLookY = 0f; private var mBounce = 0f; private var mTint = 0; private var mTintK = 0f
+    private var lookX: Float? = null; private var lookY: Float? = null; private var lookUntil = 0L
+
+    fun react(m: String, ms: Long = 1800) { reaction = m; reactionUntil = System.currentTimeMillis() + ms; invalidate() }
+    /** Look towards a point (-1…1 each way), e.g. where your finger is, for a moment. */
+    fun lookAt(x: Float, y: Float, ms: Long = 1200) {
+        lookX = x.coerceIn(-1f, 1f); lookY = y.coerceIn(-1f, 1f); lookUntil = System.currentTimeMillis() + ms
+    }
 
     private var logo: Bitmap? = null
     private var logoK = 0f
@@ -105,9 +127,9 @@ class IslandFace(ctx: Context) : View(ctx) {
             else -> (-0.34f + 0.68f * k) to 0.30f
         }
         for (p in ps) when (p.part) {
-            1 -> { val (x, y) = eye(a++ / eyeL.toFloat(), -0.34f); p.fx = x; p.fy = y }
-            2 -> { val (x, y) = eye(b++ / eyeR.toFloat(), 0.34f); p.fx = x; p.fy = y }
-            3 -> { val (x, y) = mouthAt(m++ / (mouth - 1f).coerceAtLeast(1f)); p.fx = x; p.fy = y }
+            1 -> { p.mk = a / eyeL.toFloat(); val (x, y) = eye(a++ / eyeL.toFloat(), -0.34f); p.fx = x; p.fy = y }
+            2 -> { p.mk = b / eyeR.toFloat(); val (x, y) = eye(b++ / eyeR.toFloat(), 0.34f); p.fx = x; p.fy = y }
+            3 -> { p.mk = m / (mouth - 1f).coerceAtLeast(1f); val (x, y) = mouthAt(m++ / (mouth - 1f).coerceAtLeast(1f)); p.fx = x; p.fy = y }
             else -> { val ang = 2 * PI * o++ / outlineCount; p.fx = 0.92f * cos(ang).toFloat(); p.fy = 0.92f * sin(ang).toFloat() }
         }
     }
@@ -151,8 +173,38 @@ class IslandFace(ctx: Context) : View(ctx) {
             ValueAnimator.ofFloat(0f, 1f, 0f).apply { duration = 200; addUpdateListener { blink = it.animatedValue as Float }; start() }
             nextBlink = now + 2400 + (Math.random() * 3600).toLong()
         }
-        if (now >= nextLook) { lookTarget = listOf(-1f, 0f, 1f, 0f, 0f).random(); nextLook = now + 2500 + (Math.random() * 4000).toLong() }
+        val md = mood
+        // Where he looks: your finger, the screen while you watch/search, or around on his own.
+        val lx = lookX; val ly = lookY
+        if (lx != null && now < lookUntil) lookTarget = lx
+        else when (md) {
+            "curious" -> lookTarget = sin(t * 2.4f) * 0.9f            // reading along as you type/search
+            "watching" -> lookTarget = sin(t * 0.5f) * 0.25f          // fixed on the screen, tiny drift
+            else -> if (now >= nextLook) { lookTarget = listOf(-1f, 0f, 1f, 0f, 0f).random(); nextLook = now + 2500 + (Math.random() * 4000).toLong() }
+        }
         look += (lookTarget - look) * 0.08f
+        // Mood shapes: smile (+) / frown (−), squint, happy ^ arcs, o-mouth, looking down, bounce, colour.
+        val tgt = when (md) {
+            "happy" -> floatArrayOf(1f, 1f, 1f, 0f, 0f, 0.4f)
+            "excited" -> floatArrayOf(1f, 1.15f, 0f, 0f, 0f, 1f)
+            "love" -> floatArrayOf(0.8f, 1f, 1f, 0f, 0f, 0.3f)
+            "curious" -> floatArrayOf(0.1f, 1.1f, 0f, 0f, 0.15f, 0f)
+            "watching" -> floatArrayOf(0f, 0.75f, 0f, 0.6f, 0.55f, 0f)
+            "listening" -> floatArrayOf(0.7f, 0.5f, 1f, 0f, 0f, 0.6f)
+            "surprised" -> floatArrayOf(0f, 1.4f, 0f, 1f, 0f, 0.2f)
+            "sad" -> floatArrayOf(-0.9f, 0.85f, 0f, 0f, 0.35f, 0f)
+            "sleepy" -> floatArrayOf(0f, 0.15f, 0f, 0.5f, 0.2f, 0f)
+            "thinking" -> floatArrayOf(-0.2f, 0.9f, 0f, 0f, -0.4f, 0f)
+            else -> floatArrayOf(0.25f, 1f, 0f, 0f, 0f, 0f)
+        }
+        if (lx != null && now < lookUntil) tgt[4] = ly ?: 0f
+        val e = 0.1f
+        mSmile += (tgt[0] - mSmile) * e; mSquint += (tgt[1] - mSquint) * e; mArc += (tgt[2] - mArc) * e
+        mO += (tgt[3] - mO) * e; mLookY += (tgt[4] - mLookY) * e; mBounce += (tgt[5] - mBounce) * e
+        val tint = when (md) { "love" -> 0xFFFF6B9A.toInt(); "sad" -> 0xFF64B5F6.toInt(); "excited" -> 0xFFFFD54F.toInt(); "sleepy" -> 0xFF9FA8DA.toInt(); else -> 0 }
+        if (tint != 0) mTint = tint
+        mTintK += ((if (tint != 0) 1f else 0f) - mTintK) * e
+
         invalidate()
     }
 
@@ -161,6 +213,7 @@ class IslandFace(ctx: Context) : View(ctx) {
         if (icon == null) return
         logo = icon
         logoUntil = System.currentTimeMillis() + 3200
+        react("surprised", 900)
         morphTarget = 0f; spinBoost = 1.4f
         performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
     }
@@ -187,9 +240,29 @@ class IslandFace(ctx: Context) : View(ctx) {
             // Face position (with blinking eyes, a glance and a wiggly mouth).
             var fx = p.fx; var fy = p.fy
             when (p.part) {
-                1, 2 -> { val ec = -0.16f; fy = ec + (fy - ec) * (1f - blink * 0.9f); fx += look * 0.07f }
-                3 -> if (style == "classic") fy += 0.08f * sin(fx * 9f + t * 3f * speedK) * (0.7f + 0.3f * sin(t))
+                1, 2 -> {
+                    val ec = -0.16f
+                    // Happy ^ eyes: fold the lower half of each eye up into an arc.
+                    if (mArc > 0.01f && fy > ec) fy = fy + (ec - (fy - ec) - fy) * mArc
+                    fy = ec + (fy - ec) * mSquint * (1f - blink * 0.9f)
+                    fx += look * 0.07f; fy += mLookY * 0.08f
+                    if (mood == "sad") fy += (if (p.part == 1) -1 else 1) * (fx + (if (p.part == 1) 0.34f else -0.34f)) * 0.25f
+                }
+                3 -> {
+                    if (style == "classic" && mO < 0.5f) fy += 0.08f * sin(fx * 9f + t * 3f * speedK) * (0.7f + 0.3f * sin(t)) * (1f - mO)
+                    // Smile / frown curve.
+                    val u = (fx / 0.34f).coerceIn(-1f, 1f)
+                    fy += mSmile * 0.10f * (1f - u * u) - mSmile * 0.02f
+                    // "o" mouth (surprised / watching / sleepy): gather into a small ring.
+                    if (mO > 0.01f) {
+                        val ang = 2 * PI * p.mk
+                        val ox = (0.08f * cos(ang)).toFloat(); val oy = (0.30f + 0.08f * sin(ang)).toFloat()
+                        fx += (ox - fx) * mO; fy += (oy - fy) * mO
+                    }
+                    fy += mLookY * 0.05f
+                }
             }
+            if (mBounce > 0.01f) fy -= kotlin.math.abs(sin(t * 5f * speedK)) * 0.06f * mBounce
             val jx = sin(t * 1.3f + p.seed) * 0.02f; val jy = cos(t * 1.1f + p.seed * 1.7f) * 0.02f
             val fxp = cx + (fx + jx) * R * breathe
             val fyp = cy + (fy + jy) * R * breathe
@@ -198,7 +271,8 @@ class IslandFace(ctx: Context) : View(ctx) {
             // Colour: warm orange on top, white below (like the reference); face lines turn bright white.
             val top = ((1f - p.sy) / 2f).coerceIn(0f, 1f)
             val sphereCol = blend(botCol, topCol, top)
-            val faceCol = if (p.part == 0) blend(botCol, topCol, top * 0.8f) else Color.WHITE
+            var faceCol = if (p.part == 0) blend(botCol, topCol, top * 0.8f) else Color.WHITE
+            if (mTintK > 0.02f) faceCol = blend(faceCol, mTint, mTintK * (if (p.part == 0) 0.8f else 0.45f))
             paint.color = blend(sphereCol, faceCol, k)
             val depth = (z + 1f) / 2f                  // 0 back … 1 front
             val alphaSphere = 0.25f + 0.75f * depth

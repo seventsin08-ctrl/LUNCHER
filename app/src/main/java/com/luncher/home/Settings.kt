@@ -370,6 +370,10 @@ class Settings(ctx: Context) {
     var gilbertSize: Int
         get() = p.getInt("s_gil_size", 46)
         set(v) = put("s_gil_size", v)
+    /** Gilbert shows emotions, reacts to what you do and looks where you look. */
+    var gilbertEmotions: Boolean
+        get() = p.getBoolean("s_gil_emotions", true)
+        set(v) = put("s_gil_emotions", v)
     /** Calm Mode: only priority apps pop up; Gilbert holds the rest. */
     var gilbertCalm: Boolean
         get() = p.getBoolean("s_gil_calm", true)

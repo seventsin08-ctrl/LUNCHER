@@ -740,6 +740,9 @@ class SettingsActivity : Activity() {
             slider(gil, "Size", 36, 64, s.gilbertSize, { "${it}dp" }) { s.gilbertSize = it }
             slider(gil, "Particles", 120, 360, s.gilbertDensity, { "$it" }) { s.gilbertDensity = it }
             slider(gil, "Speed", 40, 200, s.gilbertSpeed, { "$it%" }) { s.gilbertSpeed = it }
+            toggle(gil, "Emotions & Reactions", "Gilbert feels things: he watches with you during videos, bops to music, reads " +
+                "along when you search, smiles at chats, gets sleepy at night, sad when the battery is low, excited when " +
+                "charging, surprised at new messages — and his eyes follow your finger", s.gilbertEmotions) { s.gilbertEmotions = it }
         }
         val gilN = section("GILBERT · NOTIFICATIONS")
         toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; Gilbert quietly holds the rest (red bubble) " +

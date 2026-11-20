@@ -166,6 +166,10 @@ class DynamicIsland(
     fun configureFace(s: Settings) { face.configure(s); faceSize = s.gilbertSize; mirror?.configureFace(s); if (face.visibility == View.VISIBLE) refresh() }
     /** How many notifications Gilbert is holding (red bubble). */
     fun setFaceBadge(n: Int) { face.badge = n; mirror?.setFaceBadge(n) }
+    /** Gilbert's feelings: a base mood, short reactions, and where he looks. */
+    fun setFaceMood(m: String) { face.baseMood = m; mirror?.setFaceMood(m) }
+    fun faceReact(m: String, ms: Long = 1800) { face.react(m, ms); mirror?.faceReact(m, ms) }
+    fun faceLookAt(x: Float, y: Float) { face.lookAt(x, y); mirror?.faceLookAt(x, y) }
     private fun showFace(show: Boolean) {
         if (show == (face.visibility == View.VISIBLE)) return
         if (show) {

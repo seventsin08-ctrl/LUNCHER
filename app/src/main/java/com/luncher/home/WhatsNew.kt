@@ -21,6 +21,8 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        103 to listOf("Gilbert has feelings: he watches videos with you, bops to music, reads along when you search, smiles at chats, gets sleepy at night, sad on low battery, excited when charging and surprised by new messages",
+            "His eyes follow your finger on the Home Screen"),
         102 to listOf("Meet Gilbert — the living orb in the island. Tap him for his card: notifications he held, today's noisiest apps (make them Priority or Quiet) and a phone check",
             "Calm Mode: only Priority apps pop up; Gilbert holds the rest with a red bubble — no more screen full of pop-ups",
             "Customise Gilbert: colours, face (°~° ^‿^ •‿• -o-), size, particles and speed (Settings › Gilbert)"),
