@@ -994,6 +994,10 @@ class MainActivity : Activity() {
             if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) ov.collapse()
             false
         }
+        // Whenever the island changes size (long lyric, opening the player…), keep it fully on screen.
+        holder.addOnLayoutChangeListener { _, l, _, r, _, ol, _, or, _ ->
+            if (r - l != or - ol) holder.post { keepOverlayOnScreen() }
+        }
         // Hold the island over an app and drag it anywhere so it doesn't cover the app's buttons.
         var startX = 0; var startY = 0; var started = false
         ov.onWindowDrag = { dx, dy, done ->
@@ -1006,6 +1010,7 @@ class MainActivity : Activity() {
                 runCatching { overlayWm?.updateViewLayout(overlayRoot, l) }
                 if (done) {
                     started = false
+                    keepOverlayOnScreen()
                     settings.islandAppsDx = (l.x / m.density).roundToInt() - settings.islandX
                     settings.islandAppsDy = ((l.y - (lastIslandTop - dp(4)).coerceAtLeast(0)) / m.density).roundToInt()
                 }
@@ -1018,6 +1023,36 @@ class MainActivity : Activity() {
         for (a in island.snapshot()) ov.put(a)
         // It may already be showing (Gilbert, music…): make sure it takes taps over other apps right away.
         holder.post { ov.onShownChanged?.invoke(ov.shownNow()) }
+    }
+
+    private var overlaySlide: android.animation.ValueAnimator? = null
+
+    /**
+     * Over apps: if the island pokes past the side of the screen (after you drag it, or when it grows
+     * for a long lyric), glide it back in so the whole island — and every word — stays visible.
+     */
+    private fun keepOverlayOnScreen() {
+        val l = overlayLp ?: return
+        val r = overlayRoot ?: return
+        if (!r.isAttachedToWindow || r.width <= 0) return
+        val m = resources.displayMetrics
+        // The window has 30dp of invisible padding on each side around the island itself.
+        val visibleW = r.width - r.paddingLeft - r.paddingRight
+        val maxX = ((m.widthPixels - visibleW) / 2 - dp(6)).coerceAtLeast(0)
+        val target = l.x.coerceIn(-maxX, maxX)
+        val targetY = l.y.coerceIn(0, (m.heightPixels - r.height - dp(24)).coerceAtLeast(0))
+        if (target == l.x && targetY == l.y) return
+        overlaySlide?.cancel()
+        val fx = l.x; val fy = l.y
+        overlaySlide = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 260; interpolator = android.view.animation.DecelerateInterpolator(2f)
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                l.x = (fx + (target - fx) * t).roundToInt(); l.y = (fy + (targetY - fy) * t).roundToInt()
+                runCatching { overlayWm?.updateViewLayout(r, l) }
+            }
+            start()
+        }
     }
 
     private fun detachOverlayIsland() {
