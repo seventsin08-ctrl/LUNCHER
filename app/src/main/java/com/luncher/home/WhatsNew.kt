@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        121 to listOf("Lyrics in the Home Screen player always fit now — long lines shrink a little instead of being cut off at the bottom"),
         120 to listOf("The small island now fits the whole lyric line (it still cut the end off with “…”)"),
         119 to listOf("Fixed: lyrics and the time froze in the open island after a few seconds",
             "Fixed: the small island flickered while music played",

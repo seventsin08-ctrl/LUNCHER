@@ -3034,14 +3034,16 @@ class MainActivity : Activity() {
             }
         }.also { ctlViews += it }
         controls.addView(ctl(R.drawable.ic_prev) { mediaController?.transportControls?.skipToPrevious() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS) },
-            LinearLayout.LayoutParams(dp(34), dp(34)))
+            LinearLayout.LayoutParams(dp(32), dp(32)))
         val play = ctl(R.drawable.ic_play) { togglePlay() }
-        controls.addView(play, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(10); marginEnd = dp(10) })
+        controls.addView(play, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(10); marginEnd = dp(10) })
         controls.addView(ctl(R.drawable.ic_next) { mediaController?.transportControls?.skipToNext() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) },
-            LinearLayout.LayoutParams(dp(34), dp(34)))
-        texts.addView(controls, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+            LinearLayout.LayoutParams(dp(32), dp(32)))
+        texts.addView(controls, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(4) })
         val lyrics = LyricsView(this).apply { visibility = if (Lyrics.enabled) View.VISIBLE else View.GONE }
-        texts.addView(lyrics, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+        texts.addView(lyrics, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(4) })
+        // With lyrics on, the app name makes room for them (it's still on the island).
+        if (Lyrics.enabled) source.visibility = View.GONE
 
         val textsLp = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
         if (artHolder == null) { body.addView(texts, textsLp) }
