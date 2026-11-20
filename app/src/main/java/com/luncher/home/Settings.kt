@@ -441,7 +441,7 @@ class Settings(ctx: Context) {
     // ---- Gilbert (the living orb)
     /** ember, ocean, aurora, rose, mono, theme */
     var gilbertColors: String
-        get() = p.getString("s_gil_colors", "ember") ?: "ember"
+        get() = p.getString("s_gil_colors", "theme") ?: "theme"
         set(v) = put("s_gil_colors", v)
     /** classic °~°, happy ^‿^, dots •‿•, sleepy -o- */
     var gilbertFace: String

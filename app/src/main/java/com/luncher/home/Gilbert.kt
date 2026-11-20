@@ -35,7 +35,8 @@ object Gilbert {
         "aurora" -> 0xFF69F0AE.toInt() to 0xFFB388FF.toInt()
         "rose" -> 0xFFFF80AB.toInt() to 0xFFFFFFFF.toInt()
         "mono" -> 0xFFFFFFFF.toInt() to 0xFF9E9E9E.toInt()
-        "theme" -> ThemeEngine.accent to Color.WHITE
+        // Follows your wallpaper / theme colour (changes with it).
+        "theme" -> ThemeEngine.accent to IconFactory.blend(ThemeEngine.accent, Color.WHITE, 0.55f)
         else -> 0xFFFFA24C.toInt() to 0xFFFFFFFF.toInt()      // ember (default)
     }
 
@@ -158,14 +159,17 @@ object Gilbert {
         val GREEN = 0xFF30D158.toInt(); val AMBER = 0xFFFFC53D.toInt(); val RED = 0xFFFF453A.toInt()
         val BLUE = 0xFF0A84FF.toInt(); val DIM = 0x8CFFFFFF.toInt(); val FAINT = 0x59FFFFFF
         val layer = FrameLayout(act).apply { setBackgroundColor(Color.argb(150, 0, 0, 0)); isClickable = true }
+        // Theme: the card is tinted with your wallpaper / theme colour (graphite when Mono).
+        val tint = if (ThemeEngine.colorful) ThemeEngine.accent else 0xFF8E8E93.toInt()
+        fun tinted(c: Int, k: Float) = IconFactory.blend(c, tint, k)
         // The card: a brushed-graphite gradient with a fine light edge.
         val card = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(14))
             background = android.graphics.drawable.LayerDrawable(arrayOf(
-                GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF3A3A3E.toInt(), 0xFF232326.toInt(), 0xFF161618.toInt())).apply {
+                GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(tinted(0xFF3A3A3E.toInt(), 0.22f), tinted(0xFF232326.toInt(), 0.14f), tinted(0xFF161618.toInt(), 0.08f))).apply {
                     cornerRadius = dpf(34f) },
-                GradientDrawable().apply { cornerRadius = dpf(34f); setColor(Color.TRANSPARENT); setStroke(maxOf(1, dp(1)), 0x2EFFFFFF) }))
+                GradientDrawable().apply { cornerRadius = dpf(34f); setColor(Color.TRANSPARENT); setStroke(maxOf(1, dp(1)), ThemeEngine.alpha(tinted(Color.WHITE, 0.5f), 70)) }))
             elevation = dpf(20f)
         }
         lateinit var close: () -> Unit
@@ -214,8 +218,9 @@ object Gilbert {
         /** A tile: rounded glassy plate inside the card. */
         fun tile(): LinearLayout = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x24FFFFFF, 0x10FFFFFF)).apply {
-                cornerRadius = dpf(24f); setStroke(maxOf(1, dp(1)), 0x1FFFFFFF) }
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(ThemeEngine.alpha(tinted(Color.WHITE, 0.35f), 0x24), ThemeEngine.alpha(tinted(Color.WHITE, 0.35f), 0x10))).apply {
+                cornerRadius = dpf(24f); setStroke(maxOf(1, dp(1)), ThemeEngine.alpha(tinted(Color.WHITE, 0.4f), 0x26)) }
         }
         /** Tile header: icon · title + chip · subtitle · optional trailing view. */
         fun tileHead(icon: View, title: String, chipV: View?, sub: String?, trail: View? = null): LinearLayout {
@@ -270,7 +275,7 @@ object Gilbert {
         // ---- Header: orb · "Gilbert" · menu + close
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), 0, 0, dp(2)) }
         head.addView(FrameLayout(act).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(maxOf(1, dp(1)), 0x33FFFFFF) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(maxOf(1, dp(2)), ThemeEngine.alpha(tint, 170)) }
             addView(IslandFace(act).apply { configure(s) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(12) })
         head.addView(LinearLayout(act).apply {

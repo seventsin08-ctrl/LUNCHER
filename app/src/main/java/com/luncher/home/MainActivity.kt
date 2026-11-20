@@ -412,7 +412,11 @@ class MainActivity : Activity() {
         }
         // Re-colour everything when the wallpaper changes.
         ThemeEngine.watch(this) {
-            applyStyleGlobals(); restylePersistent(); applyIslandLook(); rebuild()
+            applyStyleGlobals(); restylePersistent(); applyIslandLook()
+            // Gilbert's colours follow the new wallpaper too.
+            if (::island.isInitialized) island.configureFace(settings)
+            overlayIsland?.configureFace(settings)
+            rebuild()
         }
         TimerState.load(this)
         TimerState.add(timerListener)

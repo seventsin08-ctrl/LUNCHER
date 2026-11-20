@@ -795,7 +795,7 @@ class SettingsActivity : Activity() {
         toggle(gil, "Gilbert", "The living orb in the Dynamic Island: a sphere of particles that becomes a little face, " +
             "blinks, looks around and pops app logos when something arrives. Tap him for his card", s.islandFace) { s.islandFace = it; rebuild() }
         if (s.islandFace) {
-            segment(gil, "Colours", listOf("ember" to "Ember", "ocean" to "Ocean", "aurora" to "Aurora", "rose" to "Rose", "mono" to "Mono", "theme" to "Theme"),
+            segment(gil, "Colours", listOf("ember" to "Ember", "ocean" to "Ocean", "aurora" to "Aurora", "rose" to "Rose", "mono" to "Mono", "theme" to "Wallpaper"),
                 s.gilbertColors) { s.gilbertColors = it }
             segment(gil, "Face", listOf("classic" to "°~°", "happy" to "^‿^", "dots" to "•‿•", "sleepy" to "-o-"), s.gilbertFace) { s.gilbertFace = it }
             slider(gil, "Size", 36, 64, s.gilbertSize, { "${it}dp" }) { s.gilbertSize = it }
