@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        133 to listOf("The waiting-app logos next to Gilbert now pop up like a reminder for 5 seconds when something new arrives, then tuck away (Gilbert's red badge and his card still have them)"),
         132 to listOf("The music player keeps your last song (art, title, artist) after you close the music app — tap ▶ to pick up where you left off"),
         131 to listOf("Gilbert's waiting-app logos sit neatly in a small black capsule next to him ([logo] 2), never overlapping each other or your apps"),
         130 to listOf("Beat Animation on/off right in the island player: tap the ♫ button next to the speaker (also in Settings › Dynamic Island)"),

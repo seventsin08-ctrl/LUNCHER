@@ -234,8 +234,20 @@ class DynamicIsland(
     }
 
     /** Apps Gilbert is holding notifications for: (logo, count, package), shown next to him. */
+    private var heldSig = ""
+    private val hideHeld = Runnable {
+        val row = heldRow
+        if (row.visibility == View.VISIBLE)
+            row.animate().alpha(0f).scaleX(0.7f).scaleY(0.7f).setDuration(220).withEndAction { row.visibility = View.GONE }.start()
+    }
+
     fun setHeld(items: List<Triple<android.graphics.Bitmap?, Int, String>>) {
         if (overlayMode) return
+        // Only pop up when something new arrived (not on every refresh); it shows like a reminder
+        // for 5 seconds and then tucks away — Gilbert's red badge and his card still have them.
+        val sig = items.joinToString { "${it.third}:${it.second}" }
+        if (sig == heldSig && items.isNotEmpty()) return
+        heldSig = sig
         val row = heldRow
         row.removeAllViews()
         for ((i, item) in items.take(4).withIndex()) {
@@ -264,10 +276,13 @@ class DynamicIsland(
             text = "+${items.size - 4}"; textSize = 11f; setTextColor(0xB3FFFFFF.toInt())
         }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(4) })
         val show = items.isNotEmpty() && pill.visibility == View.VISIBLE
-        if (show && row.visibility != View.VISIBLE) {
+        pill.removeCallbacks(hideHeld)
+        if (show) {
+            row.animate().cancel()
             row.visibility = View.VISIBLE; row.alpha = 0f; row.scaleX = 0.6f; row.scaleY = 0.6f
             row.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.OvershootInterpolator(1.3f)).start()
-        } else if (!show) row.visibility = View.GONE
+            pill.postDelayed(hideHeld, 5000)
+        } else row.visibility = View.GONE
         row.post { positionSide() }
     }
 
