@@ -412,7 +412,8 @@ class DynamicIsland(
         pill.background = GradientDrawable().apply {
             cornerRadius = r
             when (style) {
-                "glass" -> { setColor(Color.argb(175, 18, 18, 20)); setStroke(maxOf(1, dp(1)), Color.argb(80, 255, 255, 255)) }
+                // Open (music player, etc.): nearly solid so nothing behind shows through the text.
+                "glass" -> { setColor(Color.argb(if (expanded) 248 else 175, 18, 18, 20)); setStroke(maxOf(1, dp(1)), Color.argb(80, 255, 255, 255)) }
                 "outline" -> { setColor(Color.BLACK); setStroke(maxOf(2, dp(2)), ThemeEngine.alpha(ThemeEngine.accent, 220)) }
                 "color" -> setColor(IconFactory.blend(Color.BLACK, ThemeEngine.accent, 0.38f))
                 else -> setColor(Color.BLACK)
@@ -1100,6 +1101,7 @@ class DynamicIsland(
         val a = current() ?: return
         if (expanded) return
         expanded = true
+        applyLook()
         SoundFX.play(act, "open")
         hideBubble.run()
         buzz()
@@ -1133,6 +1135,7 @@ class DynamicIsland(
     fun collapse(animate: Boolean = true) {
         if (!expanded) return
         expanded = false
+        applyLook()
         if (animate) SoundFX.play(act, "close")
         quickMode = false
         catcher?.let { root.removeView(it) }
