@@ -942,6 +942,14 @@ class DynamicIsland(
     /** iPhone-style expanded Now Playing: artwork, title, progress and controls. */
     private fun bindMusic(a: IslandActivity, m: IslandMedia) {
         expandedView.setPadding(dp(22), dp(20), dp(22), dp(14))
+        // Spotify / ArchiveTune look: the album art, blurred, glowing behind the player.
+        expandedView.background = blurredArt(a.icon)?.let { b ->
+            android.graphics.drawable.BitmapDrawable(act.resources, b).apply { alpha = 110 }
+        }
+        expandedView.clipToOutline = true
+        expandedView.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) = outline.setRoundRect(0, 0, view.width, view.height, dp(40).toFloat())
+        }
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val artFrame = FrameLayout(act)
         artFrame.addView(ImageView(act).apply {
@@ -982,6 +990,11 @@ class DynamicIsland(
             setOnClickListener { buzz(); m.onOutput() }
         }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP; topMargin = dp(2) })
         expandedView.addView(head)
+        // Live lyrics (when the song is in the lyrics library).
+        val lyr = if (Lyrics.enabled) LyricsView(act, big = true).also {
+            it.clear("♪"); it.visibility = View.GONE
+            expandedView.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+        } else null
 
         val prog = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         fun timeLabel() = TextView(act).apply {
@@ -1027,20 +1040,37 @@ class DynamicIsland(
                 val pos = m.position().coerceIn(0, if (m.duration > 0) m.duration else Long.MAX_VALUE)
                 elapsed.text = fmtTime(pos)
                 if (m.duration > 0) bar.fraction = pos.toFloat() / m.duration
+                if (lyr != null) {
+                    val song = Lyrics.cached(a.title, a.subtitle)
+                    if (song != null) {
+                        // Lyrics found: the open island grows to fit them.
+                        if (lyr.visibility != View.VISIBLE) { lyr.visibility = View.VISIBLE; pill.post { relayoutExpanded() } }
+                        lyr.show(song, pos)
+                    } else Lyrics.fetch(a.title, a.subtitle, m.duration) { }
+                }
                 val p = m.playing()
                 if (p != wasPlaying) {
                     wasPlaying = p
                     play.setImageResource(if (p) R.drawable.ic_island_pause else R.drawable.ic_island_play)
                 }
-                pill.postDelayed(this, 500)
+                pill.postDelayed(this, 250)
             }
         }
         ticker = t
         t.run()
     }
 
+    /** Re-measure the open island after its contents changed. */
+    private fun relayoutExpanded() {
+        val a = current() ?: return
+        expandedView.measure(View.MeasureSpec.makeMeasureSpec(expandedW(), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        animateSize(expandedW(), expandedView.measuredHeight, dp(if (a.media != null) 46 else 38).toFloat())
+    }
+
     private fun bindExpanded(a: IslandActivity) {
         expandedView.removeAllViews()
+        expandedView.background = null; expandedView.clipToOutline = false
         a.media?.let { bindMusic(a, it); return }
         a.custom?.let { build ->
             expandedView.setPadding(dp(20), dp(16), dp(20), dp(16))

@@ -21,6 +21,10 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        115 to listOf("Lyrics now land on time (shown a touch early, updated 5× a second)",
+            "Spotify / ArchiveTune look: three lyric lines — the one being sung is bright, the ones around it are blurred — and the album art glows blurred behind the player",
+            "The island player has the same lyrics and blurred art too (it grows to fit them when the song has lyrics)",
+            "Settings › Widgets › Lyrics turns them on or off"),
         114 to listOf("31 Now Playing styles: Vinyl, Vinyl Right, Album, Album Right, Disc, Poster and Minimal — in Dark, Light, Glass, Album Color and Theme Color",
             "Every player style now shows ⏮ ⏯ ⏭ buttons all the time",
             "Live lyrics in the player: the line being sung, sliding up as the song plays (from the free LRCLIB library)"),

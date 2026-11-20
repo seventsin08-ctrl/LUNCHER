@@ -857,6 +857,7 @@ class MainActivity : Activity() {
     private fun applyStyleGlobals() {
         Glass.glass = settings.glass
         IconFactory.CORNER = settings.iconCorner / 100f
+        Lyrics.enabled = settings.lyrics
         // Theme: colours follow the wallpaper (or system / your pick) unless set to Mono.
         ThemeEngine.resolve(this, settings)
         if (ThemeEngine.colorful) {
@@ -2872,13 +2873,15 @@ class MainActivity : Activity() {
     private var vinylSpin: android.animation.ObjectAnimator? = null
     private var playerFrame: FrameLayout? = null
     private var playerStyleNow: PlayerStyles.Style? = null
-    private var playerLyrics: TextView? = null
+    private var playerLyrics: LyricsView? = null
+    private var playerBlur: ImageView? = null
+    private var lastBlurArt: android.graphics.Bitmap? = null
     private var playerFg: ((Int) -> Unit)? = null
     private var lastArtForTone: android.graphics.Bitmap? = null
     private val lyricsTicker = object : Runnable {
         override fun run() {
             updateLyricsLine()
-            if (playerLyrics != null) mainHandler.postDelayed(this, 450)
+            if (playerLyrics != null) mainHandler.postDelayed(this, 200)
         }
     }
 
@@ -2892,30 +2895,24 @@ class MainActivity : Activity() {
 
     private fun updateLyricsLine() {
         val tv = playerLyrics ?: return
+        if (!Lyrics.enabled) return
         val v = musicViews ?: return
         val title = v.title.text.toString(); val artist = v.artist.text.toString()
-        if (title.isBlank() || v.body.visibility != View.VISIBLE) { tv.text = ""; return }
+        if (title.isBlank() || v.body.visibility != View.VISIBLE) { tv.clear(); return }
         val song = Lyrics.cached(title, artist)
         if (song == null) {
             val dur = mediaController?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
             Lyrics.fetch(title, artist, dur) { }
-            if (tv.text.isNullOrEmpty()) tv.text = "♪"
+            tv.clear("♪")
             return
         }
-        val line = Lyrics.lineAt(song, songPosition())
-        if (tv.text.toString() != line) {
-            // Lines slide up softly, like Apple Music.
-            tv.animate().cancel()
-            tv.animate().alpha(0f).translationY(-dp(6).toFloat()).setDuration(140).withEndAction {
-                tv.text = line; tv.translationY = dp(6).toFloat()
-                tv.animate().alpha(1f).translationY(0f).setDuration(220).start()
-            }.start()
-        }
+        tv.show(song, songPosition())
     }
 
     /** Album tone: the background takes the album art's average colour. */
     private fun applyPlayerTone(art: android.graphics.Bitmap?) {
         val st = playerStyleNow ?: return
+        if (art !== lastBlurArt) { lastBlurArt = art; playerBlur?.takeIf { it.visibility == View.VISIBLE }?.setImageBitmap(blurredArt(art)) }
         val f = playerFrame ?: return
         if (st.tone != "album" || art === lastArtForTone) return
         lastArtForTone = art
@@ -2924,7 +2921,7 @@ class MainActivity : Activity() {
         val lum = (Color.red(dark) * 0.3 + Color.green(dark) * 0.59 + Color.blue(dark) * 0.11)
         val bgD = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(IconFactory.blend(c, Color.WHITE, 0.08f), dark)).apply {
             cornerRadius = dp(22).toFloat() }
-        if (st.art == "poster") (f.getChildAt(1) as? View)?.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+        if (st.art == "poster") (f.getChildAt(2) as? View)?.background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
             intArrayOf((dark and 0x00FFFFFF) or 0xE6000000.toInt(), 0x22000000)).apply { cornerRadius = dp(22).toFloat() }
         else f.background = bgD
         playerFg?.invoke(if (lum > 165) 0xFF1C1C1E.toInt() else Color.WHITE)
@@ -2953,6 +2950,14 @@ class MainActivity : Activity() {
             if (st.art == "poster") { outlineProvider = roundedOutline(22f); clipToOutline = true }
         }
         frame.addView(bg, if (st.art == "poster") FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT) else FrameLayout.LayoutParams(1, 1))
+        // Spotify / ArchiveTune look: a soft blurred copy of the album art glowing behind the player.
+        val blurLayer = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP; alpha = if (st.tone == "glass") 0.75f else 0.45f
+            outlineProvider = roundedOutline(22f); clipToOutline = true
+            visibility = if (st.art != "poster" && st.tone != "light") View.VISIBLE else View.GONE
+        }
+        frame.addView(blurLayer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        playerBlur = blurLayer
         frame.addView(View(this).apply {
             visibility = if (st.art == "poster") View.VISIBLE else View.GONE
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
@@ -3032,10 +3037,7 @@ class MainActivity : Activity() {
         controls.addView(ctl(R.drawable.ic_next) { mediaController?.transportControls?.skipToNext() ?: mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) },
             LinearLayout.LayoutParams(dp(34), dp(34)))
         texts.addView(controls, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(6) })
-        val lyrics = TextView(this).apply {
-            textSize = 13f; maxLines = 2; ellipsize = TextUtils.TruncateAt.END
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-        }
+        val lyrics = LyricsView(this).apply { visibility = if (Lyrics.enabled) View.VISIBLE else View.GONE }
         texts.addView(lyrics, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
 
         val textsLp = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
@@ -3052,7 +3054,7 @@ class MainActivity : Activity() {
             title.setTextColor(c); hint.setTextColor(c)
             artist.setTextColor((c and 0x00FFFFFF) or 0xA6000000.toInt())
             source.setTextColor((c and 0x00FFFFFF) or 0x80000000.toInt())
-            lyrics.setTextColor((c and 0x00FFFFFF) or 0xE6000000.toInt())
+            lyrics.color = c
             for (b in ctlViews) {
                 b.setColorFilter(c)
                 b.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor((c and 0x00FFFFFF) or 0x1F000000) }
@@ -3069,7 +3071,7 @@ class MainActivity : Activity() {
 
     private fun musicWidget(): View {
         vinylSpin?.cancel(); vinylSpin = null
-        playerFrame = null; playerStyleNow = null; playerLyrics = null; playerFg = null
+        playerFrame = null; playerStyleNow = null; playerLyrics = null; playerFg = null; playerBlur = null; lastBlurArt = null
         val st = PlayerStyles.playerStyle(settings.musicStyle)
         if (st.art != "classic") return styledPlayer(st)
         val frame = FrameLayout(this)

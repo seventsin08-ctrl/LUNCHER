@@ -316,6 +316,9 @@ class Settings(ctx: Context) {
     var musicStyle: String
         get() = p.getString("s_music_style", "classic") ?: "classic"
         set(v) = put("s_music_style", v)
+    var lyrics: Boolean
+        get() = p.getBoolean("s_lyrics", true)
+        set(v) = put("s_lyrics", v)
     var musicOblong: Boolean
         get() = p.getBoolean("s_music_oblong", false)
         set(v) = put("s_music_oblong", v)

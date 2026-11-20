@@ -512,6 +512,7 @@ class SettingsActivity : Activity() {
         val widgets = section("WIDGETS")
         chips(widgets, "Music Player Style (${PlayerStyles.all.size})", PlayerStyles.all.map { it.key to it.name },
             PlayerStyles.playerStyle(s.musicStyle).key) { s.musicStyle = it }
+        toggle(widgets, "Lyrics", "Live lyrics with a soft blur in the player widget and the island player", s.lyrics) { s.lyrics = it }
         info(widgets, "Vinyl, Album, Disc, Poster and Minimal players in dark, light, glass, album-colour and theme-colour looks. " +
             "Every style has ⏮ ⏯ ⏭ buttons and live lyrics (from the free LRCLIB lyrics library, when the song is there).")
         toggle(widgets, "Photos", null, s.widgetEnabled("PHOTO")) { s.setWidgetEnabled("PHOTO", it) }

@@ -16,6 +16,8 @@ object Lyrics {
     class Line(val ms: Long, val text: String)
     class Song(val synced: List<Line>, val plain: List<String>)
 
+    /** Settings › Widgets › Lyrics (player widget and island). */
+    @Volatile var enabled = true
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val cache = HashMap<String, Song?>()
@@ -87,4 +89,66 @@ object Lyrics {
         }
         return song.plain.firstOrNull() ?: ""
     }
+}
+
+/**
+ * Three lyric lines like Spotify / ArchiveTune: the line before (soft and blurred), the line being
+ * sung (bright, slides up when it changes) and the next line (blurred). Shows slightly early so
+ * the words never feel late.
+ */
+class LyricsView(ctx: android.content.Context, private val big: Boolean = false) : android.widget.LinearLayout(ctx) {
+    private val d = ctx.resources.displayMetrics.density
+    private fun mk(size: Float, alpha: Float, blur: Float) = android.widget.TextView(ctx).apply {
+        textSize = size; maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
+        this.alpha = alpha
+        if (blur > 0f && android.os.Build.VERSION.SDK_INT >= 31)
+            setRenderEffect(android.graphics.RenderEffect.createBlurEffect(blur * d, blur * d, android.graphics.Shader.TileMode.DECAL))
+    }
+    private val prev = mk(if (big) 13f else 11f, 0.35f, 2.2f)
+    private val cur = mk(if (big) 17f else 13.5f, 1f, 0f)
+    private val next = mk(if (big) 13f else 11f, 0.45f, 1.6f)
+    private var lastIdx = -2
+    var color: Int = android.graphics.Color.WHITE
+        set(v) { field = v; for (t in listOf(prev, cur, next)) t.setTextColor(v) }
+
+    init {
+        orientation = VERTICAL
+        addView(prev); addView(cur, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = (3 * d).toInt(); bottomMargin = (3 * d).toInt() }); addView(next)
+        color = android.graphics.Color.WHITE
+    }
+
+    fun clear(text: String = "") { prev.text = ""; cur.text = text; next.text = ""; lastIdx = -2 }
+
+    /** Show the lines around [posMs]. */
+    fun show(song: Lyrics.Song, posMs: Long) {
+        if (song.synced.isEmpty()) {
+            if (lastIdx != -1) { lastIdx = -1; prev.text = ""; cur.text = song.plain.firstOrNull() ?: ""; next.text = song.plain.getOrNull(1) ?: "" }
+            return
+        }
+        val t = posMs + 350   // a touch early, so it lands with the voice
+        var i = -1
+        for ((k, l) in song.synced.withIndex()) { if (l.ms <= t) i = k else break }
+        if (i == lastIdx) return
+        lastIdx = i
+        val p = song.synced.getOrNull(i - 1)?.text ?: ""
+        val c = song.synced.getOrNull(i)?.text?.ifBlank { "♪" } ?: "♪"
+        val n = song.synced.getOrNull(i + 1)?.text ?: ""
+        prev.text = p; next.text = n
+        cur.animate().cancel()
+        cur.text = c
+        cur.alpha = 0.3f; cur.translationY = 8 * d; cur.scaleX = 0.97f; cur.scaleY = 0.97f
+        cur.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(240)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        next.translationY = 6 * d; next.animate().translationY(0f).setDuration(240).start()
+    }
+}
+
+/** A soft, very blurred copy of the album art for player backgrounds (works on every Android version). */
+fun blurredArt(src: android.graphics.Bitmap?): android.graphics.Bitmap? = src?.let {
+    runCatching {
+        val small = android.graphics.Bitmap.createScaledBitmap(it, 12, 12, true)
+        val mid = android.graphics.Bitmap.createScaledBitmap(small, 48, 48, true)
+        android.graphics.Bitmap.createScaledBitmap(mid, 160, 160, true)
+    }.getOrNull()
 }
