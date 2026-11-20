@@ -296,7 +296,7 @@ class DynamicIsland(
         compact.addView(label, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         compact.addView(bars, LinearLayout.LayoutParams(dp(22), dp(16)).apply { marginStart = dp(6) })
         compact.addView(trailing, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = dp(6) })
-        pill.addView(compact, FrameLayout.LayoutParams(MATCH_PARENT, dp(36), Gravity.TOP))
+        pill.addView(compact, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.TOP))
         pill.addView(expandedView, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
         pill.addView(toolsRow, FrameLayout.LayoutParams(MATCH_PARENT, dp(36), Gravity.TOP))
         pill.addView(face, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -495,7 +495,8 @@ class DynamicIsland(
                 if (!expanded) {
                     bind(a)
                     val w = compactWidth(a)
-                    if (abs(w - pill.width) > dp(6)) animateSize(w, dp(36), dp(18).toFloat())
+                    val h = compactHeight(a)
+                    if (abs(w - pill.width) > dp(6) || abs(h - pill.height) > dp(4)) animateSize(w, h, dp(18).toFloat())
                 } else if (a.media == null) {
                     expSubtitle?.text = a.subtitle
                 }
@@ -645,8 +646,8 @@ class DynamicIsland(
         if (quickMode) return
         showTools(a == null && !expanded && toolsOn && toolsOpen)
         showFace(a == null && !expanded && faceOn && !(toolsOn && toolsOpen))
-        if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), if (a == null) idleH() else dp(36),
-            (if (a == null) idleH() else dp(36)) / 2f)
+        if (!expanded) animateSize(if (a == null) idleW() else compactWidth(a), if (a == null) idleH() else compactHeight(a),
+            if (a == null) idleH() / 2f else dp(18).toFloat())
         else if (a != null) bindExpanded(a) else collapse()
         parkAtCamera(a == null && !expanded && toolsOn && !toolsOpen && !faceOn)
     }
@@ -917,6 +918,22 @@ class DynamicIsland(
         expandedView.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
     }
 
+    /** Width the lyric would need on one line. */
+    private fun lyricNeed(a: IslandActivity): Int {
+        val text = label.text?.toString().orEmpty()
+        val dots = if (visibleList().size > 1) dp(10) else 0
+        val bars = if (a.showBars) dp(28) else 0
+        return dp(8) + dp(22) + dp(8) + kotlin.math.ceil(label.paint.measureText(text)).toInt() + bars + dp(12) + dp(10) + dots
+    }
+
+    /** Small island height: taller (two lines) when a lyric is too long for one line, so you can read all of it. */
+    private fun compactHeight(a: IslandActivity): Int {
+        if (a.media == null || label.text.isNullOrEmpty()) { label.maxLines = 1; return dp(36) }
+        val long = lyricNeed(a) > screenW() - dp(40)
+        label.maxLines = if (long) 2 else 1
+        return if (long) dp(54) else dp(36)
+    }
+
     private fun compactWidth(a: IslandActivity): Int {
         if (a.media != null) {
             val dots = if (visibleList().size > 1) dp(10) else 0
@@ -991,7 +1008,8 @@ class DynamicIsland(
                             val c = current()
                             if (!expanded && c?.media != null) {
                                 val w = compactWidth(c)
-                                if (abs(w - pill.width) > dp(6)) animateSize(w, dp(36), dp(18).toFloat())
+                                val h = compactHeight(c)
+                                if (abs(w - pill.width) > dp(6) || abs(h - pill.height) > dp(4)) animateSize(w, h, dp(18).toFloat())
                             }
                         }.start()
                     }
@@ -1249,7 +1267,7 @@ class DynamicIsland(
         Motion.scaleTo(pill, sizeScale, Motion.FLUID)
         pill.animate().translationX(offsetX).setDuration((260 * Motion.scale).toLong()).start()
         val cur = current()
-        if (cur != null) animateSize(compactWidth(cur), dp(36), dp(18).toFloat())
+        if (cur != null) animateSize(compactWidth(cur), compactHeight(cur), dp(18).toFloat())
         else if ((alwaysShow || toolsOn || faceOn) && enabled) {
             compact.visibility = View.INVISIBLE
             showTools(toolsOn && toolsOpen)
