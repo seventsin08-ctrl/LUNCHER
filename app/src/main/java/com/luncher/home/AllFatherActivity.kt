@@ -404,6 +404,43 @@ class AllFatherActivity : Activity() {
         item("☰", "Sidebar apps", "Your pinned apps and settings") { startActivity(android.content.Intent(this, SettingsActivity::class.java)) }
         item("⚙", "Settings", "Every switch in the launcher") { startActivity(android.content.Intent(this, SettingsActivity::class.java)) }
         item("⟲", "Forget All Father's data", "Erase his 30 days of records") { AllFather.forget(this); refresh() }
+
+        // ---- every feature can be switched on and off
+        fun switchRow(t: String, sub: String?, on: Boolean, fn: (Boolean) -> Unit) = drawer.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(6))
+            addView(LinearLayout(context).apply { orientation = LinearLayout.VERTICAL
+                addView(TextView(context).apply { text = t; textSize = 12f; setTextColor(INK) })
+                sub?.let { addView(TextView(context).apply { text = it; textSize = 9f; setTextColor(DIM) }) } }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            val pill = TextView(context).apply {
+                text = if (on) "ON" else "OFF"; textSize = 9.5f; typeface = monoB; gravity = Gravity.CENTER
+                setTextColor(if (on) Color.BLACK else DIM); setPadding(dp(10), dp(4), dp(10), dp(4))
+                background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (on) ACC else 0x14FFFFFF); setStroke(maxOf(1, dp(1)), if (on) ACC else 0x33FFFFFF) } }
+            addView(pill)
+            setOnClickListener { SoundFX.play(context, "tick"); fn(!on); buildDrawer() } })
+        fun section(t: String) = drawer.addView(TextView(this).apply { text = t; textSize = 10f; typeface = monoB; letterSpacing = .2f; setTextColor(Hud.SOFT); setPadding(0, dp(16), 0, dp(4)) })
+
+        section("SWITCHES · MAIN")
+        switchRow("All Father", "Collects and sorts every notification", AllFather.enabled(this)) { AllFather.setEnabled(this, it) }
+        switchRow("All Father acts by himself", "Off = only acts on what you give him", AllFather.autoAct(this)) { AllFather.setAutoAct(this, it); refresh() }
+        switchRow("All Father mode", "Island, tools and side bars live in here", AllFather.modeOn(this)) { AllFather.setMode(this, it) }
+        switchRow("Gilbert", "His face in the island", s.islandFace) { s.islandFace = it }
+        switchRow("Gilbert's voice", "He speaks in his console", s.gilbertSpeaks) { s.gilbertSpeaks = it }
+        switchRow("Gilbert's talk bubbles", "Little check-ins under the island", s.gilbertTalk) { s.gilbertTalk = it }
+        switchRow("Wake word “System online”", "Listens in the background", s.voiceOn) { s.voiceOn = it; VoiceService.sync(this) }
+        switchRow("Gilbert's archive", "Saves messages for him to search", s.gilbertArchive) { s.gilbertArchive = it }
+        switchRow("Dynamic Island", null, s.island) { s.island = it }
+        switchRow("Tools tab", "Camera tools and quick controls", s.islandTools) { s.islandTools = it }
+        switchRow("Smart side island", "Messages, volume, recents on the edge", s.sideHud) { s.sideHud = it }
+        switchRow("Sidebar", "Your pinned apps on the edge", s.sidebarOn) { s.sidebarOn = it }
+        switchRow("Dock", null, s.dockOn) { s.dockOn = it }
+        switchRow("App Library", null, s.libraryOn) { s.libraryOn = it }
+        switchRow("Sound effects", null, s.soundFx) { s.soundFx = it }
+        switchRow("Simple mode", "Hides everything extra", s.simpleMode) { s.simpleMode = it }
+
+        section("SWITCHES · EVERYTHING ELSE")
+        val main = setOf("islandFace", "gilbertSpeaks", "gilbertTalk", "voiceOn", "gilbertArchive", "island", "islandTools", "sideHud", "sidebarOn", "dockOn", "libraryOn", "soundFx", "simpleMode")
+        GilbertControl.switches(this).filter { it.first !in main }.forEach { (name, label, on) ->
+            switchRow(label, null, on) { GilbertControl.setSwitch(this, name, it) } }
     }
 
     // ------------------------------------------------------------------ TODAY / BOARD

@@ -55,8 +55,12 @@ object AllFather {
     private var seq = 0
 
     /** A notification came in. */
+    /** Is All Father collecting information at all? */
+    fun enabled(ctx: Context) = prefs(ctx).getBoolean("on", true)
+    fun setEnabled(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("on", on).apply()
+
     fun collect(ctx: Context, pkg: String, app: String, who0: String, text0: String) {
-        if (pkg == ctx.packageName) return
+        if (pkg == ctx.packageName || !enabled(ctx)) return
         val who = Gilbert.cleanTitle(who0).take(80); var text = text0.replace('\n', ' ').trim().take(400)
         if (who.isBlank() && text.isBlank()) return
         // Apps re-post the same notification often: keep it once.

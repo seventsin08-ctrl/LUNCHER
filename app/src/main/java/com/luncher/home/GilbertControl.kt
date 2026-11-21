@@ -83,6 +83,20 @@ object GilbertControl {
             ?: alias?.let { a -> props.firstOrNull { it.name == a.key } }
     }
 
+    /** Every on/off switch in the launcher: (setting name, readable label, on?). */
+    fun switches(ctx: Context): List<Triple<String, String, Boolean>> {
+        val s = Settings(ctx)
+        return props.filter { it.type == java.lang.Boolean.TYPE }.mapNotNull { p ->
+            val v = get(s, p) as? Boolean ?: return@mapNotNull null
+            val label = (ALIAS[p.name]?.split(" ")?.let { w -> w.take(if (w.size > 3) 3 else w.size).joinToString(" ") }
+                ?: p.name.replace(Regex("([a-z])([A-Z])"), "$1 $2").lowercase()).replaceFirstChar { it.uppercase() }
+            Triple(p.name, label, v)
+        }.sortedBy { it.second }
+    }
+    fun setSwitch(ctx: Context, name: String, on: Boolean) {
+        props.firstOrNull { it.name == name && it.type == java.lang.Boolean.TYPE }?.let { set(Settings(ctx), it, on) }
+    }
+
     /** Everything he can do, for the help list. */
     val HELP = listOf(
         "Turn on/off <any feature> — dock, app library, island, sidebar, side island, sounds, haptics, simple mode, game mode, lyrics, beats, blur, glass, labels, badges, calm mode…",
