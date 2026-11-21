@@ -74,22 +74,22 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
         val portrait = act.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
         if (cam == null || !portrait || !settings.islandTools) { v.visibility = View.GONE; return }
         v.visibility = View.VISIBLE
-        // The ring sits around the camera, moved by your nudge; the window always contains the
-        // WHOLE ring (it used to cut it in half) plus the tap strip to its left.
+        // The window is ONLY the button's own circle now: no tap strip to its left and no extra
+        // margin, so touches anywhere else go straight through to whatever is underneath.
         val dx = dp(settings.hotspotDx); val dy = dp(settings.hotspotDy)
-        val ringR = maxOf(cam.width(), cam.height()) / 2 + dp(5) + dp(16)   // room for the ripple too
+        val ringR = maxOf(cam.width(), cam.height()) / 2 + dp(5) + dp(2)
         val cx = cam.centerX() + dx; val cy = cam.centerY() + dy
-        val left = minOf(cam.left - dp(settings.tapZoneLen) + dx, cx - ringR)
+        val left = cx - ringR
         val right = cx + ringR
         val top = maxOf(0, cy - ringR)
         val bottom = cy + ringR
-        l.x = left; l.y = top; l.width = right - left; l.height = maxOf(dp(24), bottom - top)
+        l.x = left; l.y = top; l.width = right - left; l.height = bottom - top
         v.camInView = RectF((cam.left + dx - left).toFloat(), (cam.top + dy - top).toFloat(), (cam.right + dx - left).toFloat(), (cam.bottom + dy - top).toFloat())
         v.invalidate()
         runCatching { wm?.updateViewLayout(v, l) }
     }
 
-    /** Faint ring around the camera + faint line to its left; tapping anywhere in it opens the tools. */
+    /** Faint ring around the camera; only a tap inside that circle opens the tools. */
     private inner class ZoneView : View(act) {
         var camInView = RectF()
         private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
@@ -122,6 +122,8 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
             setOnTouchListener { _, e ->
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        val r = maxOf(camInView.width(), camInView.height()) / 2f + dp(7)
+                        if (kotlin.math.hypot(e.x - camInView.centerX(), e.y - camInView.centerY()) > r) return@setOnTouchListener false
                         glow = 1f; press = 1f; invalidate()
                         downX = e.rawX; downY = e.rawY; startDx = settings.hotspotDx; startDy = settings.hotspotDy
                         moving = false; postDelayed(lift, 480)
@@ -158,14 +160,11 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
             val cx = camInView.centerX(); val cy = camInView.centerY()
             val r = maxOf(camInView.width(), camInView.height()) / 2f + dp(5)
             c.drawCircle(cx, cy, r * (if (press > 0f) 0.92f else 1f), ring)
-            // Tap: a soft ripple grows out of the ring.
+            // Tap: a soft ripple fills the circle from its centre (it stays inside the button).
             if (ripple >= 0f) {
-                ring.alpha = (140 * (1f - ripple)).toInt()
-                c.drawCircle(cx, cy, r + dp(14) * ripple, ring)
+                line.color = 0xFFFFFFFF.toInt(); line.alpha = (90 * (1f - ripple)).toInt()
+                c.drawCircle(cx, cy, r * ripple, line)
             }
-            // Faint line from the camera towards the left: "tap here".
-            line.color = 0xFFFFFFFF.toInt(); line.alpha = (55 * a).toInt()
-            c.drawLine(dp(12).toFloat(), cy, cx - r - dp(8), cy, line)
         }
     }
 }

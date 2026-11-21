@@ -785,7 +785,6 @@ class SettingsActivity : Activity() {
                 s.toolsShape) { s.toolsShape = it }
             toggle(tools, "Show Tap Spot", "A faint ring around the camera and a faint line to its left show where to tap " +
                 "(needs the Accessibility Helper)", s.tapZoneHint) { s.tapZoneHint = it }
-            slider(tools, "Tap Line Length", 30, 150, s.tapZoneLen, { "${it}dp" }) { s.tapZoneLen = it }
             slider(tools, "Tap Area ← Left / Right →", -60, 60, s.hotspotDx, { "${it}dp" }) { s.hotspotDx = it }
             slider(tools, "Tap Area ↑ Up / Down ↓", -40, 40, s.hotspotDy, { "${it}dp" }) { s.hotspotDy = it }
             info(tools, "Tap the camera area at the top to open the tools; they tuck back around the camera after a few seconds (or tap the island again).")
