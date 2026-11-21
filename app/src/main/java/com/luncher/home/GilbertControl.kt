@@ -74,7 +74,7 @@ object GilbertControl {
     private fun findProp(q: String, type: Class<*>? = null): Prop? {
         val w = words(q) - setOf("the", "my", "turn", "on", "off", "set", "to", "change", "make", "show", "hide", "enable", "disable", "please", "gilbert")
         if (w.isEmpty()) return null
-        val alias = ALIAS.entries.firstOrNull { (_, a) -> a.split(" ").any { q.contains(it) && it.length > 3 } && (type == null || props.any { p -> p.name == it.key && p.type == type }) }
+        val alias = ALIAS.entries.firstOrNull { e -> e.value.split(" ").any { q.contains(it) && it.length > 3 } && (type == null || props.any { p -> p.name == e.key && p.type == type }) }
         return props.filter { type == null || it.type == type }
             .map { it to (it.words.count { x -> x in w } * 2 - (it.words.size - it.words.count { x -> x in w }) * 0.3f + if (ALIAS[it.name]?.let { a -> q.contains(a) } == true) 3 else 0) }
             .filter { it.second > 0.9f }.maxByOrNull { it.second }?.first
