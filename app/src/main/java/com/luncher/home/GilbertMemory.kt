@@ -101,6 +101,8 @@ object GilbertMemory {
         Gilbert.notes(ctx).filter { (it.title + " " + it.text).lowercase().contains(k) }.take(5)
             .forEach { hits += "• ${it.title}: ${it.text.take(70)}" }
         topSongs(ctx, 50).filter { it.first.lowercase().contains(k) }.take(2).forEach { hits += "• Song: ${it.first} (${it.second}×)" }
+        // Older messages from his archive folder.
+        if (hits.size < 6) GilbertArchive.search(ctx, q, 6 - hits.size).forEach { hits += "• $it" }
         return if (hits.isEmpty()) "I couldn't find “$q” in anything I've seen. Want me to search the web?"
             else "Here's what I found for “$q”:\n" + hits.joinToString("\n")
     }

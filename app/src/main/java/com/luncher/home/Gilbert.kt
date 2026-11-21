@@ -89,6 +89,7 @@ object Gilbert {
     /** Gilbert writes down every message / notification (latest 80), and spots mentions of you. */
     fun note(ctx: Context, pkg: String, title: String, text: String) {
         GilbertMemory.person(ctx, title)
+        GilbertArchive.save(ctx, pkg, title, text)
         val name = GilbertTalk.ownerName(ctx)?.lowercase()
         val low = (title + " " + text).lowercase()
         val mention = low.contains("mentioned you") || low.contains("tagged you") || low.contains("replied to you") ||

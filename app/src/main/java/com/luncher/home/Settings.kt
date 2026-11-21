@@ -478,6 +478,10 @@ class Settings(ctx: Context) {
     var gilbertQuietInApp: Boolean
         get() = p.getBoolean("s_gil_inapp", true)
         set(v) = put("s_gil_inapp", v)
+    /** Save notifications & chats to Gilbert's archive folder (so he knows everything that came in). */
+    var gilbertArchive: Boolean
+        get() = p.getBoolean("s_gil_archive", true)
+        set(v) = put("s_gil_archive", v)
     /** When you talk to Gilbert with your voice, he answers out loud. */
     var gilbertSpeaks: Boolean
         get() = p.getBoolean("s_gil_speaks", true)

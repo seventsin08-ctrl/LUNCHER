@@ -25,6 +25,11 @@ object GilbertBrain {
     fun file(ctx: Context) = File(ctx.filesDir, "gilbert_brain.task")
     fun installed(ctx: Context) = file(ctx).let { it.exists() && it.length() > 10_000_000 }
     fun sizeMb(ctx: Context) = (file(ctx).length() / 1_000_000)
+    /** Is the brain loaded and ready right now? */
+    val loaded get() = llm != null
+    /** The name of the brain file you picked (e.g. "Qwen2.5-1.5B-Instruct"). */
+    fun modelName(ctx: Context): String? = prefs(ctx).getString("name", null)
+        ?.substringBefore("_multi")?.substringBefore("_seq")?.substringBefore(".task")
 
     /** Biggest brain we allow — larger files (like the 2 GB "f32" ones) crash phones. */
     private const val MAX_BYTES = 1_800_000_000L
@@ -80,7 +85,8 @@ object GilbertBrain {
                 // Only now swap the old brain for the new one.
                 release()
                 file(app).delete(); tmp.renameTo(file(app))
-                prefs(app).edit().putBoolean("loading", false).putBoolean("crashed", false).putBoolean("heavy", force).apply()
+                prefs(app).edit().putBoolean("loading", false).putBoolean("crashed", false).putBoolean("heavy", force)
+                    .putString("name", name.ifBlank { null }).apply()
                 lastError = null
             }
             if (r.isFailure) File(app.filesDir, "gilbert_brain.tmp").delete()
@@ -189,6 +195,8 @@ object GilbertBrain {
         GilbertMemory.topArtists(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Loves: ${it.joinToString { a -> a.first }}. ") }
         GilbertMemory.topPeople(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Chats with: ${it.joinToString { p -> p.first }}. ") }
         facts.append("Time: ${java.text.SimpleDateFormat("EEE h:mm a", java.util.Locale.getDefault()).format(java.util.Date())}.")
+        // What came in that's relevant to the question (from his archive).
+        GilbertArchive.search(ctx, q, 3).takeIf { it.isNotEmpty() }?.let { facts.append(" Relevant messages: ${it.joinToString(" / ") { l -> l.take(120) }}.") }
         val name = GilbertTalk.ownerName(ctx) ?: "friend"
         val unread = Gilbert.heldCount()
         val system = "You are Gilbert, $name's personal assistant and best friend, living in their phone. " +

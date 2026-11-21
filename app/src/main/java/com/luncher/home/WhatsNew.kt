@@ -21,6 +21,10 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        147 to listOf("🧠 Brain room: tap 🧠 in Gilbert's chat — the card flips into his brain: his face in a glowing ring, what brain he's running, his memory and archive",
+            "Give him a brain right there: he calibrates with an animation (waking up neurons → reading memory → indexing archive → loading → tuning voice) and wakes up happy",
+            "Gilbert's Archive: every notification and chat is saved in a folder (one file per day, 60 days), and he searches it to answer about anything that came in",
+            "All chats open in the same tidy window (Home Screen, over apps, Sidebar, Settings, Quick Settings tile)"),
         146 to listOf("Talk to Gilbert with your voice: tap 🎤 in his chat, speak, and he answers — out loud too (Settings › Gilbert › Gilbert Speaks)",
             "Sound effects keep playing during Do Not Disturb (Settings › Sounds › Sounds in Do Not Disturb)"),
         145 to listOf("Do Not Disturb: messages from your chat apps still show while it's on (Settings › Gilbert › Always Show Messages)",

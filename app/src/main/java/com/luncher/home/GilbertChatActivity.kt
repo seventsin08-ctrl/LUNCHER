@@ -24,10 +24,22 @@ class GilbertChatActivity : Activity() {
         root.post { GilbertChat.show(this, root, s) { finish(); overridePendingTransition(0, android.R.anim.fade_out) } }
     }
 
+    private var picking = false
+    override fun startActivityForResult(intent: android.content.Intent, requestCode: Int, options: Bundle?) {
+        picking = requestCode == GilbertChat.REQ_BRAIN
+        super.startActivityForResult(intent, requestCode, options)
+    }
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        picking = false
+        val uri = data?.data
+        if (requestCode == GilbertChat.REQ_BRAIN && resultCode == RESULT_OK && uri != null) GilbertChat.onBrainPicked(this, uri)
+    }
+
     override fun onPause() {
         super.onPause()
         // Leaving (home / another app): close quietly.
-        if (!isChangingConfigurations) finish()
+        if (!isChangingConfigurations && !picking) finish()
     }
 }
 

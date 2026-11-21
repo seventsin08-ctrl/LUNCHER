@@ -816,7 +816,11 @@ class SettingsActivity : Activity() {
                 else "Memory mode: Gilbert already learns your songs, apps and who messages you, and answers from that. " +
                     "Add his brain (a small offline AI model, .task file ~500 MB) to chat about anything.")
             toggle(gilB, "Gilbert Speaks", "When you talk to him with 🎤, he answers out loud", s.gilbertSpeaks) { s.gilbertSpeaks = it }
-            button(gilB, "Talk to Gilbert", 0xFF0A84FF.toInt()) { rootFrame?.let { GilbertChat.show(this, it, s) } }
+            button(gilB, "Talk to Gilbert", 0xFF0A84FF.toInt()) { GilbertLauncher.open(this) }
+            toggle(gilB, "Gilbert's Archive", "Saves every notification and chat (one file per day, 60 days) in Android/data/…/files/Gilbert Archive, " +
+                "so Gilbert can search and answer about them. Stays on your phone", s.gilbertArchive) { s.gilbertArchive = it }
+            info(gilB, "Archive: ${GilbertArchive.count(this)} messages over ${GilbertArchive.days(this).size} days")
+            button(gilB, "Clear Archive", 0xFFFF453A.toInt()) { GilbertArchive.clear(this); rebuild() }
             if (!GilbertBrain.installed(this)) {
                 button(gilB, "1. Get a Brain File (opens browser)…", 0xFF0A84FF.toInt()) {
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(GilbertBrain.DOWNLOAD_URL))) }

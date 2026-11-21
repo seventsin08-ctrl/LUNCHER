@@ -307,7 +307,7 @@ class MainActivity : Activity() {
             },
             openInbox = { if (::sideHud.isInitialized) sideHud.openHistory(); Gilbert.clearHeld() },
             openTools = { island.toggleTools() },
-            openChat = { GilbertChat.show(this, root, settings) })
+            openChat = { GilbertLauncher.open(this) })
     }
 
     /** Pop this app's logo in the island's round face. */

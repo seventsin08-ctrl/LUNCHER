@@ -22,6 +22,26 @@ import kotlin.math.roundToInt
  */
 object GilbertChat {
     private val history = ArrayList<Pair<Boolean, String>>()   // (fromUser, text)
+    const val REQ_BRAIN = 5131
+    private var brainRoom: GilbertBrainRoom? = null
+
+    /** A brain file was picked from the brain room: warn if heavy, copy it in, then calibrate. */
+    fun onBrainPicked(act: Activity, uri: android.net.Uri) {
+        val go = { force: Boolean ->
+            brainRoom?.let { r -> r.refresh() }
+            android.widget.Toast.makeText(act, "Copying Gilbert's new brain… (a minute or two)", android.widget.Toast.LENGTH_LONG).show()
+            GilbertBrain.install(act, uri, force) { ok, msg ->
+                android.widget.Toast.makeText(act, msg, android.widget.Toast.LENGTH_LONG).show()
+                if (ok) brainRoom?.calibrate() else brainRoom?.refresh()
+            }
+        }
+        val (name, size) = GilbertBrain.describe(act, uri)
+        if (GilbertBrain.isHeavy(name, size)) android.app.AlertDialog.Builder(act, R.style.Theme_Luncher_Dialog)
+            .setTitle("Heavy brain (${if (size > 0) "${size / 1_000_000} MB" else "f32"})")
+            .setMessage("This brain is very big for this phone and may crash while loading (Gilbert will switch it off if it does). Use it anyway?")
+            .setPositiveButton("Use Anyway") { _, _ -> go(true) }.setNegativeButton("Cancel", null).show()
+        else go(false)
+    }
 
     /** Answers without the brain: memory + rules. */
     /** Questions about facts are answered instantly from memory (fast and always correct). */
@@ -87,6 +107,7 @@ object GilbertChat {
             elevation = dp(16).toFloat(); isClickable = true
         }
         lateinit var close: () -> Unit
+        var flip: () -> Unit = {}
         // Header
         card.addView(LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -103,18 +124,32 @@ object GilbertChat {
                 })
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             addView(TextView(act).apply {
+                text = "🧠"; textSize = 15f; gravity = Gravity.CENTER
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(ThemeEngine.alpha(tint, 90)) }
+                setOnClickListener { flip() }
+            }, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(8) })
+            addView(TextView(act).apply {
                 text = "✕"; textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
                 background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x33FFFFFF) }
                 setOnClickListener { close() }
             }, LinearLayout.LayoutParams(dp(34), dp(34)))
         })
+        // The chat and the brain room share the card; 🧠 flips between them.
+        val chatBox = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        val room = GilbertBrainRoom(act, s) {
+            val i = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("*/*")
+            runCatching { act.startActivityForResult(i, REQ_BRAIN) }
+        }
+        room.view.visibility = View.GONE
+        brainRoom = room
         // Messages
         val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(8), 0, dp(8)) }
         val scroll = object : ScrollView(act) {
             override fun onMeasure(w: Int, h: Int) = super.onMeasure(w,
                 View.MeasureSpec.makeMeasureSpec((act.resources.displayMetrics.heightPixels * 0.45f).toInt(), View.MeasureSpec.AT_MOST))
         }.apply { isVerticalScrollBarEnabled = false; addView(list) }
-        card.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        chatBox.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         fun bubble(user: Boolean, text: String): TextView {
             val tv = TextView(act).apply {
                 this.text = text; textSize = 15f; setTextColor(if (user) Color.WHITE else Color.WHITE)
@@ -204,7 +239,22 @@ object GilbertChat {
                 if (!said.isNullOrBlank()) { input.setText(said); spoken = true; submit() }
             }
         }
-        card.addView(LinearLayout(act).apply {
+        card.addView(chatBox, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        card.addView(room.view, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        flip = {
+            // 3D flip: the chat card turns into Gilbert's brain room (and back).
+            card.cameraDistance = 12000f * act.resources.displayMetrics.density
+            SoundFX.play(act, "open")
+            card.animate().rotationY(90f).setDuration(170).setInterpolator(android.view.animation.AccelerateInterpolator()).withEndAction {
+                val toBrain = room.view.visibility != View.VISIBLE
+                room.view.visibility = if (toBrain) View.VISIBLE else View.GONE
+                chatBox.visibility = if (toBrain) View.GONE else View.VISIBLE
+                if (toBrain) { room.refresh(); if (GilbertBrain.installed(act) && !GilbertBrain.loaded) room.calibrate() }
+                card.rotationY = -90f
+                card.animate().rotationY(0f).setDuration(220).setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+            }.start()
+        }
+        chatBox.addView(LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             addView(mic, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             addView(input, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
