@@ -71,7 +71,8 @@ class VoiceService : Service() {
             else runCatching { ctx.stopService(Intent(ctx, VoiceService::class.java)) }
         }
 
-        private val WAKE = listOf("voice activation", "voice activate", "voice activated", "voice activations")
+        /** Gilbert's wake phrase. */
+        private val WAKE = listOf("system online", "systems online", "system on line", "system's online", "system onlin")
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -131,6 +132,7 @@ class VoiceService : Service() {
                 // Follow the room's background noise so a quiet room and a busy one both work.
                 noise = noise * 0.97 + minOf(rms, noise * 1.5) * 0.03
                 if (rms > maxOf(900.0, noise * 3.2)) loud++ else loud = maxOf(0, loud - 1)
+                if (GilbertConsole.isOpen) loud = 0   // his console is open: you talk to him there
                 if (loud >= 3) {
                     listening = false
                     main.post { stopWatching(); recognize(command = false) }
@@ -186,7 +188,8 @@ class VoiceService : Service() {
             val rest = all.firstNotNullOfOrNull { t -> WAKE.firstOrNull { t.contains(it) }?.let { w -> t.substringAfter(w).trim() } }
             // Hand over to the assistant screen (timers, messages, calls, notes, report…),
             // then go back to waiting for the wake word once it closes.
-            AssistantActivity.open(this, rest?.takeIf { it.length > 2 })
+            // Wake Gilbert: his console opens (and does what you said after the phrase, if anything).
+            GilbertLauncher.open(this, rest?.takeIf { it.length > 2 })
             waitForAssistant()
             return
         }
@@ -195,7 +198,7 @@ class VoiceService : Service() {
 
     private fun waitForAssistant() {
         main.postDelayed({
-            if (AssistantActivity.active) waitForAssistant()
+            if (AssistantActivity.active || GilbertConsole.isOpen) waitForAssistant()
             else { busy = false; main.postDelayed({ startWatching() }, 400) }
         }, 1200)
     }
@@ -303,17 +306,17 @@ class VoiceService : Service() {
     private fun goForeground() {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Voice activation", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "Listening for “voice activation”"; setShowBadge(false)
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Gilbert wake word", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "Listening for “System online”"; setShowBadge(false)
             })
         }
         val open = PendingIntent.getActivity(this, 1,
-            Intent(this, SettingsActivity::class.java).putExtra("page", "general").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            Intent(this, GilbertChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_cc_mic)
-            .setContentTitle("Voice activation is on")
-            .setContentText("Say “voice activation”, then “open” and an app")
+            .setContentTitle("Gilbert is listening for “System online”")
+            .setContentText("Say “System online” — or “System online, open Spotify”")
             .setContentIntent(open).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= 30) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         else startForeground(ID, n)

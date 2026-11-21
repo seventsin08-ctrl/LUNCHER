@@ -17,7 +17,7 @@ object GilbertMind {
     val RULES = listOf(
         "RULE 1 · I only think, suggest or act while you're here with me. Nothing happens in the background.",
         "RULE 2 · I can suggest changes to how I work, but I never change anything without your permission.",
-        "RULE 3 · I never open, send or change anything unless you tap Allow — and I log every action.")
+        "RULE 3 · What you ask me to do, I do right away. Anything I suggest myself waits for your Allow. I log every action.")
 
     private const val PREF = "gil_mind"
     private fun p(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)

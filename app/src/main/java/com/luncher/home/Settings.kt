@@ -534,8 +534,8 @@ class Settings(ctx: Context) {
 
     /** Listen for "voice activation", then "open <app>". */
     var voiceOn: Boolean
-        get() = false // the voice assistant has been removed
-        set(v) = put("s_voice", v)
+        get() = p.getBoolean("s_wake_gilbert", false)
+        set(v) = put("s_wake_gilbert", v)
 
     // ---- Hello screen
     var helloOnUnlock: Boolean

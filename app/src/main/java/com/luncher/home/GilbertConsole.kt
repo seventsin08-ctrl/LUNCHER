@@ -234,6 +234,8 @@ object GilbertConsole {
             GilbertMind.recordOpen(a)
             face?.baseMood = GilbertMind.faceMood(a)
             face?.wave()   // he waves hello
+            val pc = pendingCommand; pendingCommand = null
+            if (pc != null) { GilbertNarrator.say(a, listOf("Online.", "At your service.", "Yes, ${GilbertNarrator.title(a)}?").random()); command(pc); return@postDelayed }
             val q = openingQuestion()
             // His own decision: usually he greets you aloud, sometimes just on screen.
             if (u.any { it.level == 3 } || Math.random() > 0.15) GilbertNarrator.say(a, q) else type(q.uppercase())
@@ -259,6 +261,10 @@ object GilbertConsole {
 
     private var booting = false
     private var cmdInput: EditText? = null
+    /** Is his console on screen right now? */
+    val isOpen get() = act != null && content != null
+    /** Something you said with the wake word ("System online, open Spotify"). */
+    var pendingCommand: String? = null
     const val REQ_MIC = 5143
 
     /** You told him to do something: understand it, then ask for permission (Rule 3). */
@@ -282,7 +288,11 @@ object GilbertConsole {
             return
         }
         if (!action.needsOk) { GilbertNarrator.say(a, action.title + "."); type(action.title.uppercase()); return }
-        askPermission(action)
+        // You asked for it, so he just does it (his own suggestions still wait for Allow).
+        val r = runCatching { action.run(a) }.getOrElse { "That didn't work: ${it.message?.take(60)}" }
+        GilbertMind.log(a, "${action.title} — you asked")
+        if (r.isNotEmpty()) { GilbertNarrator.say(a, r); type(r.uppercase()) }
+        face?.react("happy", 1200); rings?.ping()
     }
 
     /** A permission card at the top of the window: nothing happens until you tap Allow. */
@@ -1436,10 +1446,31 @@ object GilbertConsole {
             "Notes: ${GilbertMemory.facts(a).size}\n" +
             "Folder: Android/data/…/files/Gilbert Archive", 12f, 0xCCFFFFFF.toInt()).typeface = mono
 
+        section(p, "WAKE WORD · “SYSTEM ONLINE”")
+        val wb = box(p, 2)
+        val on = s.voiceOn && VoiceService.hasMic(a)
+        wb.addView(TextView(a).apply {
+            text = if (on) "On — say “System online” anywhere and I open. Add a command: “System online, open Spotify”."
+                else "Off — turn it on and say “System online” to wake me from anywhere (keeps a small listening notification)."
+            textSize = 12.5f; setTextColor(0xCCFFFFFF.toInt()) })
+        val wr = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        wb.addView(wr)
+        pill(wr, if (on) "Turn off wake word" else "Turn on wake word") {
+            if (!VoiceService.hasMic(a)) {
+                GilbertChatActivity.picking = true
+                s.voiceOn = true
+                runCatching { a.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC) }
+            } else {
+                s.voiceOn = !on; VoiceService.sync(a)
+                GilbertNarrator.say(a, if (!on) "Wake word on. Say system online whenever you need me." else "Wake word off.")
+                select(7, animate = false)
+            }
+        }
+
         section(p, "WHAT I CAN CONTROL · SAY OR TYPE IT")
         val hb = box(p, 2)
         GilbertControl.HELP.forEach { h -> hb.addView(TextView(a).apply { text = "› $h"; textSize = 12f; setTextColor(0xCCFFFFFF.toInt()); setPadding(0, dp(3), 0, dp(3)) }) }
-        hb.addView(TextView(a).apply { text = "Every action shows a permission card first. Nothing happens until you tap Allow."; textSize = 11f; setTextColor(Hud.a(Hud.SOFT, 200)); setPadding(0, dp(6), 0, 0) })
+        hb.addView(TextView(a).apply { text = "What you ask for, I do right away. My own suggestions still wait for your Allow."; textSize = 11f; setTextColor(Hud.a(Hud.SOFT, 200)); setPadding(0, dp(6), 0, 0) })
 
         section(p, "VOICE")
         GilbertNarrator.start(a)

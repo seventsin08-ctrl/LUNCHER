@@ -28,11 +28,21 @@ class GilbertChatActivity : Activity() {
     }
 
     companion object { @JvmStatic var picking = false }
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        // Woken again while open ("System online, open Spotify"): just do it.
+        GilbertConsole.pendingCommand?.let { c -> GilbertConsole.pendingCommand = null; GilbertConsole.command(c) }
+    }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         picking = false
-        if (requestCode == GilbertConsole.REQ_MIC && grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
-            android.widget.Toast.makeText(this, "Microphone allowed — tap 🎤 again", android.widget.Toast.LENGTH_SHORT).show()
+        if (requestCode == GilbertConsole.REQ_MIC) {
+            val ok = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!ok) Settings(this).voiceOn = false
+            VoiceService.sync(this)
+            android.widget.Toast.makeText(this, if (ok) "Microphone allowed — wake word and 🎤 are ready" else "Microphone not allowed", android.widget.Toast.LENGTH_SHORT).show()
+            GilbertConsole.refresh()
+        }
         if (requestCode == GilbertConsole.REQ_PHOTOS && PhotoWatcher.allowed(this)) {
             PhotoWatcher.register(this)
             android.widget.Toast.makeText(this, "Gilbert will pick up photos saved from your chats", android.widget.Toast.LENGTH_SHORT).show()
@@ -89,7 +99,8 @@ class GilbertTileService : android.service.quicksettings.TileService() {
 }
 
 object GilbertLauncher {
-    fun open(ctx: android.content.Context) {
+    fun open(ctx: android.content.Context, command: String? = null) {
+        GilbertConsole.pendingCommand = command
         runCatching {
             ctx.startActivity(android.content.Intent(ctx, GilbertChatActivity::class.java)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION))
