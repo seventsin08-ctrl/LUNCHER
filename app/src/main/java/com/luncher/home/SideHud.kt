@@ -884,6 +884,30 @@ class SideHud(private val act: Activity, private val settings: Settings, private
         return v
     }
 
+    // ---- the data file you drag out of the side island
+    /** What's in the file: the message showing right now, or everything that came in today. */
+    private fun fileRecords(): List<AllFather.Rec> {
+        val v = view
+        val recs = AllFather.records(act)
+        if (v != null && v.kind == Kind.MESSAGE && !v.label.isNullOrBlank()) {
+            val who = Gilbert.cleanTitle(v.label ?: ""); val body = v.body ?: ""
+            recs.firstOrNull { it.who == who && (body.isBlank() || it.text.contains(body.take(30))) }?.let { return listOf(it) }
+            recs.firstOrNull { it.who == who }?.let { return listOf(it) }
+        }
+        return AllFather.today(act).ifEmpty { recs.take(20) }
+    }
+    private fun fileTitle(): Pair<String, String> {
+        val l = fileRecords()
+        if (l.size == 1) return l[0].who to "${l[0].app} · ${l[0].cat.label}${if (l[0].imp) " · important" else ""}"
+        val apps = l.map { it.app }.distinct()
+        return "Information · today" to "${l.size} records · ${apps.take(3).joinToString(", ")}${if (apps.size > 3) "…" else ""}"
+    }
+    private fun giveToAllFather() {
+        val l = fileRecords()
+        if (l.isEmpty()) { android.widget.Toast.makeText(act, "No information yet — it fills up as notifications come in", android.widget.Toast.LENGTH_SHORT).show(); return }
+        AllFatherActivity.openIngest(act, l.map { it.id }.toLongArray())
+    }
+
     /** Shrink back to the resting bump (or away if resting is off). */
     private fun retract() {
         // Chat windows have their own timers; only the side island shape goes back to rest.
@@ -1217,6 +1241,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
     }
 
     private inner class HudView(ctx: Activity) : View(ctx) {
+        var fileDrag: DataFileDrag? = null
         var kind = Kind.REST
         var level = 0f
         var label: String? = null
@@ -1571,6 +1596,16 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 }
                 MotionEvent.ACTION_MOVE -> if (moving) {
                     val l = lp ?: return true
+                    // Held, then pulled across the screen: it becomes a data file for All Father.
+                    val inward = if (isRight) downX - e.rawX else e.rawX - downX
+                    if (fileDrag == null && !preview && inward > dp(56)) {
+                        val (title, meta) = fileTitle()
+                        val w = wm
+                        if (w != null) fileDrag = DataFileDrag(act, w, l.type, title, meta).takeIf { it.start(e.rawX, e.rawY) }
+                        l.y = startY; runCatching { wm?.updateViewLayout(this, l) }
+                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    }
+                    fileDrag?.let { it.move(e.rawX, e.rawY); return true }
                     l.y = (startY + (e.rawY - downY)).toInt()
                         .coerceIn(-dp(60), act.resources.displayMetrics.heightPixels - dp(200))
                     runCatching { wm?.updateViewLayout(this, l) }
@@ -1599,6 +1634,14 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     removeCallbacks(startMove)
+                    fileDrag?.let { f ->
+                        fileDrag = null; moving = false
+                        val dropped = f.over && e.actionMasked == MotionEvent.ACTION_UP
+                        f.end()
+                        if (dropped) { performHapticFeedback(HapticFeedbackConstants.CONFIRM); giveToAllFather() }
+                        postDelayed(backToRest, 600)
+                        return true
+                    }
                     if (moving) {
                         // Save where you dropped it (as % of the screen height).
                         moving = false

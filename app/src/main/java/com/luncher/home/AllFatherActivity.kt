@@ -46,6 +46,11 @@ class AllFatherActivity : Activity() {
             AllFatherBrain.Cat.CALENDAR -> 0xFF9FE870.toInt(); AllFatherBrain.Cat.SECURITY -> 0xFFFF5A4F.toInt(); AllFatherBrain.Cat.SOCIAL -> 0xFFC9A0FF.toInt()
             AllFatherBrain.Cat.PROMO -> 0xFF5B5D63.toInt(); AllFatherBrain.Cat.SYSTEM -> 0xFF8A8C92.toInt(); AllFatherBrain.Cat.OTHER -> 0xFF8A8C92.toInt()
         }
+        /** Open the Data Center and have him take these records (dropped from the side island). */
+        fun openIngest(ctx: Context, ids: LongArray) {
+            runCatching { ctx.startActivity(android.content.Intent(ctx, AllFatherActivity::class.java).putExtra("ingest", ids)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)) }
+        }
         fun open(ctx: Context) { runCatching { ctx.startActivity(android.content.Intent(ctx, AllFatherActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
     }
 
@@ -121,6 +126,35 @@ class AllFatherActivity : Activity() {
 
         AllFather.onChange = { runOnUiThread { refresh() } }
         refresh()
+        handleIngest(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); handleIngest(intent) }
+
+    /** Records dropped on All Father from the side island: black screen, his verdicts, his actions. */
+    private fun handleIngest(i: android.content.Intent?) {
+        val ids = i?.getLongArrayExtra("ingest") ?: return
+        i.removeExtra("ingest")
+        val recs = AllFather.records(this).filter { it.id in ids.toSet() }
+        if (recs.isEmpty()) return
+        veil.visibility = View.VISIBLE; veil.alpha = 1f
+        val out = ArrayList<String>()
+        out += "ALL FATHER · INGESTING ${recs.size} RECORD${if (recs.size > 1) "S" else ""}"
+        veil.text = out.joinToString("\n")
+        veil.postDelayed({
+            var n = 0
+            for (r in recs) {
+                r.acted = false
+                val acts = AllFather.act(this, r).filter { it.kind != "FILE" }
+                n += acts.size
+                if (recs.size <= 4) { out += "> ${r.who.take(24)} · ${r.cat.label.uppercase()} · ${if (r.imp) "IMPORTANT" else "UNIMPORTANT"}"; acts.forEach { out += "  ✓ ${it.kind}  ${it.text.take(40)}" } }
+            }
+            val imp = recs.count { it.imp }
+            out += "> ${recs.size} sorted · $imp need you · $n actions"
+            veil.text = out.takeLast(14).joinToString("\n")
+            if (imp > 0) SoundFX.play(this, "success")
+            veil.postDelayed({ veil.animate().alpha(0f).setDuration(300).withEndAction { veil.visibility = View.GONE; tab = "TODAY"; refresh() }.start() }, 2200)
+        }, 700)
     }
 
     override fun onDestroy() { AllFather.onChange = null; super.onDestroy() }
