@@ -105,21 +105,13 @@ object GilbertConsole {
         val fs = (hudH * 0.58f).toInt()
         hud.addView(fc, FrameLayout.LayoutParams(fs, fs, Gravity.CENTER))
         // Tap his globe: hush him if he's talking, otherwise he tells you about this window.
+        // Double-tap his globe: start talking (conversation mode).
+        var lastFaceTap = 0L
         fc.setOnClickListener {
-            SoundFX.play(a, "tick"); rg.ping()
-            when {
-                GilbertNarrator.speaking() -> GilbertNarrator.stop()
-                !s.gilbertSpeaks -> { type("VOICE MUTED · TAP 🔇 TO TURN ON"); face?.react("sleepy", 1200) }
-                else -> {
-                    val u = updates()
-                    val (talk, why) = GilbertMind.decideToSpeak(a, u.any { it.level == 3 }, !briefedThisOpen && u.isNotEmpty())
-                    if (!talk) { type("GILBERT · $why"); face?.react(GilbertMind.faceMood(a), 1500) }
-                    else {
-                        GilbertMind.spoke()
-                        if (!briefedThisOpen) brief() else chatter()?.let { GilbertNarrator.say(a, it) }
-                    }
-                }
-            }
+            val nowT = System.currentTimeMillis()
+            if (nowT - lastFaceTap < 320) { lastFaceTap = 0L; GilbertNarrator.stop(); GilbertNarrator.say(a, "Go ahead, ${GilbertNarrator.title(a)}."); startConversation(); return@setOnClickListener }
+            lastFaceTap = nowT
+            fc.postDelayed({ if (lastFaceTap == nowT) faceTap(a, s) }, 320)
         }
         // Tapping anywhere on the HUD does the same.
         rg.setOnClickListener { fc.performClick() }
@@ -276,6 +268,24 @@ object GilbertConsole {
     }
 
     private var booting = false
+    /** One tap on his globe: hush him, brief you, or say something — his own decision. */
+    private fun faceTap(a: Activity, s: Settings) {
+        SoundFX.play(a, "tick"); rings?.ping()
+        when {
+            GilbertNarrator.speaking() -> GilbertNarrator.stop()
+            !s.gilbertSpeaks -> { type("VOICE MUTED · TAP 🔇 TO TURN ON"); face?.react("sleepy", 1200) }
+            else -> {
+                val u = updates()
+                val (talk, why) = GilbertMind.decideToSpeak(a, u.any { it.level == 3 }, !briefedThisOpen && u.isNotEmpty())
+                if (!talk) { type("GILBERT · $why"); face?.react(GilbertMind.faceMood(a), 1500) }
+                else {
+                    GilbertMind.spoke()
+                    if (!briefedThisOpen) brief() else chatter()?.let { GilbertNarrator.say(a, it) }
+                }
+            }
+        }
+    }
+
     private var cmdInput: EditText? = null
     /** Is his console on screen right now? */
     val isOpen get() = act != null && content != null
@@ -1734,7 +1744,14 @@ object GilbertConsole {
             "Notes: ${GilbertMemory.facts(a).size}\n" +
             "Folder: Android/data/…/files/Gilbert Archive", 12f, 0xCCFFFFFF.toInt()).typeface = mono
 
-        section(p, "WAKE WORD · “SYSTEM ONLINE”")
+        section(p, "TALK TO GILBERT")
+        val dt = box(p, 2)
+        dt.addView(TextView(a).apply {
+            text = "DOUBLE-TAP GILBERT — on the island, over any app, or his globe here — and he starts listening. " +
+                "Talk back and forth; say “that's all” to stop. Tap once for his console."
+            textSize = 12.5f; setTextColor(Hud.CYAN); typeface = monoBold })
+
+        section(p, "WAKE WORD · EXPERIMENTAL")
         val wb = box(p, 2)
         val on = s.voiceOn && VoiceService.hasMic(a)
         val notifOk = android.os.Build.VERSION.SDK_INT < 33 ||

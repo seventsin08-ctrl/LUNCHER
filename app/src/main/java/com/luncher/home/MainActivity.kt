@@ -296,6 +296,24 @@ class MainActivity : Activity() {
     }
 
     /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
+    // Tap Gilbert: his console. Double-tap: his console, already listening — just talk.
+    private var lastGilTap = 0L
+    private val gilSingle = Runnable { openGilbert() }
+    private fun gilbertTap() {
+        val now = System.currentTimeMillis()
+        if (now - lastGilTap < 320) {
+            lastGilTap = 0L
+            root.removeCallbacks(gilSingle)
+            GilbertConsole.openInbox = { if (::sideHud.isInitialized) sideHud.openHistory(); Gilbert.clearHeld() }
+            GilbertConsole.openTools = { if (::island.isInitialized) island.toggleTools() }
+            haptic(root, HapticFeedbackConstants.CONFIRM)
+            GilbertLauncher.open(this, null, byVoice = true)
+        } else {
+            lastGilTap = now
+            root.postDelayed(gilSingle, 320)
+        }
+    }
+
     private fun openGilbert() {
         // One place for everything: his HUD console (00 NOW has what the card used to show).
         GilbertConsole.openInbox = { if (::sideHud.isInitialized) sideHud.openHistory(); Gilbert.clearHeld() }
@@ -435,7 +453,7 @@ class MainActivity : Activity() {
         island.alwaysShow = settings.islandAlways
         island.faceOn = settings.islandFace
         island.configureFace(settings)
-        island.onFaceTap = { openGilbert() }
+        island.onFaceTap = { gilbertTap() }
         island.beatsOn = settings.islandBeats
         island.onBeatsToggle = { on ->
             settings.islandBeats = on; overlayIsland?.beatsOn = on
@@ -602,6 +620,9 @@ class MainActivity : Activity() {
         Tilt.resume()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
+        // The "System online" wake word was replaced by double-tapping Gilbert: switch it off once.
+        getSharedPreferences("luncher", MODE_PRIVATE).let { pr ->
+            if (!pr.getBoolean("wake_off_v176", false)) { settings.voiceOn = false; pr.edit().putBoolean("wake_off_v176", true).apply() } }
         runCatching { VoiceService.sync(this) }
         if (::sideHud.isInitialized) runCatching { sideHud.rest() }
         if (::island.isInitialized) detachOverlayIsland()
@@ -989,7 +1010,7 @@ class MainActivity : Activity() {
         ov.beatsOn = settings.islandBeats
         ov.onBeatsToggle = { on -> settings.islandBeats = on; island.beatsOn = on }
         // Over other apps too, tapping Gilbert opens his HUD console (00 NOW has the inbox button).
-        ov.onFaceTap = { openGilbert() }
+        ov.onFaceTap = { gilbertTap() }
         ov.camera = island.camera
         applyToolsStyle(ov)
         ov.allow = island.allow
