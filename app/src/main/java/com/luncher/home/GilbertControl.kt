@@ -182,6 +182,9 @@ object GilbertControl {
             }
             K.TOGGLE -> {
                 val what = i.text.removeSuffix(" back").trim()
+                if (Regex("all ?father").containsMatchIn(what)) return Action("All Father mode ${if (i.on != false) "on" else "off"}", "") { a ->
+                    AllFather.setMode(a, i.on != false)
+                    if (i.on != false) "All Father mode on. The island, tools and side bars now live inside him — open him from the right edge." else "All Father mode off. Everything is back on the Home Screen." }
                 findProp(what, java.lang.Boolean.TYPE)?.let { p ->
                     val cur = get(s, p) as? Boolean ?: false
                     val v = i.on ?: !cur

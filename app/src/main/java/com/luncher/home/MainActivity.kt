@@ -296,6 +296,27 @@ class MainActivity : Activity() {
     }
 
     /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
+    // All Father mode: a slim gold tab on the right edge opens him (the island and side bars step aside).
+    private var afEdge: View? = null
+    private fun allFatherEdge() {
+        val on = AllFather.modeOn(this)
+        if (!on) { afEdge?.let { root.removeView(it) }; afEdge = null; return }
+        if (afEdge != null) return
+        val e = TextView(this).apply {
+            text = "ALL FATHER"; textSize = 8.5f; letterSpacing = .3f; setTextColor(Hud.CYAN); gravity = Gravity.CENTER
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
+            rotation = 90f
+        }
+        val tab = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadii = floatArrayOf(dp(14).toFloat(), dp(14).toFloat(), 0f, 0f, 0f, 0f, dp(14).toFloat(), dp(14).toFloat())
+                setColor(0xE00B0D0E.toInt()); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 160)) }
+            addView(e, FrameLayout.LayoutParams(dp(110), dp(22), Gravity.CENTER))
+            setOnClickListener { AllFatherActivity.open(this@MainActivity) }
+        }
+        afEdge = tab
+        root.addView(tab, FrameLayout.LayoutParams(dp(24), dp(120), Gravity.END or Gravity.CENTER_VERTICAL))
+    }
+
     // Tap Gilbert: his console. Double-tap: his console, already listening — just talk.
     private var lastGilTap = 0L
     private val gilSingle = Runnable { openGilbert() }
@@ -601,6 +622,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        allFatherEdge()
         // Back home: clear any leftover Gilbert console task out of recent apps.
         runCatching {
             getSystemService(android.app.ActivityManager::class.java).appTasks.forEach { t ->

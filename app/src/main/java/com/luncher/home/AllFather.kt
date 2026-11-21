@@ -167,5 +167,22 @@ object AllFather {
             (if (inn > 0) " ₱${"%,.0f".format(inn)} came in this week." else "")
     }
 
+    // ------------------------------------------------------------------ All Father mode
+    /** When on, the island, tools tab, side island and sidebar step aside and live inside All Father. */
+    fun modeOn(ctx: Context) = prefs(ctx).getBoolean("mode", false)
+    fun setMode(ctx: Context, on: Boolean) {
+        val s = Settings(ctx); val p = prefs(ctx)
+        if (on && !modeOn(ctx)) {
+            // Remember how they were, so turning the mode off brings them back exactly.
+            p.edit().putBoolean("mode", true).putBoolean("was_island", s.island).putBoolean("was_tools", s.islandTools)
+                .putBoolean("was_side", s.sideHud).putBoolean("was_sidebar", s.sidebarOn).apply()
+            s.island = false; s.islandTools = false; s.sideHud = false; s.sidebarOn = false
+        } else if (!on && modeOn(ctx)) {
+            s.island = p.getBoolean("was_island", true); s.islandTools = p.getBoolean("was_tools", s.islandTools)
+            s.sideHud = p.getBoolean("was_side", true); s.sidebarOn = p.getBoolean("was_sidebar", true)
+            p.edit().putBoolean("mode", false).apply()
+        }
+    }
+
     fun forget(ctx: Context) { recFile(ctx).delete(); prefs(ctx).edit().clear().apply(); cache = null; onChange?.invoke() }
 }
