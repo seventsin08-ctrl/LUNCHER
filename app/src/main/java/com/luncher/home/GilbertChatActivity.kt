@@ -49,6 +49,22 @@ class GilbertChatActivity : Activity() {
         if (requestCode == GilbertConsole.REQ_SCAN && resultCode == RESULT_OK && uri != null) GilbertConsole.onScanPicked(this, uri)
     }
 
+    /** Close the console and take its task out of recent apps (unless a picker/permission is open). */
+    private fun leave() { if (!isChangingConfigurations && !picking && !isFinishing) finishAndRemoveTask() }
+
+    // Swiping up / pressing Home or Recents: close right away, so the console never sits in the
+    // recent-apps screen (Android keeps it running during the gesture, before onPause).
+    override fun onUserLeaveHint() { super.onUserLeaveHint(); leave() }
+    override fun onTopResumedActivityChanged(isTop: Boolean) {
+        super.onTopResumedActivityChanged(isTop)
+        if (!isTop) window.decorView.postDelayed({ if (!hasWindowFocus()) leave() }, 250)
+    }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) window.decorView.postDelayed({ if (!hasWindowFocus()) leave() }, 400)
+    }
+    override fun onStop() { super.onStop(); leave() }
+
     override fun onPause() {
         super.onPause()
         // Leaving (home / another app): close quietly.

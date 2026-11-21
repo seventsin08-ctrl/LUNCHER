@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        159 to listOf("🔧 Gilbert's console closes the moment you swipe up or press Home / Recents, and any leftover is cleared from recent apps when you're back home"),
         158 to listOf("⬆ Files can now show photos from Messenger: allow saved photos and turn on Messenger's Save photos — each one lands on its “Sent a photo” and gets scanned", "⬆ Share → Gilbert: share any photo from any app and he keeps and scans it", "⬆ Photos that haven't arrived yet show the sender's picture with a 📷 tag instead of an empty camera"),
         157 to listOf("🔧 Gilbert's console no longer stays behind in the recent-apps screen after you leave it"),
         156 to listOf("🔧 Tapping Gilbert inside other apps now opens his HUD console too (it used to open the Notifications list)"),

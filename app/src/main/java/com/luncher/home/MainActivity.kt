@@ -583,6 +583,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Back home: clear any leftover Gilbert console task out of recent apps.
+        runCatching {
+            getSystemService(android.app.ActivityManager::class.java).appTasks.forEach { t ->
+                val base = t.taskInfo.baseIntent.component?.className ?: return@forEach
+                if (base.endsWith("GilbertChatActivity") || base.endsWith("GilbertShareActivity")) t.finishAndRemoveTask()
+            }
+        }
         GameState.leftApps()   // back on the Home Screen: no game on screen
         if (::pager.isInitialized) pager.post { runCatching { pager.requestTransform() } }
         mainHandler.post { updateGilbertMood() }
