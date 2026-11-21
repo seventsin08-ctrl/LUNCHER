@@ -95,158 +95,107 @@ object GilbertControl {
         "Go to <window>")
 
     // ------------------------------------------------------------------ understanding you
-    fun parse(ctx: Context, input: String): Action? {
-        val q = input.trim().lowercase().removePrefix("gilbert").trim(' ', ',', '.').removePrefix("please").trim()
-        if (q.isEmpty()) return null
+    /** Turn what you said into an action (understanding is in [GilbertIntent], tested with 240+ phrasings). */
+    fun parse(ctx: Context, input: String): Action? = GilbertIntent.parse(input)?.let { action(ctx, it) }
+
+    fun action(ctx: Context, i: GilbertIntent.Intent): Action? {
         val s = Settings(ctx)
-        val onWords = Regex("^(turn on|switch on|enable|activate|show|start|open up|bring back)\\b")
-        val offWords = Regex("^(turn off|switch off|disable|deactivate|hide|stop|remove|kill)\\b")
-
-        // ---- tasks & notes (from his desktop brain)
-        Regex("^(?:add|new|create)(?: a)? task\\s*[: ]\\s*(\\S.*)$").find(q)?.let { m ->
-            val title = input.trim().let { raw -> Regex("task\\s*[: ]\\s*", RegexOption.IGNORE_CASE).split(raw, 2).getOrNull(1) ?: m.groupValues[1] }
-            return Action("Add task", title) { a -> "Task ${GilbertTasks.add(a, title)} added." }
-        }
-        if (q in setOf("show tasks", "list tasks", "my tasks", "tasks", "what are my tasks")) return Action("Tasks", "", needsOk = true) { a ->
-            val t = GilbertTasks.open(a)
-            if (t.isEmpty()) "No open tasks." else t.joinToString("\n") { "${it.id}. ${it.title}" }
-        }
-        Regex("^(?:complete|finish|done|tick off)(?: with)? task (\\d{1,6})[.!]?$").find(q)?.let { m ->
-            val id = m.groupValues[1].toInt()
-            return Action("Complete task $id", "") { a -> if (GilbertTasks.complete(a, id)) "Task $id complete." else "I couldn't find that open task." }
-        }
-        if (q in setOf("show notes", "list notes", "my notes", "notes")) return Action("Notes", "") { a ->
-            val n = GilbertMemory.facts(a).take(10)
-            if (n.isEmpty()) "No saved notes." else n.mapIndexed { i, x -> "${i + 1}. $x" }.joinToString("\n")
-        }
-
-        // ---- phone functions first (specific words)
-        if (Regex("flash ?light|torch").containsMatchIn(q)) {
-            val on = !q.contains("off")
-            return Action("Flashlight ${if (on) "on" else "off"}", "Turns the camera light ${if (on) "on" else "off"}.") { a ->
-                runCatching { val cm = a.getSystemService(android.hardware.camera2.CameraManager::class.java)
-                    cm.setTorchMode(cm.cameraIdList.first(), on) }.fold({ "Flashlight ${if (on) "on" else "off"}." }, { "This phone wouldn't let me use the flashlight." })
-            }
-        }
-        if (q.contains("volume")) {
-            val am = ctx.getSystemService(AudioManager::class.java)
-            val dir = when { q.contains("up") || q.contains("louder") || q.contains("max") -> AudioManager.ADJUST_RAISE; q.contains("mute") || q.contains("silent") -> AudioManager.ADJUST_MUTE
-                q.contains("unmute") -> AudioManager.ADJUST_UNMUTE; else -> AudioManager.ADJUST_LOWER }
-            val times = if (q.contains("max")) 15 else 2
-            return Action("Volume ${when (dir) { AudioManager.ADJUST_RAISE -> "up"; AudioManager.ADJUST_MUTE -> "mute"; AudioManager.ADJUST_UNMUTE -> "unmute"; else -> "down" }}", "Media volume.") {
-                repeat(times) { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, if (it == times - 1) AudioManager.FLAG_SHOW_UI else 0) }; "Volume adjusted."
-            }
-        }
-        if (q.contains("brightness")) {
-            val pct = Regex("(\\d{1,3})").find(q)?.value?.toIntOrNull() ?: if (q.contains("up") || q.contains("max")) 100 else if (q.contains("low") || q.contains("down")) 15 else 50
-            return Action("Brightness ${pct.coerceIn(1, 100)}%", "Screen brightness.") { a ->
-                if (!android.provider.Settings.System.canWrite(a)) {
-                    runCatching { a.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:${a.packageName}"))) }
-                    "I need permission to change brightness — allow “Modify system settings” and ask again."
-                } else {
-                    android.provider.Settings.System.putInt(a.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE, 0)
-                    android.provider.Settings.System.putInt(a.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS, (pct.coerceIn(1, 100) * 255 / 100))
-                    "Brightness set to $pct percent."
+        val K = GilbertIntent.Kind
+        fun cap(t: String) = t.replaceFirstChar { it.uppercase() }
+        return when (i.kind) {
+            K.TASK_ADD -> Action("Add task", i.text) { a -> "Task ${GilbertTasks.add(a, i.text)} added." }
+            K.TASK_LIST -> Action("Tasks", "") { a ->
+                val t = GilbertTasks.open(a); if (t.isEmpty()) "No open tasks." else t.joinToString("\n") { "${it.id}. ${it.title}" } }
+            K.TASK_DONE -> Action("Complete task ${i.num}", "") { a -> if (GilbertTasks.complete(a, i.num ?: -1)) "Task ${i.num} complete." else "I couldn't find that open task." }
+            K.NOTE_ADD -> Action("Save a note", i.text) { a -> GilbertMemory.addFact(a, i.text); "Saved, ${GilbertNarrator.ownerName(a) ?: "John"}." }
+            K.NOTE_LIST -> Action("Notes", "") { a ->
+                val n = GilbertMemory.facts(a).take(10); if (n.isEmpty()) "No saved notes." else n.mapIndexed { k, x -> "${k + 1}. $x" }.joinToString("\n") }
+            K.FLASHLIGHT -> { val on = i.on != false
+                Action("Flashlight ${if (on) "on" else "off"}", "") { a ->
+                    runCatching { val cm = a.getSystemService(android.hardware.camera2.CameraManager::class.java)
+                        cm.setTorchMode(cm.cameraIdList.first(), on) }.fold({ "Flashlight ${if (on) "on" else "off"}." }, { "This phone wouldn't let me use the flashlight." }) } }
+            K.VOLUME -> {
+                val dir = when (i.text) { "up", "max" -> AudioManager.ADJUST_RAISE; "mute" -> AudioManager.ADJUST_MUTE; "unmute" -> AudioManager.ADJUST_UNMUTE; else -> AudioManager.ADJUST_LOWER }
+                val times = if (i.text == "max") 15 else 2
+                Action("Volume ${i.text}", "") { a ->
+                    val am = a.getSystemService(AudioManager::class.java)
+                    repeat(times) { n -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, if (n == times - 1) AudioManager.FLAG_SHOW_UI else 0) }
+                    when (i.text) { "mute" -> "Muted."; "unmute" -> "Sound's back."; "max" -> "Volume at maximum."; else -> "Volume ${i.text}." } } }
+            K.BRIGHTNESS -> { val pct = i.num ?: 50
+                Action("Brightness $pct%", "") { a ->
+                    if (!android.provider.Settings.System.canWrite(a)) {
+                        runCatching { a.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:${a.packageName}"))) }
+                        "I need permission to change brightness — allow “Modify system settings” and ask again."
+                    } else {
+                        android.provider.Settings.System.putInt(a.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE, 0)
+                        android.provider.Settings.System.putInt(a.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS, pct * 255 / 100)
+                        "Brightness at $pct percent."
+                    } } }
+            K.MEDIA -> { val key = when (i.text) { "play" -> KeyEvent.KEYCODE_MEDIA_PLAY; "pause" -> KeyEvent.KEYCODE_MEDIA_PAUSE; "next" -> KeyEvent.KEYCODE_MEDIA_NEXT; else -> KeyEvent.KEYCODE_MEDIA_PREVIOUS }
+                Action("Music: ${i.text}", "") { a ->
+                    val am = a.getSystemService(AudioManager::class.java)
+                    am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, key)); am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key))
+                    when (i.text) { "play" -> "Playing."; "pause" -> "Paused."; "next" -> "Next track."; else -> "Previous track." } } }
+            K.DND -> { val on = i.on != false
+                Action("Do Not Disturb ${if (on) "on" else "off"}", "") { a ->
+                    val nm = a.getSystemService(android.app.NotificationManager::class.java)
+                    if (!nm.isNotificationPolicyAccessGranted) {
+                        runCatching { a.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+                        "I need Do Not Disturb access — allow it for the launcher and ask again."
+                    } else { nm.setInterruptionFilter(if (on) android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY else android.app.NotificationManager.INTERRUPTION_FILTER_ALL); "Do Not Disturb ${if (on) "on" else "off"}." } } }
+            K.LOCK -> Action("Lock the phone", "") { _ ->
+                if (LuncherAccessibility.perform(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)) "Locked." else "Turn on the launcher's gesture helper (Accessibility) so I can lock the phone." }
+            K.ALARM -> { val hr = i.num ?: 7; val mn = i.num2 ?: 0
+                Action("Alarm ${"%d:%02d".format(hr, mn)}", "") { a ->
+                    runCatching { a.startActivity(Intent(android.provider.AlarmClock.ACTION_SET_ALARM).putExtra(android.provider.AlarmClock.EXTRA_HOUR, hr)
+                        .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, mn).putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Gilbert")) }
+                    "Alarm set for ${"%d:%02d".format(hr, mn)}." } }
+            K.TIMER -> { val secs = i.num ?: 60
+                val label = if (secs % 3600 == 0) "${secs / 3600} hour${if (secs > 3600) "s" else ""}" else if (secs % 60 == 0) "${secs / 60} minute${if (secs > 60) "s" else ""}" else "$secs seconds"
+                Action("Timer $label", "") { a ->
+                    runCatching { a.startActivity(Intent(android.provider.AlarmClock.ACTION_SET_TIMER).putExtra(android.provider.AlarmClock.EXTRA_LENGTH, secs)
+                        .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)) }; "Timer set for $label." } }
+            K.CALL -> { val num = contactNumber(ctx, i.text) ?: i.text.takeIf { it.replace(Regex("[^0-9+]"), "").length >= 5 }
+                Action("Call ${cap(i.text)}", "") { a ->
+                    runCatching { a.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:${num ?: ""}"))) }
+                    if (num != null) "Dialer's ready — press call." else "I couldn't find ${cap(i.text)} in your contacts. Dialer's open." } }
+            K.SEARCH -> Action("Search “${i.text}”", "") { a ->
+                runCatching { a.startActivity(Intent(Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, i.text)) }; "Searching." }
+            K.LAUNCHER_SETTINGS -> Action("Open launcher settings", "") { a -> a.startActivity(Intent(a, SettingsActivity::class.java)); "Settings open." }
+            K.SETTINGS_PAGE -> { val act = when (i.text) {
+                    "wi-fi" -> android.provider.Settings.ACTION_WIFI_SETTINGS; "bluetooth" -> android.provider.Settings.ACTION_BLUETOOTH_SETTINGS
+                    "battery" -> Intent.ACTION_POWER_USAGE_SUMMARY; "display" -> android.provider.Settings.ACTION_DISPLAY_SETTINGS
+                    "sound" -> android.provider.Settings.ACTION_SOUND_SETTINGS; "storage" -> android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS
+                    "location" -> android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS; else -> android.provider.Settings.ACTION_WIRELESS_SETTINGS }
+                Action("Open ${cap(i.text)} settings", "") { a -> runCatching { a.startActivity(Intent(act)) }; "${cap(i.text)} settings." } }
+            K.SET_NUMBER -> findProp(i.text, Integer.TYPE)?.let { p ->
+                val v = i.num ?: return null
+                Action("${cap(p.label)} → $v", "Was ${get(s, p)}.") { a -> set(Settings(a), p, v); "${cap(p.label)} set to $v." } }
+                ?: Action("I don't have a setting called “${i.text}”", "", needsOk = false) { "" }
+            K.SET_STYLE -> {
+                val what = i.text.substringBefore('\u0000'); val target = i.text.substringAfter('\u0000').replace("android", "stack").replace("a-z", "list")
+                findProp(what, String::class.java)?.let { p ->
+                    val opt = OPTIONS[p.name]?.firstOrNull { it == target || target.startsWith(it) || it.startsWith(target) }
+                    if (opt != null) Action("${cap(p.label)} → $opt", "Was ${get(s, p)}.") { a -> set(Settings(a), p, opt); "${cap(p.label)} is now $opt." }
+                    else Action("${cap(p.label)} can be: ${OPTIONS[p.name]?.joinToString()}", "", needsOk = false) { "" }
                 }
             }
-        }
-        Regex("^(play|pause|resume|next|skip|previous|prev|back)( (the )?(song|music|track))?$").find(q)?.let { m ->
-            val key = when (m.groupValues[1]) { "play", "resume" -> KeyEvent.KEYCODE_MEDIA_PLAY; "pause" -> KeyEvent.KEYCODE_MEDIA_PAUSE
-                "next", "skip" -> KeyEvent.KEYCODE_MEDIA_NEXT; else -> KeyEvent.KEYCODE_MEDIA_PREVIOUS }
-            return Action("Music: ${m.groupValues[1]}", "Controls what's playing.") { a ->
-                val am = a.getSystemService(AudioManager::class.java)
-                am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, key)); am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key)); "Done."
+            K.TOGGLE -> {
+                val what = i.text.removeSuffix(" back").trim()
+                findProp(what, java.lang.Boolean.TYPE)?.let { p ->
+                    val cur = get(s, p) as? Boolean ?: false
+                    val v = i.on ?: !cur
+                    if (cur == v && i.on != null) Action("${cap(p.label)} is already ${if (v) "on" else "off"}", "", needsOk = false) { "" }
+                    else Action("Turn ${if (v) "on" else "off"} ${p.label}", "") { a -> set(Settings(a), p, v); "${cap(p.label)} ${if (v) "on" else "off"}." }
+                } ?: appFor(ctx, what)?.takeIf { i.on == true }?.let { (pkg, label) ->
+                    Action("Open $label", "") { a -> a.packageManager.getLaunchIntentForPackage(pkg)?.let { a.startActivity(it) }; "Opening $label." } }
+                ?: Action("I don't have a switch called “$what”", "", needsOk = false) { "" }
             }
+            K.OPEN_APP -> appFor(ctx, i.text)?.let { (pkg, label) ->
+                Action("Open $label", "") { a -> a.packageManager.getLaunchIntentForPackage(pkg)?.let { a.startActivity(it) }; "Opening $label." } }
+                ?: Action("I couldn't find “${i.text}” on your phone", "", needsOk = false) { "" }
+            else -> null   // HELLO, BYE, HELP, WINDOW are handled by the console
         }
-        if (Regex("do not disturb|\\bdnd\\b|focus mode").containsMatchIn(q)) {
-            val on = !q.contains("off")
-            return Action("Do Not Disturb ${if (on) "on" else "off"}", "Silences calls and notifications.") { a ->
-                val nm = a.getSystemService(android.app.NotificationManager::class.java)
-                if (!nm.isNotificationPolicyAccessGranted) {
-                    runCatching { a.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
-                    "I need Do Not Disturb access — allow it for the launcher and ask again."
-                } else { nm.setInterruptionFilter(if (on) android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY else android.app.NotificationManager.INTERRUPTION_FILTER_ALL); "Do Not Disturb ${if (on) "on" else "off"}." }
-            }
-        }
-        if (Regex("^lock( the)?( phone| screen)?$").containsMatchIn(q))
-            return Action("Lock the phone", "Locks the screen now.") { _ ->
-                if (LuncherAccessibility.perform(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)) "Locked." else "Turn on the launcher's gesture helper (Accessibility) so I can lock the phone." }
-        Regex("(?:alarm|wake me)(?: up)?(?: for| at)? (\\d{1,2})(?::(\\d{2}))? ?(am|pm)?").find(q)?.let { m ->
-            var hr = m.groupValues[1].toInt(); val mn = m.groupValues[2].toIntOrNull() ?: 0
-            if (m.groupValues[3] == "pm" && hr < 12) hr += 12; if (m.groupValues[3] == "am" && hr == 12) hr = 0
-            return Action("Alarm ${"%d:%02d".format(hr, mn)}", "Sets an alarm in your Clock app.") { a ->
-                runCatching { a.startActivity(Intent(android.provider.AlarmClock.ACTION_SET_ALARM).putExtra(android.provider.AlarmClock.EXTRA_HOUR, hr)
-                    .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, mn).putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Gilbert")) }
-                "Alarm set for ${"%d:%02d".format(hr, mn)}."
-            }
-        }
-        Regex("timer (?:for )?(\\d+) ?(sec|second|min|minute|hour|hr)").find(q)?.let { m ->
-            val n = m.groupValues[1].toInt(); val secs = when { m.groupValues[2].startsWith("h") -> n * 3600; m.groupValues[2].startsWith("m") -> n * 60; else -> n }
-            return Action("Timer ${m.groupValues[1]} ${m.groupValues[2]}", "Starts a timer in your Clock app.") { a ->
-                runCatching { a.startActivity(Intent(android.provider.AlarmClock.ACTION_SET_TIMER).putExtra(android.provider.AlarmClock.EXTRA_LENGTH, secs)
-                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)) }; "Timer started."
-            }
-        }
-        Regex("^call (.+)$").find(q)?.let { m ->
-            val who = m.groupValues[1].trim()
-            val num = contactNumber(ctx, who)
-            return Action("Call ${who.replaceFirstChar { it.uppercase() }}", if (num != null) "Opens the dialer with $num — you press call." else "I couldn't find that contact — I'll open the dialer.") { a ->
-                runCatching { a.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:${num ?: ""}"))) }; "Dialer open."
-            }
-        }
-        Regex("^(?:search|google|look up)(?: for)? (.+)$").find(q)?.let { m ->
-            return Action("Search “${m.groupValues[1]}”", "Opens a web search.") { a ->
-                runCatching { a.startActivity(Intent(Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, m.groupValues[1])) }; "Searching."
-            }
-        }
-        Regex("^(?:remember|save note|note|take a note)(?: that)?\\s*[: ]\\s*(\\S.+)$").find(q)?.let { m ->
-            return Action("Save a note", m.groupValues[1]) { a -> GilbertMemory.addFact(a, m.groupValues[1]); "Saved, ${GilbertNarrator.ownerName(a) ?: "John"}." }
-        }
-        // Settings pages
-        val pages = linkedMapOf("wi-?fi|internet" to android.provider.Settings.ACTION_WIFI_SETTINGS, "bluetooth" to android.provider.Settings.ACTION_BLUETOOTH_SETTINGS,
-            "battery" to Intent.ACTION_POWER_USAGE_SUMMARY, "display|screen settings" to android.provider.Settings.ACTION_DISPLAY_SETTINGS,
-            "sound|ringtone" to android.provider.Settings.ACTION_SOUND_SETTINGS, "storage" to android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS,
-            "location|gps" to android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS, "hotspot|mobile data|data" to android.provider.Settings.ACTION_WIRELESS_SETTINGS)
-        if (q.startsWith("open") || q.contains("settings")) {
-            if (Regex("launcher settings|your settings|gilbert settings|^settings$|^open settings$").containsMatchIn(q))
-                return Action("Open launcher settings", "Every switch in the launcher.") { a -> a.startActivity(Intent(a, SettingsActivity::class.java)); "Settings open." }
-            for ((re, act) in pages) if (Regex(re).containsMatchIn(q))
-                return Action("Open ${re.split("|").first().replace("-?", "-").replaceFirstChar { it.uppercase() }} settings", "Phone settings page.") { a ->
-                    runCatching { a.startActivity(Intent(act)) }; "Opened." }
-        }
-        // ---- launcher settings
-        val sizeM = Regex("^(?:set|change|make)? ?(.+?) (?:to|=) (\\d{1,4})%?$").find(q)
-        if (sizeM != null) findProp(sizeM.groupValues[1], Integer.TYPE)?.let { p ->
-            val v = sizeM.groupValues[2].toInt()
-            return Action("${p.label.replaceFirstChar { it.uppercase() }} → $v", "Was ${get(s, p)}.") { a -> set(Settings(a), p, v); "${p.label.replaceFirstChar { it.uppercase() }} set to $v." }
-        }
-        val styleM = Regex("^(?:set|change|make|switch)? ?(?:the )?(.+?) (?:to|into|=) ([a-z ]+)$").find(q)
-        if (styleM != null) {
-            val target = styleM.groupValues[2].trim().replace("android", "stack").replace("a-z", "list")
-            findProp(styleM.groupValues[1], String::class.java)?.let { p ->
-                val opt = OPTIONS[p.name]?.firstOrNull { it == target || target.startsWith(it) || it.startsWith(target) }
-                if (opt != null) return Action("${p.label.replaceFirstChar { it.uppercase() }} → $opt", "Was ${get(s, p)}.") { a -> set(Settings(a), p, opt); "${p.label.replaceFirstChar { it.uppercase() }} is now $opt." }
-                return Action("I can set ${p.label} to: ${OPTIONS[p.name]?.joinToString()}", "Say one of those.", needsOk = false) { "" }
-            }
-        }
-        val on = onWords.containsMatchIn(q); val off = offWords.containsMatchIn(q); val toggle = q.startsWith("toggle")
-        if (on || off || toggle || q.endsWith(" on") || q.endsWith(" off")) {
-            val what = q.replace(onWords, "").replace(offWords, "").removePrefix("toggle").removeSuffix(" on").removeSuffix(" off").trim()
-            findProp(what, java.lang.Boolean.TYPE)?.let { p ->
-                val cur = get(s, p) as? Boolean ?: false
-                val v = when { toggle -> !cur; off || q.endsWith(" off") -> false; else -> true }
-                if (cur == v && !toggle) return Action("${p.label.replaceFirstChar { it.uppercase() }} is already ${if (v) "on" else "off"}", "", needsOk = false) { "" }
-                return Action("Turn ${if (v) "on" else "off"} ${p.label}", "Launcher setting.") { a -> set(Settings(a), p, v); "${p.label.replaceFirstChar { it.uppercase() }} ${if (v) "on" else "off"}." }
-            }
-        }
-        // ---- apps
-        Regex("^(?:open|launch|start|go to|run) (.+)$").find(q)?.let { m ->
-            val name = m.groupValues[1].removePrefix("the ").removeSuffix(" app").trim()
-            appFor(ctx, name)?.let { (pkg, label) ->
-                return Action("Open $label", "Launches the app.") { a -> a.packageManager.getLaunchIntentForPackage(pkg)?.let { a.startActivity(it) }; "Opening $label." }
-            }
-        }
-        return null
     }
 
     private fun appFor(ctx: Context, name: String): Pair<String, String>? = runCatching {

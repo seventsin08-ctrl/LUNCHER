@@ -291,13 +291,18 @@ object GilbertConsole {
         (a.getSystemService(android.view.inputmethod.InputMethodManager::class.java))?.hideSoftInputFromWindow(cmdInput?.windowToken, 0)
         type("> ${t.uppercase()}")
         GilbertMind.feel(a, "curious", 0.05f)
-        // Moving around his own console needs no permission.
-        val low = t.lowercase()
-        wins.indexOfFirst { w -> low.matches(Regex("(?:go to |show |open )(?:the )?(?:${w.tab.lowercase()}|${w.prog.lowercase()}|win ${w.num})(?: window)?")) }
-            .takeIf { it >= 0 }?.let { select(it); return }
-        if (low == "help" || low.contains("what can you do")) { select(7); GilbertNarrator.say(a, "Here's what I can do. Everything waits for your permission."); return }
-        if (Regex("^(gilbert|hey gilbert|system online)[,.!]?$").matches(low)) { GilbertNarrator.say(a, "Listening, John."); return }
-        val action = runCatching { GilbertControl.parse(a, t) }.getOrNull()
+        val intent = runCatching { GilbertIntent.parse(t) }.getOrNull()
+        when (intent?.kind) {
+            GilbertIntent.Kind.HELLO -> { GilbertNarrator.say(a, listOf("Listening, John.", "Yes, ${GilbertNarrator.title(a)}?", "Here.").random()); return }
+            GilbertIntent.Kind.BYE -> { if (convo) stopConversation(say = true) else GilbertNarrator.say(a, listOf("Anytime.", "Standing by.", "Of course.").random()); return }
+            GilbertIntent.Kind.HELP -> { select(7); GilbertNarrator.say(a, "Here's what I can do. Just say it."); return }
+            GilbertIntent.Kind.WINDOW -> {
+                val idx = mapOf("mind" to 0, "now" to 1, "summary" to 2, "chats" to 3, "names" to 4, "notes" to 5, "files" to 6, "system" to 7)[intent.text] ?: 0
+                select(idx); return
+            }
+            else -> {}
+        }
+        val action = intent?.let { runCatching { GilbertControl.action(a, it) }.getOrNull() }
         if (action == null) { think(t); return }
         if (!action.needsOk) { GilbertNarrator.say(a, action.title + "."); type(action.title.uppercase()); return }
         // You asked for it, so he just does it (his own suggestions still wait for Allow).

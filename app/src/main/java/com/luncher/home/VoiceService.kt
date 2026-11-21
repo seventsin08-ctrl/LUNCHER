@@ -67,15 +67,7 @@ class VoiceService : Service() {
 
         /** "System online" — forgiving of how the recogniser spells it (sistem on line, systems online…). */
         private val WAKE_RE = Regex("(?:s[iy]st[ae]ms?'?s?|sister|cistern)\\s*(?:is\\s*)?(?:on\\s*-?\\s*l[iy]ne?|online|onlin|on lie|on lion|on time)")
-        fun wakeIn(t: String): Pair<Boolean, String?> {
-            Regex("\\b(?:hey|hi|okay|ok) gilbert\\b").find(t)?.let { return true to t.substring(it.range.last + 1).trim(' ', ',', '.') }
-            val m = WAKE_RE.find(t)
-            if (m != null) return true to t.substring(m.range.last + 1).trim(' ', ',', '.')
-            // Heard only the end ("online") right after it started listening — still count it.
-            val w = t.trim().split(Regex("\\s+"))
-            if (w.size <= 4 && (w.firstOrNull() == "online" || t.startsWith("on line"))) return true to t.substringAfter("line").trim(' ', ',', '.')
-            return false to null
-        }
+        fun wakeIn(t: String): Pair<Boolean, String?> = GilbertIntent.wake(t).let { (it != null) to it }
 
         fun hasMic(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
