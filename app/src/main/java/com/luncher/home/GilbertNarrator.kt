@@ -31,6 +31,9 @@ object GilbertNarrator {
     private var n = 0
     /** Told (main thread) when he starts / stops talking: the line, or null when quiet. */
     var onSpeaking: ((String?) -> Unit)? = null
+    /** Live loudness of his voice 0..1 (−1 when it can't be measured — the HUD then fakes it). */
+    @Volatile var level = -1f
+    private var viz: android.media.audiofx.Visualizer? = null
 
     fun start(ctx: Context) {
         if (tts != null) return
@@ -142,8 +145,25 @@ object GilbertNarrator {
             mp.attachAuxEffect(rv.id); mp.setAuxEffectSendLevel(0.55f)
         }
         player = mp
-        mp.setOnCompletionListener { it.release(); f.delete(); if (player === it) player = null; busy = false; next() }
-        mp.setOnErrorListener { p, _, _ -> p.release(); f.delete(); player = null; busy = false; next(); true }
+        // Measure his real voice for the HUD (needs the microphone permission; otherwise it's simulated).
+        runCatching {
+            viz?.release()
+            viz = android.media.audiofx.Visualizer(mp.audioSessionId).apply {
+                captureSize = android.media.audiofx.Visualizer.getCaptureSizeRange()[0].coerceAtLeast(128)
+                setDataCaptureListener(object : android.media.audiofx.Visualizer.OnDataCaptureListener {
+                    override fun onWaveFormDataCapture(v: android.media.audiofx.Visualizer?, w: ByteArray?, rate: Int) {
+                        if (w == null) return
+                        var sum = 0.0; for (b in w) { val x = (b.toInt() and 0xFF) - 128; sum += x * x }
+                        level = (kotlin.math.sqrt(sum / w.size) / 40.0).toFloat().coerceIn(0f, 1f)
+                    }
+                    override fun onFftDataCapture(v: android.media.audiofx.Visualizer?, fft: ByteArray?, rate: Int) {}
+                }, android.media.audiofx.Visualizer.getMaxCaptureRate() / 2, true, false)
+                enabled = true
+            }
+        }.onFailure { viz = null; level = -1f }
+        fun endViz() { runCatching { viz?.release() }; viz = null; level = -1f }
+        mp.setOnCompletionListener { endViz(); it.release(); f.delete(); if (player === it) player = null; busy = false; next() }
+        mp.setOnErrorListener { p, _, _ -> endViz(); p.release(); f.delete(); player = null; busy = false; next(); true }
         onSpeaking?.invoke(line)
         mp.start()
     }

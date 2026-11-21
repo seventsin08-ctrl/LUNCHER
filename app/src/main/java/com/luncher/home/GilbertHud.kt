@@ -67,6 +67,84 @@ class HudRings(ctx: Context) : HudAnimView(ctx) {
     /** 0 → 1 start-up progress. */
     var boot = 1f; set(v) { field = v; invalidate() }
     private var pingT = -10f
+    /** He's speaking (set by the console). */
+    var talking = false
+    /** "jarvis" (voice waveform ring) or "vision" (glowing Mind-Stone gem). */
+    var talkStyle = "jarvis"
+    private var lvl = 0f       // smoothed voice level 0..1
+    private var talkK = 0f     // fades the speaking visuals in/out
+    private val gemPath = android.graphics.Path()
+    private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** How loud he is right now: the real audio when available, otherwise a speech-like rhythm. */
+    private fun voiceLevel(): Float {
+        if (!talking) return 0f
+        val real = GilbertNarrator.level
+        if (real >= 0f) return real
+        val syll = kotlin.math.abs(sin(t * 9.3f)) * (0.55f + 0.45f * kotlin.math.abs(sin(t * 3.1f + 1f)))
+        val pause = if (sin(t * 0.9f) > 0.85f) 0.2f else 1f
+        return (0.25f + 0.75f * syll) * pause
+    }
+
+    private fun drawJarvis(c: Canvas, cx: Float, cy: Float, R: Float, k: Float) {
+        val col = Hud.CYAN
+        // Radial voice bars all around the globe.
+        val n = 96
+        val r0 = R * 0.66f
+        p.strokeCap = Paint.Cap.ROUND; p.strokeWidth = d * 1.6f
+        for (i in 0 until n) {
+            val a = (i * 2 * PI / n + t * 0.4).toFloat()
+            val wobble = 0.5f + 0.5f * sin(i * 0.61f + t * 11f) * sin(i * 0.23f - t * 6f)
+            val len = R * (0.02f + 0.20f * lvl * wobble) * k
+            p.color = Hud.a(if (i % 6 == 0) Color.WHITE else col, (120 + 135 * lvl * k).toInt())
+            c.drawLine(cx + r0 * cos(a), cy + r0 * sin(a), cx + (r0 + len) * cos(a), cy + (r0 + len) * sin(a), p)
+        }
+        p.strokeCap = Paint.Cap.BUTT
+        // A wavy voice circle just inside.
+        gemPath.reset()
+        val rw = R * 0.6f
+        for (i in 0..120) {
+            val a = (i * 2 * PI / 120).toFloat()
+            val rr = rw + R * 0.035f * lvl * k * (sin(a * 7f + t * 14f) + 0.6f * sin(a * 13f - t * 9f))
+            val x = cx + rr * cos(a); val y = cy + rr * sin(a)
+            if (i == 0) gemPath.moveTo(x, y) else gemPath.lineTo(x, y)
+        }
+        p.strokeWidth = d * 1.2f; p.color = Hud.a(Color.WHITE, (90 + 120 * lvl * k).toInt())
+        c.drawPath(gemPath, p)
+    }
+
+    private fun drawVision(c: Canvas, cx: Float, cy: Float, R: Float, k: Float) {
+        val gold = 0xFFFFC53D.toInt(); val amber = 0xFFFF8A00.toInt()
+        val s = R * (0.2f + 0.05f * lvl) * k
+        // Glow behind the stone.
+        val gr = R * (0.45f + 0.35f * lvl) * k
+        if (gr > 1f) {
+            glow.shader = android.graphics.RadialGradient(cx, cy, gr, intArrayOf(Hud.a(gold, (150 * k).toInt()), Hud.a(amber, (60 * k).toInt()), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.45f, 1f), android.graphics.Shader.TileMode.CLAMP)
+            c.drawCircle(cx, cy, gr, glow)
+        }
+        // Light rays.
+        p.strokeWidth = d * 1f
+        for (i in 0 until 16) {
+            val a = (i * 2 * PI / 16 + t * 0.25).toFloat()
+            val len = R * (0.15f + 0.25f * lvl * (0.5f + 0.5f * sin(i * 1.7f + t * 8f))) * k
+            p.color = Hud.a(gold, (70 + 120 * lvl * k).toInt())
+            c.drawLine(cx + s * 1.3f * cos(a), cy + s * 1.3f * sin(a), cx + (s * 1.3f + len) * cos(a), cy + (s * 1.3f + len) * sin(a), p)
+        }
+        // The gem: an elongated hexagon with facets.
+        val pts = listOf(0f to -1.25f, 0.8f to -0.45f, 0.8f to 0.45f, 0f to 1.25f, -0.8f to 0.45f, -0.8f to -0.45f)
+        gemPath.reset()
+        pts.forEachIndexed { i, (x, y) -> if (i == 0) gemPath.moveTo(cx + x * s, cy + y * s) else gemPath.lineTo(cx + x * s, cy + y * s) }
+        gemPath.close()
+        f.shader = LinearGradient(cx, cy - s * 1.25f, cx, cy + s * 1.25f, intArrayOf(0xFFFFF3B0.toInt(), gold, amber), null, Shader.TileMode.CLAMP)
+        f.alpha = (255 * k).toInt(); c.drawPath(gemPath, f); f.shader = null
+        p.color = Hud.a(0xFFFFF8DC.toInt(), (200 * k).toInt()); p.strokeWidth = d * 0.9f
+        for ((x, y) in pts) c.drawLine(cx, cy, cx + x * s, cy + y * s, p)
+        c.drawPath(gemPath, p)
+        // Inner light pulses with his voice.
+        f.color = Hud.a(Color.WHITE, ((90 + 165 * lvl) * k).toInt())
+        c.drawCircle(cx, cy - s * 0.1f, s * (0.18f + 0.22f * lvl), f)
+    }
 
     fun startBoot(ms: Long = 1100) {
         ValueAnimator.ofFloat(0f, 1f).apply {
@@ -90,7 +168,7 @@ class HudRings(ctx: Context) : HudAnimView(ctx) {
             val prog = seg(b, i * 0.12f, 0.5f + i * 0.12f)
             if (prog <= 0f) return@forEachIndexed
             r.set(cx - rr, cy - rr, cx + rr, cy + rr)
-            val rot = (t * (if (i % 2 == 0) 14f else -20f) * (1f + i * 0.3f)) % 360f
+            val rot = (t * (if (i % 2 == 0) 14f else -20f) * (1f + i * 0.3f) * (1f + talkK * (1.5f + 2f * lvl))) % 360f
             p.strokeWidth = if (i == 3) d * 1.4f else d * 0.8f
             p.color = if (i == 3) Hud.a(Color.WHITE, 230) else Hud.a(Color.WHITE, 70 + i * 25)
             c.drawArc(r, rot - 90f, 360f * prog, false, p)
@@ -152,6 +230,11 @@ class HudRings(ctx: Context) : HudAnimView(ctx) {
                 c.drawRect(minOf(x0, x0 + side * d * 10f), cy + R * 0.92f - d * 2.5f, maxOf(x0, x0 + side * d * 10f), cy + R * 0.92f, f)
             }
         }
+        // --- speaking: JARVIS voice ring or Vision's Mind Stone
+        lvl += (voiceLevel() - lvl) * 0.35f
+        talkK += ((if (talking) 1f else 0f) - talkK) * 0.12f
+        if (talkK > 0.02f) { if (talkStyle == "vision") drawVision(c, cx, cy, R, talkK) else drawJarvis(c, cx, cy, R, talkK) }
+
         // --- ping: a ring flies out
         val pt = t - pingT
         if (pt in 0f..1.2f) {

@@ -32,7 +32,7 @@ object GilbertControl {
         "pageEffect" to "page transition swipe effect", "animSpeed" to "animation speed", "launchAnim" to "app opening animation",
         "dockStyle" to "dock style", "libraryStyle" to "library style", "musicStyle" to "player style music style",
         "notifStyle" to "notification style", "islandStyle" to "island style", "gilbertFace" to "face style",
-        "gilbertTitle" to "call me", "iconSize" to "icon size", "columns" to "columns", "rows" to "rows",
+        "gilbertTitle" to "call me", "gilbertTalkStyle" to "talk style speaking style look when talking mode", "iconSize" to "icon size", "columns" to "columns", "rows" to "rows",
         "islandScale" to "island size", "dim" to "wallpaper dim", "soundFxVolume" to "effects volume", "labelSize" to "label size",
         "iconCorner" to "icon corners", "dockIconPct" to "dock icon size", "sidebarCols" to "sidebar columns")
     /** Choices for style settings. */
@@ -45,7 +45,8 @@ object GilbertControl {
         "notifStyle" to listOf("launcher", "original", "both"),
         "islandStyle" to listOf("black", "glass", "outline", "color"),
         "gilbertFace" to listOf("orb", "classic", "happy", "dots", "sleepy"),
-        "gilbertTitle" to listOf("auto", "sir", "boss", "name"))
+        "gilbertTitle" to listOf("auto", "sir", "boss", "name"),
+        "gilbertTalkStyle" to listOf("jarvis", "vision"))
     private val SKIP = Regex("(Dx|Dy|Y|X|Seen|Shown|Uri|Color|Order|order|Apps|apps|hidden|pending|Pinned|Placement|Nudge|Angle|Mode)$")
 
     private fun words(s: String) = s.replace(Regex("([a-z])([A-Z])"), "$1 $2").lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 1 }.toSet()

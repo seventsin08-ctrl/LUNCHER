@@ -256,6 +256,10 @@ object GilbertConsole {
         GilbertNarrator.onSpeaking = { line ->
             if (line != null) { face?.react("listening", 60_000); type(line.uppercase()) }
             else face?.react("happy", 600)
+            // JARVIS / Vision speaking visuals.
+            rings?.talking = line != null
+            rings?.talkStyle = Settings(a).gilbertTalkStyle
+            if (Settings(a).gilbertTalkStyle == "vision") face?.animate()?.alpha(if (line != null) 0.3f else 1f)?.setDuration(300)?.start()
             updateMute()
         }
         updateMute()
@@ -1597,6 +1601,20 @@ object GilbertConsole {
         val hb = box(p, 2)
         GilbertControl.HELP.forEach { h -> hb.addView(TextView(a).apply { text = "› $h"; textSize = 12f; setTextColor(0xCCFFFFFF.toInt()); setPadding(0, dp(3), 0, dp(3)) }) }
         hb.addView(TextView(a).apply { text = "What you ask for, I do right away. My own suggestions still wait for your Allow."; textSize = 11f; setTextColor(Hud.a(Hud.SOFT, 200)); setPadding(0, dp(6), 0, 0) })
+
+        section(p, "WHEN HE TALKS")
+        val tb = box(p, 2)
+        val tr = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        tb.addView(tr)
+        for ((k, label) in listOf("jarvis" to "JARVIS · voice ring", "vision" to "VISION · mind stone")) {
+            tr.addView(TextView(a).apply {
+                text = label; textSize = 11f; typeface = monoBold; gravity = Gravity.CENTER
+                val on = s.gilbertTalkStyle == k
+                setTextColor(if (on) Color.BLACK else Hud.CYAN); setPadding(dp(6), dp(9), dp(6), dp(9))
+                background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(if (on) Hud.CYAN else Hud.a(Hud.CYAN, 22)); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 150)) }
+                setOnClickListener { s.gilbertTalkStyle = k; select(7, animate = false); GilbertNarrator.say(a, if (k == "vision") "The stone suits me." else "Back to the classic look.") }
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(6) })
+        }
 
         section(p, "VOICE")
         GilbertNarrator.start(a)

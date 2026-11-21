@@ -491,6 +491,10 @@ class Settings(ctx: Context) {
     var gilbertVoice: String
         get() = p.getString("s_gil_voice_name", "") ?: ""
         set(v) = put("s_gil_voice_name", v)
+    /** What shows while Gilbert talks: "jarvis" (voice ring) or "vision" (Mind Stone). */
+    var gilbertTalkStyle: String
+        get() = p.getString("s_gil_talkstyle", "jarvis") ?: "jarvis"
+        set(v) = put("s_gil_talkstyle", v)
     /** "AI" sound: a soft room echo on his voice, like speakers in a lab. */
     var gilbertEcho: Boolean
         get() = p.getBoolean("s_gil_echo", true)
