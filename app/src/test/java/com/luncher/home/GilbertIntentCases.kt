@@ -113,7 +113,36 @@ object GilbertIntentCases {
         c("open wifi", SETTINGS_PAGE, "wi-fi"), c("open bluetooth", SETTINGS_PAGE, "bluetooth"), c("open the battery settings", SETTINGS_PAGE, "battery"),
         c("go to files", WINDOW, "files"), c("open names", WINDOW, "names"), c("show the summary", WINDOW, "summary"),
         c("Explain recursion with an example", null), c("can you help me price a menu website", null), c("paano gumawa ng for loop", null),
-        c("draft a reply to my client", null), c("is it going to rain", null), c("who is messaging me the most", null)
+        c("draft a reply to my client", null), c("is it going to rain", null), c("who is messaging me the most", null),
+        // ===== round 5: planner, calendar, email, photos, files
+        c("remind me to submit the report at 5 pm", REMIND, "submit the report"), c("remind me in 10 minutes to check the oven", REMIND, "check the oven"),
+        c("remind me tomorrow at 8 am to call the client", REMIND, "call the client"), c("remind me to drink water", REMIND, "drink water"),
+        c("set a reminder: pay internet bill on friday", REMIND, "pay internet bill"), c("paalalahanan mo ako na mag-review mamayang gabi", REMIND, "mag-review"),
+        c("remind me about the NSTP quiz tomorrow", REMIND, "the nstp quiz"), c("System online, remind me in half an hour to stretch", REMIND, "stretch"),
+        c("show my reminders", REMINDER_LIST), c("reminders", REMINDER_LIST),
+        c("follow up with Jia about the menu tomorrow", FOLLOW_ADD, "jia about the menu"), c("add to follow up: Grain Cafe payment", FOLLOW_ADD, "grain cafe payment"),
+        c("i need to follow up on the DevMart proposal", FOLLOW_ADD, "the devmart proposal"), c("show follow ups", FOLLOW_LIST), c("who do I need to follow up with", FOLLOW_LIST),
+        c("send this to the task", SEND_TO_TASK), c("send this to tasks", SEND_TO_TASK), c("add this to my tasks", SEND_TO_TASK), c("save it as a task", SEND_TO_TASK),
+        c("can you send this to the task", SEND_TO_TASK), c("show it on my screen", SHOW_IT), c("can you show it on my screen", SHOW_IT), c("show me", SHOW_IT),
+        c("create me a task", TASK_ADD, ""), c("I wanna set timer", null), c("set timer", TIMER), c("set a timer", TIMER), c("start a timer", TIMER),
+        c("create me a task: finish the logo", TASK_ADD, "finish the logo"), c("open agenda", AGENDA), c("my day", AGENDA),
+        c("what's on my calendar today", CALENDAR, "today"), c("do I have anything tomorrow", CALENDAR, "tomorrow"), c("show my schedule", CALENDAR, "today"),
+        c("check my calendar for this week", CALENDAR, "week"), c("do I have class today", CALENDAR, "today"),
+        c("add to calendar meeting with client tomorrow at 3 pm", CALENDAR_ADD, "meeting with client"), c("schedule a call with Carlo on friday at 2", CALENDAR_ADD, "call with carlo"),
+        c("check my email", EMAIL_CHECK), c("any new emails?", EMAIL_CHECK), c("read my gmail", EMAIL_CHECK), c("do I have new mail", EMAIL_CHECK),
+        c("email Jia about the menu design", EMAIL_SEND, "jia\u0000the menu design"), c("send an email to my professor", EMAIL_SEND, "my professor\u0000"),
+        c("show my photos", PHOTOS, ""), c("show me my recent pictures", PHOTOS, ""), c("open my screenshots", PHOTOS, "screenshots"), c("show my files", FILES), c("show downloads", FILES),
+        c("open gallery", PHOTOS, ""), c("open gmail", OPEN_APP, "gmail"), c("open calendar", OPEN_APP, "calendar")
+    )
+
+    /** Time parsing: phrase → (inMin, hour, min, day, weekday). */
+    val TIMES = listOf(
+        Triple("in 10 minutes", GilbertIntent.When(inMin = 10), ""), Triple("at 5 pm", GilbertIntent.When(hour = 17), ""),
+        Triple("tomorrow at 8 am", GilbertIntent.When(hour = 8, day = 1), ""), Triple("at 6:30", GilbertIntent.When(hour = 18, min = 30), ""),
+        Triple("tonight at 9", GilbertIntent.When(hour = 21), ""), Triple("in 2 hours", GilbertIntent.When(inMin = 120), ""),
+        Triple("on friday", GilbertIntent.When(weekday = 6), ""), Triple("bukas ng 7 ng umaga", GilbertIntent.When(hour = 7, day = 1), ""),
+        Triple("in half an hour", GilbertIntent.When(inMin = 30), ""), Triple("later", GilbertIntent.When(inMin = 60), ""),
+        Triple("at 12 am", GilbertIntent.When(hour = 0), ""), Triple("this afternoon", GilbertIntent.When(hour = 15), "")
     )
 
     /** What the wake-word listener might hear → should it wake (and what's the command after it)? */

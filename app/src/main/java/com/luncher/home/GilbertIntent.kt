@@ -6,13 +6,62 @@ package com.luncher.home
  * [GilbertControl] turns the result into a real action.
  */
 object GilbertIntent {
-    data class Intent(val kind: Kind, val text: String = "", val on: Boolean? = null, val num: Int? = null, val num2: Int? = null)
+    data class Intent(val kind: Kind, val text: String = "", val on: Boolean? = null, val num: Int? = null, val num2: Int? = null, val at: When? = null)
+
+    /** A time someone said: "in 10 minutes", "at 5 pm", "tomorrow at 8", "on friday". */
+    data class When(val inMin: Int? = null, val hour: Int? = null, val min: Int = 0, val day: Int = 0, val weekday: Int? = null) {
+        val isEmpty get() = inMin == null && hour == null && day == 0 && weekday == null
+    }
 
     enum class Kind {
         HELLO, BYE, HELP, WINDOW,
         TASK_ADD, TASK_LIST, TASK_DONE, NOTE_ADD, NOTE_LIST,
         FLASHLIGHT, VOLUME, BRIGHTNESS, MEDIA, DND, LOCK, ALARM, TIMER, CALL, SEARCH,
-        SETTINGS_PAGE, LAUNCHER_SETTINGS, SET_NUMBER, SET_STYLE, TOGGLE, OPEN_APP
+        SETTINGS_PAGE, LAUNCHER_SETTINGS, SET_NUMBER, SET_STYLE, TOGGLE, OPEN_APP,
+        REMIND, REMINDER_LIST, FOLLOW_ADD, FOLLOW_LIST, SEND_TO_TASK, SHOW_IT,
+        CALENDAR, CALENDAR_ADD, EMAIL_CHECK, EMAIL_SEND, PHOTOS, FILES, AGENDA
+    }
+
+    // ------------------------------------------------------------------ times
+    private val WEEK = listOf("sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday")
+    private val TIME_RE = Regex("\\b(?:at |by |sa |ng )?(\\d{1,2})(?:[:.](\\d{2}))? ?(a\\.?m\\.?|p\\.?m\\.?|am|pm|ng umaga|ng gabi|ng hapon|o'?clock)?\\b")
+
+    /** Find a time in [q]; returns it and [q] with the time words removed. */
+    fun parseWhen(q: String): Pair<When, String> {
+        var rest = " $q "
+        var w = When()
+        Regex("\\b(?:in|after|within|mamaya(?:ng)?|pagkatapos ng) (\\w+|an?|half an?) ?(minutes?|mins?|hours?|hrs?|minuto|oras)\\b").find(rest)?.let { m ->
+            val n = if (m.groupValues[1].startsWith("half")) 30 else (m.groupValues[1].toIntOrNull() ?: mapOf("a" to 1, "an" to 1, "one" to 1, "two" to 2, "three" to 3, "five" to 5, "ten" to 10, "fifteen" to 15, "twenty" to 20, "thirty" to 30, "isa" to 1, "dalawa" to 2)[m.groupValues[1]])
+            if (n != null) {
+                val unitH = m.groupValues[2].startsWith("h") || m.groupValues[2] == "oras"
+                w = w.copy(inMin = if (m.groupValues[1].startsWith("half")) 30 else if (unitH) n * 60 else n)
+                rest = rest.replace(m.value, " ")
+            }
+        }
+        if (Regex("\\b(?:tomorrow|bukas)\\b").containsMatchIn(rest)) { w = w.copy(day = 1); rest = rest.replace(Regex("\\b(?:tomorrow|bukas)\\b"), " ") }
+        Regex("\\b(?:on |this |next |sa )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\\b").find(rest)?.let { m ->
+            w = w.copy(weekday = WEEK.indexOf(m.groupValues[1]) + 1); rest = rest.replace(m.value, " ")
+        }
+        when {
+            Regex("\\b(?:tonight|mamayang gabi)\\b").containsMatchIn(rest) -> { w = w.copy(hour = 20); rest = rest.replace(Regex("\\b(?:tonight|mamayang gabi)\\b"), " ") }
+            Regex("\\bthis (?:afternoon)\\b|\\bmamayang hapon\\b").containsMatchIn(rest) -> { w = w.copy(hour = 15); rest = rest.replace(Regex("\\bthis afternoon\\b|\\bmamayang hapon\\b"), " ") }
+            Regex("\\b(?:this )?morning\\b").containsMatchIn(rest) -> { w = w.copy(hour = 8); rest = rest.replace(Regex("\\b(?:this |in the )?morning\\b"), " ") }
+            Regex("\\b(?:this )?evening\\b").containsMatchIn(rest) -> { w = w.copy(hour = 19); rest = rest.replace(Regex("\\b(?:this |in the )?evening\\b"), " ") }
+        }
+        if (w.inMin == null) TIME_RE.findAll(rest).firstOrNull { m ->
+            val suffix = m.groupValues[3]; val hasAt = m.value.trimStart().let { it.startsWith("at ") || it.startsWith("by ") || it.startsWith("sa ") || it.startsWith("ng ") }
+            (suffix.isNotEmpty() || hasAt || m.groupValues[2].isNotEmpty()) && (m.groupValues[1].toIntOrNull() ?: 99) in 0..23
+        }?.let { m ->
+            var h = m.groupValues[1].toInt(); val mn = m.groupValues[2].toIntOrNull() ?: 0
+            val ap = m.groupValues[3].replace(".", "")
+            if ((ap == "pm" || ap.contains("gabi") || ap.contains("hapon")) && h < 12) h += 12
+            if (ap == "am" && h == 12) h = 0
+            if (ap.isEmpty() && !ap.contains("o") && h in 1..6 && w.hour == null) h += 12   // "at 5" usually means 5 pm
+            if (w.hour != null && w.hour!! >= 12 && h < 12) h += 12                           // "tonight at 8"
+            w = w.copy(hour = h, min = mn); rest = rest.replace(m.value, " ")
+        }
+        if (w.inMin == null && w.hour == null && Regex("\\b(?:later|mamaya)\\b").containsMatchIn(rest)) { w = w.copy(inMin = 60); rest = rest.replace(Regex("\\b(?:later|mamaya)\\b"), " ") }
+        return w to rest.replace(Regex("\\s+"), " ").trim(' ', ',', '.')
     }
 
     // ------------------------------------------------------------------ clean up what was heard
@@ -70,13 +119,50 @@ object GilbertIntent {
         if (Regex("^(?:that'?s all|that is all|goodbye|bye|good ?night|stop listening|never ?mind|nothing|salamat|thanks?|thank you|wala na|ok na)$").matches(q)) return Intent(Kind.BYE)
         if (Regex("^(?:hi|hello|hey|yo|you there|are you there|gilbert|good (?:morning|afternoon|evening))$").matches(q)) return Intent(Kind.HELLO)
         if (Regex("^(?:help|help me|what can you do|what do you do|commands|ano(?:ng)? (?:kaya|magagawa)(?: mo)?)$").matches(q)) return Intent(Kind.HELP)
+        // ---- planner: reminders, follow-ups, "send this to tasks", "show it"
+        if (Regex("^(?:(?:show|list|read|what are)(?: me)?(?: my)? reminders|(?:my )?reminders|mga paalala ko)$").matches(q)) return Intent(Kind.REMINDER_LIST)
+        Regex("^(?:remind me|set (?:a )?reminder|reminder|paalalahanan mo ako|ipaalala mo|ipaalala)\\b(?: (?:to|na|that|about|ng|sa|for)\\b)?\\s*[:,-]?\\s*(.*)$").find(q)?.let { m ->
+            val (w, what0) = parseWhen(m.groupValues[1])
+            val what = what0.replace(Regex("^(?:to|na|that|about|ng|sa|for|i need to)\\s+"), "").replace(Regex("\\s+(?:to|at|on|na)$"), "").trim()
+            return Intent(Kind.REMIND, what.ifEmpty { "your reminder" }, at = w)
+        }
+        if (Regex("^(?:(?:show|list|read|what are)(?: me)?(?: my)? reminders|(?:my )?reminders|mga paalala ko)$").matches(q)) return Intent(Kind.REMINDER_LIST)
+        Regex("^(?:follow up(?: with| on)?|follow-up(?: with| on)?|add (?:to )?(?:the )?follow[- ]?ups?|to be followed|i need to follow up(?: with| on)?|i-?follow up(?: si| kay)?)\\s*[:,-]?\\s*(\\S.*)$").find(q)?.let { m ->
+            val (w, what) = parseWhen(m.groupValues[1])
+            return Intent(Kind.FOLLOW_ADD, what, at = w.takeIf { !it.isEmpty })
+        }
+        if (Regex("^(?:(?:show|list|what are)(?: me)?(?: my| the)? follow[- ]?ups?|(?:my )?follow[- ]?ups?|who do i need to follow up(?: with)?|what do i need to follow up(?: on)?|to be followed)$").matches(q)) return Intent(Kind.FOLLOW_LIST)
+        if (Regex("^(?:send|add|save|put|move|make|turn)(?: (?:this|that|it))? (?:to|into|in|as)(?: (?:a|my|the))? (?:task|tasks|to-?do|to-?do list|task list)$|^(?:send|save|add) (?:this|that|it)$|^(?:i-?save|isave) (?:mo )?(?:ito|yan)(?: sa tasks?)?$").matches(q)) return Intent(Kind.SEND_TO_TASK)
+        if (Regex("^(?:show (?:it|this|that|me)(?: on (?:my|the) screen)?|show it to me|put it on (?:my|the) screen|display it|ipakita mo|ipakita)$").matches(q)) return Intent(Kind.SHOW_IT)
+        if (Regex("^(?:(?:show|open)(?: me)?(?: my| the)? )?(?:agenda|planner|plan for today|my day)$").matches(q)) return Intent(Kind.AGENDA)
+        // ---- calendar
+        Regex("^(?:add|put|schedule|create|book|set)(?: an?)?(?: (?:event|meeting|appointment))?(?: to| on| in)? (?:my |the )?calendar\\s*[:,-]?\\s*(.*)$|^(?:schedule|book) (?:an? )?(.+)$").find(q)?.let { m ->
+            val body = m.groupValues[1].ifEmpty { m.groupValues[2] }
+            val (w, what) = parseWhen(body)
+            if (what.isNotEmpty() || !w.isEmpty) return Intent(Kind.CALENDAR_ADD, what.replace(Regex("^(?:a |an |for |to )"), "").ifEmpty { "Event" }, at = w)
+        }
+        if (Regex("\\b(?:calendar|schedule|events?|iskedyul)\\b").containsMatchIn(q) && Regex("^(?:what|what's|whats|show|check|read|do i have|any|my|ano|anong)").containsMatchIn(q) ||
+            Regex("^(?:do i have (?:anything|any plans|class|classes|meetings?)|what do i have|anything (?:today|tomorrow))").containsMatchIn(q)) {
+            return Intent(Kind.CALENDAR, if (Regex("\\b(?:tomorrow|bukas)\\b").containsMatchIn(q)) "tomorrow" else if (Regex("\\bweek\\b").containsMatchIn(q)) "week" else "today")
+        }
+        // ---- email
+        if (Regex("\\b(?:e-?mails?|gmail|inbox|mail)\\b").containsMatchIn(q) && Regex("^(?:check|read|any|do i have|show|what|what's|whats|new|summarize|i-?check)").containsMatchIn(q)) return Intent(Kind.EMAIL_CHECK)
+        Regex("^(?:send (?:an )?e-?mail to|e-?mail|write (?:an )?e-?mail to|mag-?email kay) ([^,]+?)(?:\\s+(?:about|saying|that|re|regarding|tungkol sa)\\s+(.+))?$").find(q)?.let { m ->
+            return Intent(Kind.EMAIL_SEND, m.groupValues[1].trim() + "\u0000" + m.groupValues[2].trim())
+        }
+        // ---- photos & files
+        if (Regex("^(?:show|open|find|see|view|ipakita)(?: me)?(?: my| the| mga)? (?:recent |latest |last )?(?:photos?|pictures?|pics|images?|screenshots?|gallery|litrato)(?: ko)?$").matches(q)) return Intent(Kind.PHOTOS, if (q.contains("screenshot")) "screenshots" else "")
+        if (Regex("^(?:show|open|find|see|list)(?: me)?(?: (?:my|the))? (?:recent |latest )?(?:downloads|documents|docs)$|^(?:show|open|find|see|list)(?: me)? my (?:recent |latest )?files$").matches(q)) return Intent(Kind.FILES)
+
         if (Regex("^(?:show|list|read)(?: me)?(?: my)? notes$").matches(q)) return Intent(Kind.NOTE_LIST)
         Regex("^(?:go to|show|open|switch to|pumunta sa)(?: the)? (mind|now|summary|chats?|names|notes|files|system|updates)(?: window| tab)?$").find(q)?.let {
             return Intent(Kind.WINDOW, it.groupValues[1].removeSuffix("s").let { w -> if (w == "chat") "chats" else if (w == "note") "notes" else if (w == "file") "files" else if (w == "name") "names" else if (w == "update") "mind" else w })
         }
 
         // ---- tasks & notes
-        Regex("^(?:add|new|create|make|dagdag|idagdag|lagay)(?: a| ng| ang)? (?:task|to[- ]?do|gawain)(?: list)?(?:\\s*(?:[:,-]|to|that|na)\\s*|\\s+)(\\S.*)$").find(q)?.let { m ->
+        if (Regex("^(?:create|add|make|new|gawa)(?: me| ng)?(?: a| an)?(?: new)? (?:task|to-?do)$").matches(q)) return Intent(Kind.TASK_ADD, "")
+        if (Regex("^(?:set|start|create|make)(?: me)?(?: a| an)? (?:timer|countdown)$|^timer$").matches(q)) return Intent(Kind.TIMER)
+        Regex("^(?:add|new|create|make|dagdag|idagdag|lagay)(?: me)?(?: a| ng| ang)? (?:task|to[- ]?do|gawain)(?: list)?(?:\\s*(?:[:,-]|to|that|na)\\s*|\\s+)(\\S.*)$").find(q)?.let { m ->
             val orig = Regex("(?:task|to[- ]?do|gawain)(?: list)?\\s*(?:[:,-]|to|that|na)?\\s*", RegexOption.IGNORE_CASE).split(raw, 2).getOrNull(1)?.trim()
             return Intent(Kind.TASK_ADD, (orig?.takeIf { it.isNotEmpty() } ?: m.groupValues[1]).trim(' ', '.', ','))
         }

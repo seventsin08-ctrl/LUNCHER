@@ -194,7 +194,26 @@ object GilbertControl {
             K.OPEN_APP -> appFor(ctx, i.text)?.let { (pkg, label) ->
                 Action("Open $label", "") { a -> a.packageManager.getLaunchIntentForPackage(pkg)?.let { a.startActivity(it) }; "Opening $label." } }
                 ?: Action("I couldn't find “${i.text}” on your phone", "", needsOk = false) { "" }
-            else -> null   // HELLO, BYE, HELP, WINDOW are handled by the console
+            K.REMIND -> { val at = GilbertPlanner.resolve(i.at)
+                Action("Remind: ${i.text}", GilbertPlanner.label(at)) { a ->
+                    GilbertPlanner.remind(a, i.text, at)
+                    "Reminder set for ${GilbertPlanner.label(at)}: ${i.text}." + if (!GilbertPlanner.exactAllowed(a)) " It may ring a minute or two late until you allow exact alarms." else "" } }
+            K.FOLLOW_ADD -> { val at = i.at?.let { GilbertPlanner.resolve(it) }
+                Action("Follow up: ${i.text}", "") { a -> GilbertPlanner.follow(a, i.text, at); "Added to follow-ups${at?.let { " — I'll remind you " + GilbertPlanner.label(it) } ?: ""}." } }
+            K.CALENDAR_ADD -> { val at = GilbertPlanner.resolve(i.at)
+                Action("Calendar: ${i.text}", GilbertPlanner.label(at)) { a ->
+                    runCatching { a.startActivity(Intent(Intent.ACTION_INSERT).setData(android.provider.CalendarContract.Events.CONTENT_URI)
+                        .putExtra(android.provider.CalendarContract.Events.TITLE, cap(i.text))
+                        .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, at)
+                        .putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, at + 3_600_000L)) }
+                    "Calendar's open with “${cap(i.text)}” ${GilbertPlanner.label(at)} — tap Save." } }
+            K.EMAIL_SEND -> { val who = i.text.substringBefore('\u0000'); val about = i.text.substringAfter('\u0000')
+                Action("Email ${cap(who)}", about) { a ->
+                    val addr = GilbertPlanner.emailFor(a, who)
+                    runCatching { a.startActivity(Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:${addr ?: ""}"))
+                        .putExtra(Intent.EXTRA_SUBJECT, cap(about))) }
+                    if (addr != null) "Draft open to ${cap(who)}. Review it and press send." else "Draft open — I couldn't find ${cap(who)}'s email, so add it. Then press send." } }
+            else -> null   // HELLO, BYE, HELP, WINDOW and the on-screen ones are handled by the console
         }
     }
 

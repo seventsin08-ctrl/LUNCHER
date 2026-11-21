@@ -37,6 +37,7 @@ class GilbertChatActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         picking = false
+        if (requestCode == GilbertConsole.REQ_CAL) { GilbertConsole.refresh(); window.decorView.postDelayed({ GilbertConsole.refresh() }, 600) }
         if (requestCode == GilbertConsole.REQ_MIC) {
             val ok = VoiceService.hasMic(this)
             if (!ok) Settings(this).voiceOn = false

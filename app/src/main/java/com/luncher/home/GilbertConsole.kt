@@ -18,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import kotlin.math.roundToInt
+import com.luncher.home.GilbertIntent.Kind as K
 
 /**
  * Gilbert's console (HUD). He doesn't chat — he gives you data, split into windows. Each window is
@@ -164,7 +165,8 @@ object GilbertConsole {
             Win("04", "PEOPLE.IDX", "NAMES") { buildNames(it) },
             Win("05", "NOTES", "NOTES") { buildNotes(it) },
             Win("06", "SCAN", "FILES") { buildFiles(it) },
-            Win("07", "SYSTEM", "SYSTEM") { buildSystem(it, s) })
+            Win("07", "SYSTEM", "SYSTEM") { buildSystem(it, s) },
+            Win("08", "AGENDA", "AGENDA") { buildAgenda(it) })
 
         // ---- Window tabs (HUD labels)
         tabs = ArrayList()
@@ -291,7 +293,62 @@ object GilbertConsole {
         (a.getSystemService(android.view.inputmethod.InputMethodManager::class.java))?.hideSoftInputFromWindow(cmdInput?.windowToken, 0)
         type("> ${t.uppercase()}")
         GilbertMind.feel(a, "curious", 0.05f)
+        // Answering his question ("What's the task?" / "For how long?")?
+        when (asking) {
+            "task" -> { asking = null; if (GilbertIntent.parse(t)?.kind !in setOf(GilbertIntent.Kind.BYE, GilbertIntent.Kind.HELLO)) { command("add task: $t"); return } }
+            "timer" -> { asking = null; val ti = GilbertIntent.parse("timer $t"); if (ti?.num != null) { command("timer $t"); return } }
+            "remind" -> { asking = null; command("remind me $t"); return }
+        }
         val intent = runCatching { GilbertIntent.parse(t) }.getOrNull()
+        when (intent?.kind) {
+            K.TASK_ADD -> if (intent.text.isBlank()) { asking = "task"; GilbertNarrator.say(a, "What's the task, ${GilbertNarrator.title(a)}?"); type("WHAT'S THE TASK?"); return }
+            K.TIMER -> if (intent.num == null) { asking = "timer"; GilbertNarrator.say(a, "For how long?"); type("FOR HOW LONG?"); return }
+            K.REMIND -> if (intent.text == "your reminder") { asking = "remind"; GilbertNarrator.say(a, "Remind you about what, and when?"); type("ABOUT WHAT, AND WHEN?"); return }
+            K.SEND_TO_TASK -> {
+                val r = lastReply
+                if (r == null) GilbertNarrator.say(a, "There's nothing on screen to send yet.")
+                else {
+                    val title = r.second.lineSequence().map { it.trim().trimStart('•', '-', '*', ' ') }.firstOrNull { it.length > 2 }?.take(140) ?: r.first
+                    val id = GilbertTasks.add(a, title); GilbertMind.log(a, "Sent to tasks: $title — you asked")
+                    GilbertNarrator.say(a, "Sent to tasks as task $id."); type("TASK $id · ${title.uppercase().take(50)}")
+                }
+                return
+            }
+            K.SHOW_IT -> { lastReply?.let { (h, m) -> reply(h, m); GilbertNarrator.say(a, "On screen.") } ?: run { select(8); GilbertNarrator.say(a, "Here's your agenda.") }; return }
+            K.AGENDA -> { select(8); GilbertNarrator.say(a, agendaLine()); return }
+            K.REMINDER_LIST, K.FOLLOW_LIST -> { select(8); GilbertNarrator.say(a, if (intent.kind == K.REMINDER_LIST)
+                GilbertPlanner.reminders(a).let { r -> if (r.isEmpty()) "No reminders set." else "${GilbertNarrator.plural(r.size, "reminder")}. Next: ${r.first().text}, ${GilbertPlanner.label(r.first().at)}." }
+                else GilbertPlanner.follows(a).let { f -> if (f.isEmpty()) "Nothing to follow up." else "${GilbertNarrator.plural(f.size, "follow-up")}. First: ${f.first().text}." }); return }
+            K.CALENDAR -> {
+                if (!GilbertPlanner.calendarAllowed(a)) { askPerm(android.Manifest.permission.READ_CALENDAR, "I need access to your calendar for that."); return }
+                val ev = GilbertPlanner.events(a, intent.text)
+                val when_ = when (intent.text) { "tomorrow" -> "tomorrow"; "week" -> "this week"; else -> "today" }
+                if (ev.isEmpty()) GilbertNarrator.say(a, "Nothing on your calendar $when_. A rare clear stretch.")
+                else { reply("Calendar · $when_", ev.joinToString("\n") { e -> "${GilbertPlanner.eventTime(e)} — ${e.title}${if (e.where.isNotBlank()) " · ${e.where}" else ""}" })
+                    GilbertNarrator.say(a, "${GilbertNarrator.plural(ev.size, "event")} $when_. First: ${ev.first().title}, ${GilbertPlanner.eventTime(ev.first()).lowercase()}.") }
+                return
+            }
+            K.EMAIL_CHECK -> {
+                val em = GilbertPlanner.emails(a)
+                if (em.isEmpty()) GilbertNarrator.say(a, "No new emails in your notifications. For your whole inbox, open Gmail.")
+                else { reply("Gmail · recent", em.joinToString("\n") { e -> "${e.stamp}  ${e.who}: ${e.text.take(90)}" })
+                    GilbertNarrator.say(a, "${GilbertNarrator.plural(em.size, "email")} came in. Latest from ${spokenName(em.first().who)}: ${em.first().text.take(70)}") }
+                return
+            }
+            K.PHOTOS -> {
+                if (!PhotoWatcher.allowed(a)) { askPerm(PhotoWatcher.permission(), "I need access to your photos for that."); return }
+                val ph = GilbertPlanner.photos(a, intent.text == "screenshots")
+                if (ph.isEmpty()) GilbertNarrator.say(a, "I don't see any photos.") else { mediaCard(if (intent.text == "screenshots") "Screenshots" else "Recent photos", ph, true)
+                    GilbertNarrator.say(a, "Your ${ph.size} most recent ${if (intent.text == "screenshots") "screenshots" else "photos"}. Tap one to open it, hold to have me scan it.") }
+                return
+            }
+            K.FILES -> {
+                val f = GilbertPlanner.downloads(a)
+                if (f.isEmpty()) GilbertNarrator.say(a, "No recent downloads I can see.") else { mediaCard("Recent downloads", f, false); GilbertNarrator.say(a, "Your latest ${f.size} downloads.") }
+                return
+            }
+            else -> {}
+        }
         when (intent?.kind) {
             GilbertIntent.Kind.HELLO -> { GilbertNarrator.say(a, listOf("Listening, John.", "Yes, ${GilbertNarrator.title(a)}?", "Here.").random()); return }
             GilbertIntent.Kind.BYE -> { if (convo) stopConversation(say = true) else GilbertNarrator.say(a, listOf("Anytime.", "Standing by.", "Of course.").random()); return }
@@ -314,6 +371,117 @@ object GilbertConsole {
     }
 
     private val talk = ArrayList<Pair<Boolean, String>>()   // the last turns with his brain
+    /** The last thing he showed you (for "send this to tasks" / "show it on my screen"). */
+    private var lastReply: Pair<String, String>? = null
+    /** He asked you something ("task" / "timer" / "remind") and waits for the answer. */
+    private var asking: String? = null
+    const val REQ_CAL = 5144
+
+    private fun askPerm(perm: String, why: String) {
+        val a = act ?: return
+        GilbertNarrator.say(a, "$why Please allow it.")
+        GilbertChatActivity.picking = true
+        runCatching { a.requestPermissions(arrayOf(perm), REQ_CAL) }
+    }
+
+    private fun agendaLine(): String {
+        val a = act ?: return ""
+        val ev = GilbertPlanner.events(a, "today"); val r = GilbertPlanner.reminders(a); val t = GilbertTasks.open(a); val f = GilbertPlanner.follows(a)
+        return "Today: ${GilbertNarrator.plural(ev.size, "event")}, ${GilbertNarrator.plural(r.size, "reminder")}, ${GilbertNarrator.plural(t.size, "open task")}, ${GilbertNarrator.plural(f.size, "follow-up")}."
+    }
+
+    /** Photos / files on screen: tap to open; hold a photo to scan it. */
+    private fun mediaCard(title: String, items: List<GilbertPlanner.Media>, photos: Boolean) {
+        val a = act ?: return
+        val body = content ?: return
+        val card = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Hud.a(Hud.CYAN, 16)); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 150)) } }
+        val head = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(TextView(a).apply { text = "GILBERT · ${title.uppercase()}"; textSize = 10f; typeface = monoBold; setTextColor(Hud.CYAN) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        head.addView(TextView(a).apply { text = "✕"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); setOnClickListener { body.removeView(card) } })
+        card.addView(head)
+        fun open(m: GilbertPlanner.Media) = runCatching { a.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(m.uri, m.mime)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        if (photos) {
+            val size = (a.resources.displayMetrics.widthPixels - dp(90)) / 3
+            var row: LinearLayout? = null
+            items.forEachIndexed { k, m ->
+                if (k % 3 == 0) { row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }; card.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }) }
+                val iv = ImageView(a).apply { scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true; outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                    background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(0x22FFFFFF) }
+                    setOnClickListener { open(m) }
+                    setOnLongClickListener { PocherFiles.decode(a, m.uri)?.let { b -> PocherFiles.addPhoto(a, b, null, "You", "Scanned from your photos"); GilbertNarrator.say(a, "Scanning it. It'll be in Files.") }; true } }
+                row!!.addView(iv, LinearLayout.LayoutParams(size, size).apply { marginEnd = dp(6) })
+                Thread { val b = runCatching { if (android.os.Build.VERSION.SDK_INT >= 29) a.contentResolver.loadThumbnail(m.uri, android.util.Size(size, size), null) else PocherFiles.decode(a, m.uri) }.getOrNull()
+                    iv.post { if (b != null) iv.setImageBitmap(b) } }.start()
+            }
+        } else for (m in items) card.addView(TextView(a).apply {
+            text = "📄  ${m.name}\n     ${PocherFiles.timeLabel(m.time)}"; textSize = 13f; setTextColor(Color.WHITE); setPadding(0, dp(6), 0, dp(6)); setOnClickListener { open(m) } })
+        body.addView(card, 0, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        (body.parent as? ScrollView)?.smoothScrollTo(0, 0)
+        lastReply = title to items.joinToString("\n") { it.name }
+    }
+
+    // ------------------------------------------------------------------ 08 AGENDA
+    private fun buildAgenda(p: LinearLayout) {
+        val a = act ?: return
+        val GOLD = 0xFFFFC53D.toInt()
+        section(p, "TODAY · CALENDAR")
+        if (!GilbertPlanner.calendarAllowed(a)) {
+            val b = box(p, 2); b.addView(TextView(a).apply { text = "Let me read your calendar to show today's events."; textSize = 12.5f; setTextColor(0xCCFFFFFF.toInt()) })
+            val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }; b.addView(r)
+            pill(r, "Allow calendar") { GilbertChatActivity.picking = true; runCatching { a.requestPermissions(arrayOf(android.Manifest.permission.READ_CALENDAR), REQ_CAL) } }
+        } else {
+            val ev = GilbertPlanner.events(a, "today") + GilbertPlanner.events(a, "tomorrow").map { it }
+            if (ev.isEmpty()) empty(p, "Nothing on your calendar today or tomorrow.")
+            for (e in ev.distinctBy { it.title + it.start }.take(10)) { val b = box(p, 4)
+                b.addView(TextView(a).apply { text = e.title; textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD })
+                b.addView(TextView(a).apply { text = GilbertPlanner.eventTime(e) + if (e.where.isNotBlank()) " · ${e.where}" else ""; textSize = 11.5f; typeface = mono; setTextColor(Hud.CYAN) }) }
+        }
+        section(p, "REMINDERS")
+        val rem = GilbertPlanner.reminders(a)
+        if (rem.isEmpty()) empty(p, "No reminders. Say “remind me to … at 5 pm”.")
+        for (r in rem) { val b = box(p, 4); val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            row.addView(LinearLayout(a).apply { orientation = LinearLayout.VERTICAL
+                addView(TextView(a).apply { text = r.text; textSize = 14f; setTextColor(Color.WHITE) })
+                addView(TextView(a).apply { text = "⏰ " + GilbertPlanner.label(r.at); textSize = 11.5f; typeface = mono; setTextColor(GOLD) }) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            row.addView(TextView(a).apply { text = "✕"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); setPadding(dp(10), dp(4), dp(4), dp(4))
+                setOnClickListener { GilbertPlanner.cancelReminder(a, r.id); select(8, animate = false, scanOnly = true) } })
+            b.addView(row) }
+        if (rem.isNotEmpty() && !GilbertPlanner.exactAllowed(a)) {
+            val b = box(p, 4); b.addView(TextView(a).apply { text = "Reminders may ring a minute or two late. Allow exact alarms to make them precise."; textSize = 12f; setTextColor(GOLD) })
+            val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }; b.addView(r)
+            pill(r, "Allow exact alarms") { runCatching { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:${a.packageName}"))) } }
+        }
+        section(p, "TASKS")
+        val tasks = GilbertTasks.open(a)
+        if (tasks.isEmpty()) empty(p, "No open tasks. Say “create me a task”.")
+        for (t in tasks.take(12)) { val b = box(p, 4); val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            row.addView(TextView(a).apply { text = "${t.id}.  ${t.title}"; textSize = 14f; setTextColor(Color.WHITE) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            row.addView(TextView(a).apply { text = "✓"; textSize = 14f; setTextColor(Color.BLACK); gravity = Gravity.CENTER
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Hud.CYAN) }
+                setOnClickListener { GilbertTasks.complete(a, t.id); SoundFX.play(a, "success"); select(8, animate = false, scanOnly = true) } }, LinearLayout.LayoutParams(dp(28), dp(28)))
+            b.addView(row) }
+        section(p, "TO BE FOLLOWED")
+        val fol = GilbertPlanner.follows(a)
+        if (fol.isEmpty()) empty(p, "Nothing to follow up. Say “follow up with … about …”.")
+        for (f in fol) { val b = box(p, 4); val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            row.addView(LinearLayout(a).apply { orientation = LinearLayout.VERTICAL
+                addView(TextView(a).apply { text = f.text; textSize = 14f; setTextColor(Color.WHITE) })
+                if (f.at > 0) addView(TextView(a).apply { text = "⏰ " + GilbertPlanner.label(f.at); textSize = 11.5f; typeface = mono; setTextColor(GOLD) }) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            row.addView(TextView(a).apply { text = "✓"; textSize = 14f; setTextColor(Color.BLACK); gravity = Gravity.CENTER
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(GOLD) }
+                setOnClickListener { GilbertPlanner.doneFollow(a, f.id); select(8, animate = false, scanOnly = true) } }, LinearLayout.LayoutParams(dp(28), dp(28)))
+            b.addView(row) }
+        section(p, "QUICK")
+        val q = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }; p.addView(q)
+        pill(q, "Photos") { command("show my photos") }
+        q.addView(View(a), LinearLayout.LayoutParams(dp(6), 1))
+        pill(q, "Downloads") { command("show downloads") }
+        q.addView(View(a), LinearLayout.LayoutParams(dp(6), 1))
+        pill(q, "Email") { command("check my email") }
+        winInfo?.text = "${rem.size} reminders · ${tasks.size} tasks"
+    }
 
     /** Not a command: ask his brain (persona from Gilbert_Brain), show the answer, speak the start. */
     private fun think(q: String) {
@@ -341,6 +509,7 @@ object GilbertConsole {
 
     /** A reply card at the top of the window (long answers, lists, code). */
     private fun reply(title: String, msg: String) {
+        lastReply = title to msg
         val a = act ?: return
         val body = content ?: return
         val card = LinearLayout(a).apply {

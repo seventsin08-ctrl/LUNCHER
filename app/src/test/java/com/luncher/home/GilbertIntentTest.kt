@@ -20,5 +20,9 @@ class GilbertIntentTest {
         for ((heard, want) in GilbertIntentCases.WAKE) assertEquals("wake(\"$heard\")", want, GilbertIntent.wake(heard))
     }
 
+    @Test fun times() {
+        for ((say, want, _) in GilbertIntentCases.TIMES) assertEquals("parseWhen(\"$say\")", want, GilbertIntent.parseWhen(say).first)
+    }
+
     @Test fun atLeastAHundredSimulations() = assertTrue(GilbertIntentCases.ALL.size + GilbertIntentCases.WAKE.size >= 100)
 }
