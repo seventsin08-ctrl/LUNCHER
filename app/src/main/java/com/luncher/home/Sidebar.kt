@@ -177,7 +177,7 @@ class Sidebar(
         // All Father first (the system lives on this side; Gilbert lives in the island).
         val gil = assistantItem { close(); AllFatherActivity.open(act) }
         ((gil as? LinearLayout)?.getChildAt(1) as? TextView)?.text = "All Father"
-        put(gil); items += gil
+        if (Features.GILBERT) { put(gil); items += gil }
         for ((i, a) in chosen.withIndex()) {
             if (!twoCols && i == 2 && chosen.size > 3) col.addView(View(act).apply {
                 background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(0x66FFFFFF) }

@@ -56,7 +56,7 @@ object AllFather {
 
     /** A notification came in. */
     /** Is All Father collecting information at all? */
-    fun enabled(ctx: Context) = prefs(ctx).getBoolean("on", true)
+    fun enabled(ctx: Context) = Features.GILBERT && prefs(ctx).getBoolean("on", true)
     fun setEnabled(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("on", on).apply()
 
     fun collect(ctx: Context, pkg: String, app: String, who0: String, text0: String) {
@@ -173,7 +173,15 @@ object AllFather {
 
     // ------------------------------------------------------------------ All Father mode
     /** When on, the island, tools tab, side island and sidebar step aside and live inside All Father. */
-    fun modeOn(ctx: Context) = prefs(ctx).getBoolean("mode", false)
+    fun modeOn(ctx: Context) = Features.GILBERT && prefs(ctx).getBoolean("mode", false)
+    /** Classic build: if All Father mode had moved the island / tools / side bars away, put them back. */
+    fun restoreClassic(ctx: Context) {
+        val p = prefs(ctx); if (!p.getBoolean("mode", false)) return
+        val s = Settings(ctx)
+        s.island = p.getBoolean("was_island", true); s.islandTools = p.getBoolean("was_tools", s.islandTools)
+        s.sideHud = p.getBoolean("was_side", true); s.sidebarOn = p.getBoolean("was_sidebar", true)
+        p.edit().putBoolean("mode", false).apply()
+    }
     fun setMode(ctx: Context, on: Boolean) {
         val s = Settings(ctx); val p = prefs(ctx)
         if (on && !modeOn(ctx)) {

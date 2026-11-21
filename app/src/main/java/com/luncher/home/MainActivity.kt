@@ -299,6 +299,15 @@ class MainActivity : Activity() {
     // All Father mode: a slim gold tab on the right edge opens him (the island and side bars step aside).
     private var afEdge: View? = null
     private fun allFatherEdge() {
+        if (!Features.GILBERT) {
+            AllFather.restoreClassic(this)
+            // No Gilbert tile in Quick Settings and no "Share → Gilbert" in the classic launcher.
+            for (c in listOf(GilbertTileService::class.java, GilbertShareActivity::class.java)) runCatching {
+                val cn = android.content.ComponentName(this, c)
+                if (packageManager.getComponentEnabledSetting(cn) != android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED)
+                    packageManager.setComponentEnabledSetting(cn, android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED, android.content.pm.PackageManager.DONT_KILL_APP)
+            }
+        }
         val on = AllFather.modeOn(this)
         if (!on) { afEdge?.let { root.removeView(it) }; afEdge = null; return }
         if (afEdge != null) return

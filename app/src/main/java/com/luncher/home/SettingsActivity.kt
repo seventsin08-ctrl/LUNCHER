@@ -49,7 +49,8 @@ class SettingsActivity : Activity() {
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
         Category("phone", "Phone & Connections", 0xFF30D158.toInt(), R.drawable.ic_cc_wifi, listOf("PHONE & CONNECTIVITY", "CONNECTIONS")),
         Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
-        Category("gilbert", "Gilbert", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("GILBERT", "GILBERT · BRAIN & MEMORY", "GILBERT · NOTIFICATIONS")),
+        if (Features.GILBERT) Category("gilbert", "Gilbert", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("GILBERT", "GILBERT · BRAIN & MEMORY", "NOTIFICATIONS · POP-UPS"))
+            else Category("gilbert", "Notifications", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("NOTIFICATIONS · POP-UPS")),
         Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "RESET"))
     )
     private val groups = listOf(listOf("setup"), listOf("look", "home", "island", "gilbert", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
@@ -841,7 +842,7 @@ class SettingsActivity : Activity() {
             } else info(gilB, "Teach him: in the chat say “remember that my exam is Friday”, or just talk — “I'm a BSIT student”, “I love NF”.")
             button(gilB, "Forget Everything", 0xFFFF453A.toInt()) { GilbertMemory.forget(this); rebuild() }
         }
-        val gilN = section("GILBERT · NOTIFICATIONS")
+        val gilN = section("NOTIFICATIONS · POP-UPS")
         segment(gilN, "Notification Style", listOf("launcher" to "Launcher", "original" to "Original", "both" to "Both"), s.notifStyle) {
             s.notifStyle = it
         }
@@ -851,8 +852,7 @@ class SettingsActivity : Activity() {
             "(they just don't make a sound)", s.alwaysShowMessages) { s.alwaysShowMessages = it }
         toggle(gilN, "Quiet in the App You're Using", "No pop-ups or messages from an app while you have it open — " +
             "other apps still pop up as usual", s.gilbertQuietInApp) { s.gilbertQuietInApp = it }
-        toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; Gilbert quietly holds the rest (red bubble) " +
-            "until you tap him", s.gilbertCalm) { s.gilbertCalm = it }
+        toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; the rest wait quietly in your notifications and the side island's history", s.gilbertCalm) { s.gilbertCalm = it }
         slider(gilN, "Pop-ups per Minute (others)", 1, 10, s.gilbertMaxPerMin, { "$it" }) { s.gilbertMaxPerMin = it }
         button(gilN, "Priority Apps… (${s.gilbertPriority.size})", 0xFF0A84FF.toInt()) {
             chooseApps("Priority Apps", launchableApps(), s.gilbertPriority) { s.gilbertPriority = it; rebuild() }
@@ -860,9 +860,8 @@ class SettingsActivity : Activity() {
         button(gilN, "Quiet Apps… (${s.gilbertQuiet.size})", 0xFF0A84FF.toInt()) {
             chooseApps("Quiet Apps (always held)", launchableApps(), s.gilbertQuiet) { s.gilbertQuiet = it; rebuild() }
         }
-        info(gilN, "Priority apps always pop up. Quiet apps never do — Gilbert keeps them for you. Everything else pops up " +
-            "only within the per-minute limit (or never, in Calm Mode with Priority apps chosen). Tap Gilbert to see what he's holding, " +
-            "today's noisiest apps and a quick phone check.")
+        info(gilN, "Priority apps always pop up. Quiet apps never do — they wait in your notifications. Everything else pops up " +
+            "only within the per-minute limit (or never, in Calm Mode with Priority apps chosen).")
 
         // ---------------- Sounds
         val snd = section("SOUNDS")

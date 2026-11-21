@@ -462,7 +462,7 @@ class Settings(ctx: Context) {
         set(v) = put("s_gil_emotions", v)
     /** Gilbert says things now and then (check-ins, reminders, updates). */
     var gilbertTalk: Boolean
-        get() = p.getBoolean("s_pocher_talk", false)
+        get() = Features.GILBERT && p.getBoolean("s_pocher_talk", false)
         set(v) = put("s_pocher_talk", v)
     var gilbertTalkMin: Int
         get() = p.getInt("s_gil_talk_min", 12)
@@ -480,11 +480,11 @@ class Settings(ctx: Context) {
         set(v) = put("s_gil_inapp", v)
     /** Save notifications & chats to Gilbert's archive folder (so he knows everything that came in). */
     var gilbertArchive: Boolean
-        get() = p.getBoolean("s_gil_archive", true)
+        get() = Features.GILBERT && p.getBoolean("s_gil_archive", true)
         set(v) = put("s_gil_archive", v)
     /** Gilbert's voice in his console (greets you, talks you through each window). */
     var gilbertSpeaks: Boolean
-        get() = p.getBoolean("s_gil_voice", true)
+        get() = Features.GILBERT && p.getBoolean("s_gil_voice", true)
         set(v) = put("s_gil_voice", v)
     /** How Gilbert addresses you: "sir", "ma'am", "boss" or "name". */
     /** The text-to-speech voice he uses (name), or "" = pick the best British male voice. */
@@ -525,7 +525,7 @@ class Settings(ctx: Context) {
         set(v) = putSet("s_gil_quiet", v)
     /** Round island with a cute face  °~°  when nothing is happening. */
     var islandFace: Boolean
-        get() = p.getBoolean("s_island_face", true)
+        get() = Features.GILBERT && p.getBoolean("s_island_face", true)
         set(v) = put("s_island_face", v)
     /** Assistant button at the top of the Sidebar. */
     var sidebarAssistant: Boolean
@@ -538,7 +538,7 @@ class Settings(ctx: Context) {
 
     /** Listen for "voice activation", then "open <app>". */
     var voiceOn: Boolean
-        get() = p.getBoolean("s_wake_gilbert", false)
+        get() = Features.GILBERT && p.getBoolean("s_wake_gilbert", false)
         set(v) = put("s_wake_gilbert", v)
 
     // ---- Hello screen
