@@ -55,6 +55,9 @@ object GilbertConsole {
     private var frame: HudFrame? = null
     private var flashWho: String? = null
     private var prevHeld: (() -> Unit)? = null
+    /** Which window to open first (e.g. 5 = Files after sharing a photo to Gilbert). */
+    var startWin = 0
+    const val REQ_PHOTOS = 5142
 
     fun show(a: Activity, root: FrameLayout, s: Settings, onClosed: (() -> Unit)? = null) {
         act = a
@@ -160,7 +163,7 @@ object GilbertConsole {
         layer.postDelayed({
             strip.animate().alpha(1f).setDuration(220).start()
             fr.animate().alpha(1f).setDuration(200).start()
-            select(0)
+            select(startWin.coerceIn(0, wins.size - 1)); startWin = 0
             SoundFX.play(a, "success")
         }, 900)
 
@@ -171,6 +174,9 @@ object GilbertConsole {
         prevHeld = prev
         Gilbert.onHeldChanged = { prev?.invoke(); if (current == 0) layer.post { select(0, animate = false, scanOnly = true) } }
     }
+
+    /** Redraw the open window. */
+    fun refresh() { if (act != null) select(current, animate = false, scanOnly = true) }
 
     /** New data arrived while the console is open. */
     private fun update(msg: String, who: String?, onlyWin: Int) {
@@ -660,6 +666,19 @@ object GilbertConsole {
                 .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("image/*")
             runCatching { a.startActivityForResult(i, REQ_SCAN) }
         }
+        if (!PhotoWatcher.allowed(a)) {
+            val wb = box(p, 8)
+            wb.addView(TextView(a).apply {
+                text = "Some apps (like Messenger) don't put the photo in their notification — only “Sent a photo”. " +
+                    "Allow Gilbert to see photos SAVED to your phone and he'll match them to the chat automatically."
+                textSize = 12.5f; setTextColor(0xCCFFFFFF.toInt()) })
+            pill(wb, "Allow saved photos") {
+                GilbertChatActivity.picking = true
+                runCatching { a.requestPermissions(arrayOf(PhotoWatcher.permission()), REQ_PHOTOS) }
+            }
+        }
+        line(p, "Tip: in Messenger turn on Settings › Photos & media › Save photos — every photo you receive then shows up here. " +
+            "Or tap Share → Gilbert on any photo.", 11.5f, Hud.a(Hud.SOFT, 200), top = 6)
         line(p, "Photos and attachments from your chats are kept and scanned here: the text inside them and what's in them.",
             11.5f, 0x80FFFFFF.toInt(), top = 6)
         if (items.isEmpty()) { empty(p, "No files yet."); return }
@@ -668,7 +687,19 @@ object GilbertConsole {
             val b = box(p, 6)
             val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
             val thumb = PocherFiles.thumb(a, it, px)
-            if (thumb != null) row.addView(ImageView(a).apply {
+            val av = if (thumb == null) PocherFiles.avatar(a, it) else null
+            if (thumb == null && av != null) row.addView(FrameLayout(a).apply {
+                // The sender's picture with a 📷 tag: the photo itself hasn't reached Gilbert yet.
+                addView(ImageView(a).apply {
+                    setImageBitmap(av); scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0.85f
+                    clipToOutline = true; outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x22FFFFFF) }
+                }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+                addView(TextView(a).apply { text = "📷"; textSize = 13f; gravity = Gravity.CENTER
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xE6000000.toInt()); setStroke(maxOf(1, dp(1)), Hud.CYAN) } },
+                    FrameLayout.LayoutParams(dp(26), dp(26), Gravity.BOTTOM or Gravity.END))
+            }, LinearLayout.LayoutParams(px, px).apply { marginEnd = dp(10) })
+            else if (thumb != null) row.addView(ImageView(a).apply {
                 setImageBitmap(thumb); scaleType = ImageView.ScaleType.CENTER_CROP
                 clipToOutline = true; outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
                 background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(0x22FFFFFF) }
@@ -684,6 +715,7 @@ object GilbertConsole {
             col.addView(TextView(a).apply { text = "$kind · ${it.app} · ${PocherFiles.timeLabel(it.time)}"; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
             val scanned = it.img != null
             val status = when {
+                !scanned && it.kind.startsWith("image") -> "${it.msg.ifBlank { "Sent a photo" }} · waiting for the photo (save it in ${it.app} or share it to Gilbert)"
                 !scanned -> it.msg.ifBlank { "Attachment (the app keeps the file)" }
                 it.ocr.isEmpty() && it.labels.isEmpty() -> "SCANNING…"
                 else -> null

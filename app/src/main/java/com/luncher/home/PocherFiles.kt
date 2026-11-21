@@ -25,7 +25,7 @@ import java.util.concurrent.Executors
  */
 object PocherFiles {
     class Item(val id: String, val time: Long, val app: String, val who: String, val kind: String,
-               val img: String?, val msg: String, val ocr: String, val labels: String)
+               val img: String?, val msg: String, val ocr: String, val labels: String, val av: String? = null)
 
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -40,7 +40,8 @@ object PocherFiles {
         index(ctx).takeIf { it.exists() }?.readLines()?.mapNotNull { l ->
             runCatching { JSONObject(l).let { o ->
                 Item(o.optString("id"), o.optLong("t"), o.optString("app"), o.optString("who"), o.optString("kind"),
-                    o.optString("img").ifBlank { null }, o.optString("msg"), o.optString("ocr"), o.optString("labels"))
+                    o.optString("img").ifBlank { null }, o.optString("msg"), o.optString("ocr"), o.optString("labels"),
+                    o.optString("av").ifBlank { null })
             } }.getOrNull()
         }?.asReversed()
     }.getOrNull() ?: emptyList()
@@ -48,11 +49,11 @@ object PocherFiles {
     private fun write(ctx: Context, items: List<Item>) {   // items newest first
         val keep = items.take(MAX)
         // Delete pictures that fell off the list.
-        val used = keep.mapNotNull { it.img }.toSet()
+        val used = (keep.mapNotNull { it.img } + keep.mapNotNull { it.av }).toSet()
         dir(ctx).listFiles()?.forEach { if (it.name !in used) it.delete() }
         index(ctx).writeText(keep.asReversed().joinToString("") { i ->
             JSONObject().put("id", i.id).put("t", i.time).put("app", i.app).put("who", i.who).put("kind", i.kind)
-                .put("img", i.img ?: "").put("msg", i.msg).put("ocr", i.ocr).put("labels", i.labels).toString() + "\n"
+                .put("img", i.img ?: "").put("msg", i.msg).put("ocr", i.ocr).put("labels", i.labels).put("av", i.av ?: "").toString() + "\n"
         })
     }
 
@@ -60,7 +61,7 @@ object PocherFiles {
         ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
 
     /** A chat notification came in: keep any photos / attachments in it (once each). */
-    fun capture(ctx: Context, pkg: String, chat: ChatInfo) {
+    fun capture(ctx: Context, pkg: String, chat: ChatInfo, avatar: Bitmap? = null) {
         if (!Settings(ctx).gilbertArchive) return
         val app = ctx.applicationContext
         val title = Gilbert.cleanTitle(chat.title)
@@ -87,11 +88,48 @@ object PocherFiles {
                         .onFailure { file = null }
                     if (file != null) toScan += key to b
                 }
-                items.add(0, Item(key, System.currentTimeMillis(), label(app, pkg), who, m.mime, file, text, "", ""))
+                // No photo in the notification (Messenger only says "Sent a photo"): keep the sender's picture
+                // as the thumbnail, and wait for the real photo (saved to the phone or shared to Gilbert).
+                var av: String? = null
+                if (file == null && avatar != null) runCatching {
+                    av = "${key}_av.jpg"
+                    File(dir(app), av!!).outputStream().use { avatar.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+                }.onFailure { av = null }
+                items.add(0, Item(key, System.currentTimeMillis(), label(app, pkg), who, m.mime, file, text, "", "", av))
             }
             write(app, items)
             main.post { onChanged?.invoke() }
             for ((key, b) in toScan) main.post { scan(app, key, b) }
+        }
+    }
+
+    /** Decode a picture from a content link (small enough to keep and scan). */
+    fun decode(ctx: Context, uri: Uri): Bitmap? = runCatching {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+        var sample = 1
+        while (maxOf(o.outWidth, o.outHeight) / sample > 1600) sample *= 2
+        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+    }.getOrNull()
+
+    /**
+     * A real photo arrived (saved to the phone or shared to Gilbert). If a "Sent a photo" from the
+     * same app is still waiting (last 2 hours), the photo is put on THAT item; otherwise it's new.
+     */
+    fun addPhoto(ctx: Context, b: Bitmap, app: String?, who: String, msg: String) {
+        val a = ctx.applicationContext
+        exec.execute {
+            val items = list(a).toMutableList()
+            val cutoff = System.currentTimeMillis() - 2 * 3_600_000L
+            val idx = if (app == null) -1 else items.indexOfFirst {
+                it.img == null && it.kind.startsWith("image") && it.app.equals(app, true) && it.time >= cutoff }
+            val key = if (idx >= 0) items[idx].id else "pic" + System.currentTimeMillis().toString(16)
+            val file = "${key}_${System.currentTimeMillis().toString(16)}.jpg"
+            if (runCatching { File(dir(a), file).outputStream().use { b.compress(Bitmap.CompressFormat.JPEG, 88, it) } }.isFailure) return@execute
+            if (idx >= 0) { val o = items[idx]; items[idx] = Item(o.id, o.time, o.app, o.who, o.kind, file, o.msg, "", "", o.av) }
+            else items.add(0, Item(key, System.currentTimeMillis(), app ?: "Phone", who, "image/*", file, msg, "", ""))
+            write(a, items)
+            main.post { onChanged?.invoke(); scan(a, key, b) }
         }
     }
 
@@ -155,6 +193,9 @@ object PocherFiles {
             BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })
         }.getOrNull()
     }
+
+    /** The sender's picture (for photos the app didn't share). */
+    fun avatar(ctx: Context, item: Item): Bitmap? = item.av?.let { runCatching { BitmapFactory.decodeFile(File(dir(ctx), it).path) }.getOrNull() }
 
     fun clear(ctx: Context) { exec.execute { index(ctx).delete(); dir(ctx).listFiles()?.forEach { it.delete() }; main.post { onChanged?.invoke() } } }
 

@@ -98,6 +98,7 @@ class NotificationService : NotificationListenerService() {
     }
 
     override fun onListenerConnected() {
+        runCatching { PhotoWatcher.register(this) }
         // Keeps the headphone pop-up listening while other apps are open.
         main.post { runCatching { HeadsetPopup.get(applicationContext) } }
         recount()
@@ -130,13 +131,19 @@ class NotificationService : NotificationListenerService() {
         val text = n.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
         if (title.isBlank() && text.isBlank()) return
         val chat = runCatching { readChat(sbn, title, text) }.getOrNull()
+        // The sender's picture (used when the app doesn't share the photo itself).
+        val avatar = if (chat?.media?.any { it != null && it.image == null } == true) runCatching {
+            n.getLargeIcon()?.loadDrawable(this)?.let { d ->
+                val bm = android.graphics.Bitmap.createBitmap(160, 160, android.graphics.Bitmap.Config.ARGB_8888)
+                val cv = android.graphics.Canvas(bm); d.setBounds(0, 0, 160, 160); d.draw(cv); bm }
+        }.getOrNull() else null
         main.post {
             if (chat != null) {
                 lastChat[sbn.packageName] = chat
                 remember(this, sbn.packageName, chat)
                 saveHistory(this)
                 // Pocher keeps (and scans) photos & attachments from chats.
-                runCatching { PocherFiles.capture(this, sbn.packageName, chat) }
+                runCatching { PocherFiles.capture(this, sbn.packageName, chat, avatar) }
             }
             onPosted?.invoke(sbn.packageName, title, text)
         }

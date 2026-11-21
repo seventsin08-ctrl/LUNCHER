@@ -27,7 +27,16 @@ class GilbertChatActivity : Activity() {
         root.post { GilbertConsole.show(this, root, s) { finishAndRemoveTask(); overridePendingTransition(0, android.R.anim.fade_out) } }
     }
 
-    private var picking = false
+    companion object { @JvmStatic var picking = false }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        picking = false
+        if (requestCode == GilbertConsole.REQ_PHOTOS && PhotoWatcher.allowed(this)) {
+            PhotoWatcher.register(this)
+            android.widget.Toast.makeText(this, "Gilbert will pick up photos saved from your chats", android.widget.Toast.LENGTH_SHORT).show()
+            GilbertConsole.refresh()
+        }
+    }
     override fun startActivityForResult(intent: android.content.Intent, requestCode: Int, options: Bundle?) {
         picking = requestCode == GilbertChat.REQ_BRAIN || requestCode == GilbertConsole.REQ_SCAN
         super.startActivityForResult(intent, requestCode, options)
