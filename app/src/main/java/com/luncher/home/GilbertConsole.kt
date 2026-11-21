@@ -224,38 +224,73 @@ object GilbertConsole {
 
     // ------------------------------------------------------------------ what Gilbert says
     private val ENDINGS = listOf("What's the task for today?", "What shall we tackle first?", "What's on the agenda?",
-        "How can I help you get ahead today?", "Where would you like to start?")
+        "Where would you like to start?", "What do you need?", "Shall I pull anything up?")
 
     /** Greeting + a short briefing from the data (spoken when the console opens). */
     private fun briefing(): String {
         val a = act ?: return ""
-        val sb = StringBuilder(GilbertNarrator.greeting(a))
+        val p = a.getSharedPreferences("gil_brief", android.content.Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val lastOpen = p.getLong("open", 0L)
+        val away = now - lastOpen
         val sir = GilbertNarrator.title(a)
-        val today = messages(1).filter { it.today }
-        val h = runCatching { Gilbert.health(a) }.getOrNull()
-        if (today.isEmpty()) sb.append(" All quiet so far, no messages today.")
-        else {
-            val top = today.groupBy { it.who }.maxByOrNull { it.value.size }
-            sb.append(" You have ${GilbertNarrator.plural(today.size, "message")} from ${GilbertNarrator.plural(today.map { it.who }.distinct().size, "person", "people")}")
-            top?.let { sb.append(", mostly ${spokenName(it.key)}") }
-            sb.append(".")
-        }
-        val mentions = Gilbert.notes(a).count { it.mention && android.text.format.DateUtils.isToday(it.time) }
-        if (mentions > 0) sb.append(" ${GilbertNarrator.plural(mentions, "person")} mentioned you.")
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+        fun at(e: GilbertArchive.Entry) = runCatching { fmt.parse("${e.day} ${e.time}")?.time }.getOrNull() ?: 0L
+        // Only what's NEW since he last briefed you (so he never repeats himself).
+        val since = if (lastOpen > 0) lastOpen - 60_000 else now - 12 * 3_600_000L
+        val fresh = messages(2).filter { at(it) >= since }
+        val mentions = Gilbert.notes(a).count { it.mention && it.time >= since }
         val held = Gilbert.heldCount()
-        if (held > 0) sb.append(" I'm holding ${GilbertNarrator.plural(held, "notification")} for you.")
-        messages(1).firstOrNull { it.today && FLAG.containsMatchIn(it.text) }?.let { e ->
-            sb.append(" ${spokenName(e.who)} mentioned ${FLAG.find(e.text)?.value?.lowercase()}, worth a look.")
+        val flag = fresh.firstOrNull { FLAG.containsMatchIn(it.text) }
+        val h = runCatching { Gilbert.health(a) }.getOrNull()
+        val said = p.getStringSet("said", emptySet()) ?: emptySet()
+        fun pick(list: List<String>, key: String): String {
+            // Never the same line twice in a row.
+            val opts = list.filterNot { "$key:$it" in said }.ifEmpty { list }
+            return opts.random().also { newSaid += "$key:$it" }
         }
+        newSaid.clear()
+
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val part = when (hour) { in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; in 18..21 -> "Good evening"; else -> "Late night" }
+        val opening = when {
+            away < 10 * 60_000L -> pick(listOf("Welcome back, $sir.", "Back again, $sir.", "Yes, $sir?", "At your service."), "back")
+            lastOpen == 0L || away > 4 * 3_600_000L -> pick(listOf("$part, $sir.", "$part, $sir. Systems are online.", "$part. Good to have you back, $sir.",
+                "$part, $sir. Everything is running smoothly."), "hello$part")
+            else -> pick(listOf("$sir.", "Hello again, $sir.", "Systems ready, $sir.", "$part, $sir."), "again")
+        }
+
+        // The most important thing or two — not a list of everything.
+        val facts = ArrayList<String>()
+        if (mentions > 0) facts += pick(listOf("You were mentioned ${if (mentions == 1) "once" else "$mentions times"}.",
+            "${GilbertNarrator.plural(mentions, "mention")} waiting for you."), "men")
+        if (flag != null) {
+            val w = FLAG.find(flag.text)?.value?.lowercase() ?: "something"
+            facts += pick(listOf("${spokenName(flag.who)} brought up $w.", "Something about $w, from ${spokenName(flag.who)}.",
+                "Possible task: $w, from ${spokenName(flag.who)}."), "flag")
+        }
+        if (fresh.isNotEmpty()) {
+            val top = fresh.groupBy { it.who }.maxByOrNull { it.value.size }!!
+            val people = fresh.map { it.who }.distinct().size
+            val n = fresh.size
+            facts += if (people == 1) pick(listOf("${GilbertNarrator.plural(n, "new message")} from ${spokenName(top.key)}.",
+                "${spokenName(top.key)} sent ${GilbertNarrator.plural(n, "message")}."), "msg1")
+            else pick(listOf("${GilbertNarrator.plural(n, "new message")}, mostly ${spokenName(top.key)}.",
+                "$n messages from $people people. ${spokenName(top.key)} is the busiest.",
+                "${spokenName(top.key)} leads with ${top.value.size} of $n new messages."), "msgN")
+        } else if (away < 10 * 60_000L) facts += pick(listOf("Nothing new since.", "All quiet since you left.", "No changes."), "none")
+        if (held > 0 && facts.size < 2) facts += pick(listOf("$held held quietly for you.", "I'm holding ${GilbertNarrator.plural(held, "notification")}."), "held")
         h?.let {
-            if (it.battery in 0..20 && !it.charging) sb.append(" Battery is at ${it.battery} percent, you may want to charge.")
-            if ((it.tempC ?: 0f) >= 42f) sb.append(" The phone is running hot.")
+            if (it.battery in 0..20 && !it.charging) facts += "Battery at ${it.battery} percent."
+            else if ((it.tempC ?: 0f) >= 42f) facts += "The phone is running warm."
         }
-        if (!GilbertBrain.installed(a)) Unit
-        sb.append(" ").append(ENDINGS.random())
-        if (sir == "sir" && Math.random() < 0.3) Unit
-        return sb.toString()
+        if (facts.isEmpty()) facts += pick(listOf("All quiet.", "Nothing needs your attention.", "No new messages.", "All clear."), "quiet")
+
+        val ending = if (away < 10 * 60_000L || Math.random() < 0.35) "" else " " + pick(ENDINGS, "end")
+        p.edit().putLong("open", now).putStringSet("said", newSaid.toSet()).apply()
+        return opening + " " + facts.take(2).joinToString(" ") + ending
     }
+    private val newSaid = HashSet<String>()
 
     /** "BSIT 1-C (2026-2027): John Cedrick Culia" → "John Cedrick Culia in BSIT 1-C". */
     private fun spokenName(who: String): String {
@@ -941,7 +976,7 @@ object GilbertConsole {
             GilbertNarrator.say(a, if (s.gilbertEcho) "Echo on. I sound like I'm in the room." else "Echo off.")
         }
         ctl.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
-        pill(ctl, "▶ Test") { GilbertNarrator.say(a, briefing()) }
+        pill(ctl, "▶ Test") { GilbertNarrator.say(a, "${GilbertNarrator.greeting(a)} All systems are online. What do you need?") }
         vb.addView(TextView(a).apply {
             text = "More voices: install “Speech Services by Google”, then Settings › Accessibility › Text-to-speech › English (UK) › download voices."
             textSize = 11f; setTextColor(0x80FFFFFF.toInt()); setPadding(0, dp(8), 0, 0) })
