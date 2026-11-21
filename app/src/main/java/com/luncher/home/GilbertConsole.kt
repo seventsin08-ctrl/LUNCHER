@@ -1449,21 +1449,36 @@ object GilbertConsole {
         section(p, "WAKE WORD · “SYSTEM ONLINE”")
         val wb = box(p, 2)
         val on = s.voiceOn && VoiceService.hasMic(a)
+        val notifOk = android.os.Build.VERSION.SDK_INT < 33 ||
+            a.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
         wb.addView(TextView(a).apply {
-            text = if (on) "On — say “System online” anywhere and I open. Add a command: “System online, open Spotify”."
-                else "Off — turn it on and say “System online” to wake me from anywhere (keeps a small listening notification)."
-            textSize = 12.5f; setTextColor(0xCCFFFFFF.toInt()) })
+            text = when {
+                !on -> "OFF — turn it on and say “System online” to wake me from anywhere (keeps a small listening notification)."
+                VoiceService.running -> "LISTENING ✓ — say “System online” anywhere. Add a command: “System online, open Spotify”."
+                VoiceService.problem != null -> "NOT LISTENING — ${VoiceService.problem}"
+                else -> "STARTING… (open this window again in a moment)"
+            }
+            textSize = 12.5f; typeface = if (on) monoBold else Typeface.DEFAULT
+            setTextColor(if (on && VoiceService.running) Hud.CYAN else if (on) 0xFFFFC53D.toInt() else 0xCCFFFFFF.toInt()) })
+        if (on && !notifOk) wb.addView(TextView(a).apply {
+            text = "Notifications are blocked for the launcher, so you won't see the listening notification. Allow notifications so Android keeps me listening."
+            textSize = 11.5f; setTextColor(0xFFFFC53D.toInt()); setPadding(0, dp(4), 0, 0) })
         val wr = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
         wb.addView(wr)
         pill(wr, if (on) "Turn off wake word" else "Turn on wake word") {
-            if (!VoiceService.hasMic(a)) {
+            val need = ArrayList<String>()
+            if (!on && !VoiceService.hasMic(a)) need += android.Manifest.permission.RECORD_AUDIO
+            if (!on && !notifOk) need += android.Manifest.permission.POST_NOTIFICATIONS
+            if (need.isNotEmpty()) {
                 GilbertChatActivity.picking = true
                 s.voiceOn = true
-                runCatching { a.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC) }
+                runCatching { a.requestPermissions(need.toTypedArray(), REQ_MIC) }
             } else {
                 s.voiceOn = !on; VoiceService.sync(a)
                 GilbertNarrator.say(a, if (!on) "Wake word on. Say system online whenever you need me." else "Wake word off.")
                 select(7, animate = false)
+                // Show whether it really started.
+                a.window?.decorView?.postDelayed({ if (isOpen && current == 7) select(7, animate = false, scanOnly = true) }, 1500)
             }
         }
 

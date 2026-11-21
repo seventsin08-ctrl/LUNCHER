@@ -60,14 +60,25 @@ class VoiceService : Service() {
         private const val CHANNEL = "voice"
         private const val ID = 7302
         @Volatile var running = false
+        /** Why the wake word isn't listening (shown in Gilbert's 07 SYSTEM), or null. */
+        @Volatile var problem: String? = null
 
         fun hasMic(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
         /** Start or stop listening to match the setting. Call while the launcher is on screen. */
         fun sync(ctx: Context) {
             val s = Settings(ctx)
-            val want = s.voiceOn && hasMic(ctx) && SpeechRecognizer.isRecognitionAvailable(ctx)
+            val speech = runCatching { SpeechRecognizer.isRecognitionAvailable(ctx) }.getOrDefault(false)
+            problem = when {
+                !s.voiceOn -> null
+                !hasMic(ctx) -> "Microphone isn't allowed for the launcher."
+                !speech -> "This phone has no speech-recognition service turned on. Install or update the Google app " +
+                    "(Speech Recognition & Synthesis), then try again."
+                else -> null
+            }
+            val want = s.voiceOn && hasMic(ctx) && speech
             if (want) runCatching { ctx.startForegroundService(Intent(ctx, VoiceService::class.java)) }
+                .onFailure { problem = "Android wouldn't start the listener (${it.javaClass.simpleName}). Open the launcher's Home Screen and try again." }
             else runCatching { ctx.stopService(Intent(ctx, VoiceService::class.java)) }
         }
 
@@ -87,8 +98,9 @@ class VoiceService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        running = true
-        goForeground()
+        val ok = runCatching { goForeground() }
+        if (ok.isFailure) { problem = "Android blocked the listener (${ok.exceptionOrNull()?.javaClass?.simpleName}). Open Gilbert from the Home Screen and turn it on again."; stopSelf(); return }
+        running = true; problem = null
         startWatching()
     }
 
@@ -305,15 +317,15 @@ class VoiceService : Service() {
 
     private fun goForeground() {
         val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Gilbert wake word", NotificationManager.IMPORTANCE_MIN).apply {
+        if (nm.getNotificationChannel(CHANNEL + "2") == null) {
+            nm.createNotificationChannel(NotificationChannel(CHANNEL + "2", "Gilbert wake word", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Listening for “System online”"; setShowBadge(false)
             })
         }
         val open = PendingIntent.getActivity(this, 1,
             Intent(this, GilbertChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE)
-        val n = Notification.Builder(this, CHANNEL)
+        val n = Notification.Builder(this, CHANNEL + "2")
             .setSmallIcon(R.drawable.ic_cc_mic)
             .setContentTitle("Gilbert is listening for “System online”")
             .setContentText("Say “System online” — or “System online, open Spotify”")

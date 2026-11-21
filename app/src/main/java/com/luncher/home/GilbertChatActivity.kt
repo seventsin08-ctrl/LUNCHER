@@ -37,11 +37,12 @@ class GilbertChatActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         picking = false
         if (requestCode == GilbertConsole.REQ_MIC) {
-            val ok = grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val ok = VoiceService.hasMic(this)
             if (!ok) Settings(this).voiceOn = false
             VoiceService.sync(this)
             android.widget.Toast.makeText(this, if (ok) "Microphone allowed — wake word and 🎤 are ready" else "Microphone not allowed", android.widget.Toast.LENGTH_SHORT).show()
             GilbertConsole.refresh()
+            window.decorView.postDelayed({ GilbertConsole.refresh() }, 1500)
         }
         if (requestCode == GilbertConsole.REQ_PHOTOS && PhotoWatcher.allowed(this)) {
             PhotoWatcher.register(this)
