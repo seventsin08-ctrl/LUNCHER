@@ -525,7 +525,7 @@ object GilbertConsole {
             val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
             col.addView(TextView(a).apply { text = it.who; textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
             val kind = when { it.kind.startsWith("video") -> "VIDEO"; it.kind.startsWith("audio") -> "VOICE"; it.kind.startsWith("image") -> "IMAGE"; it.kind.contains("sticker") -> "STICKER"; else -> "FILE" }
-            col.addView(TextView(a).apply { text = "$kind · ${it.app} · ${GilbertFiles.timeLabel(it.time)}"; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
+            col.addView(TextView(a).apply { text = "$kind · ${it.app} · ${PocherFiles.timeLabel(it.time)}"; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
             val scanned = it.img != null
             val status = when {
                 !scanned -> it.msg.ifBlank { "Attachment (the app keeps the file)" }
