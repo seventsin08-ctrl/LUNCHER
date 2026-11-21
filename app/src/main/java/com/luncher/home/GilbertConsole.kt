@@ -109,8 +109,15 @@ object GilbertConsole {
             when {
                 GilbertNarrator.speaking() -> GilbertNarrator.stop()
                 !s.gilbertSpeaks -> { type("VOICE MUTED · TAP 🔇 TO TURN ON"); face?.react("sleepy", 1200) }
-                !briefedThisOpen -> brief()
-                else -> runCatching { narrate(a, current) }.getOrNull()?.let { GilbertNarrator.say(a, it) }
+                else -> {
+                    val u = updates()
+                    val (talk, why) = GilbertMind.decideToSpeak(a, u.any { it.level == 3 }, !briefedThisOpen && u.isNotEmpty())
+                    if (!talk) { type("GILBERT · $why"); face?.react(GilbertMind.faceMood(a), 1500) }
+                    else {
+                        GilbertMind.spoke()
+                        if (!briefedThisOpen) brief() else chatter()?.let { GilbertNarrator.say(a, it) }
+                    }
+                }
             }
         }
         // Tapping anywhere on the HUD does the same.
@@ -124,7 +131,7 @@ object GilbertConsole {
         col.addView(ticker, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
 
         wins = listOf(
-            Win("00", "UPDATES", "UPDATES") { buildUpdates(it) },
+            Win("00", "MIND", "MIND") { buildMind(it) },
             Win("01", "NOW", "NOW") { buildNow(it, s) },
             Win("02", "DIGEST", "SUMMARY") { buildSummary(it) },
             Win("03", "CHAT.LOG", "CHATS") { buildChats(it) },
@@ -140,7 +147,11 @@ object GilbertConsole {
             val t = TextView(a).apply {
                 text = "${w.num} ${w.tab}"; textSize = 11.5f; typeface = monoBold; letterSpacing = 0.06f; gravity = Gravity.CENTER
                 setPadding(dp(11), dp(7), dp(11), dp(7))
-                setOnClickListener { SoundFX.play(a, "tick"); select(i) }
+                setOnClickListener {
+                    SoundFX.play(a, "tick")
+                    val now = System.currentTimeMillis(); if (lastTabTap > 0) GilbertMind.recordTap(a, now - lastTabTap); lastTabTap = now
+                    select(i)
+                }
             }
             tabs += t
             strip.addView(t, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginEnd = dp(6) })
@@ -164,9 +175,11 @@ object GilbertConsole {
         layer.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         closeConsole = { close() }
+        startMotion(a)
         close = {
             closeConsole = null
             GilbertNarrator.onSpeaking = null; GilbertNarrator.stop()
+            motion?.let { l -> runCatching { a.getSystemService(android.hardware.SensorManager::class.java)?.unregisterListener(l) } }; motion = null
             announceJob?.let { uiHandler.removeCallbacks(it) }; announceJob = null; heard.clear(); heardCount = 0
             PocherFiles.onChanged = null; GilbertArchive.onSaved = null; Gilbert.onHeldChanged = prevHeld
             rings = null; face = null; ticker = null; frame = null
@@ -190,8 +203,15 @@ object GilbertConsole {
             booting = false
             SoundFX.play(a, "success")
             // He greets you and asks — the briefing only comes when you tap him or the screen.
-            briefedThisOpen = false
-            GilbertNarrator.say(a, openingQuestion())
+            briefedThisOpen = false; hiddenThisOpen.clear()
+            // Rule 1: he only thinks now, while you're here.
+            val u = updates(); val h = runCatching { Gilbert.health(a) }.getOrNull()
+            GilbertMind.sense(a, u.count { it.level == 2 }, u.count { it.level == 3 }, h?.battery ?: 100, h?.charging ?: true)
+            GilbertMind.recordOpen(a)
+            face?.baseMood = GilbertMind.faceMood(a)
+            val q = openingQuestion()
+            // His own decision: usually he greets you aloud, sometimes just on screen.
+            if (u.any { it.level == 3 } || Math.random() > 0.15) GilbertNarrator.say(a, q) else type(q.uppercase())
         }, 900)
 
         // While he talks: the globe "listens"/pulses and his words show as subtitles in the ticker.
@@ -213,6 +233,40 @@ object GilbertConsole {
     }
 
     private var booting = false
+    private var lastTabTap = 0L
+    private var motion: android.hardware.SensorEventListener? = null
+
+    /** How much the phone moves while he's open (Rule 1: only now, never in the background). */
+    private fun startMotion(a: Activity) {
+        val sm = a.getSystemService(android.hardware.SensorManager::class.java) ?: return
+        val acc = sm.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER) ?: return
+        var sum = 0f; var n = 0; var start = System.currentTimeMillis()
+        val l = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                val m = kotlin.math.sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2])
+                sum += kotlin.math.abs(m - 9.81f); n++
+                if (System.currentTimeMillis() - start > 4000 && n > 0) { GilbertMind.recordMotion(a, (sum / n) / 3f); sum = 0f; n = 0; start = System.currentTimeMillis() }
+            }
+            override fun onAccuracyChanged(s: android.hardware.Sensor?, x: Int) {}
+        }
+        motion = l
+        runCatching { sm.registerListener(l, acc, android.hardware.SensorManager.SENSOR_DELAY_NORMAL) }
+    }
+
+    /** How fast you type in his console fields. */
+    private fun watchTyping(et: EditText) {
+        var burstStart = 0L; var last = 0L; var chars = 0
+        et.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, af: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, before: Int, count: Int) {
+                val now = System.currentTimeMillis()
+                if (count != 1 || before != 0) return   // only single keystrokes (not paste)
+                if (now - last > 2000) { if (chars >= 8 && last > burstStart) act?.let { GilbertMind.recordTyping(it, chars * 1000f / (last - burstStart)) }; burstStart = now; chars = 0 }
+                chars++; last = now
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+    }
     private var muteBtn: TextView? = null
 
     /** Show the mute button while he speaks (or while muted); hide it otherwise. */
@@ -464,6 +518,197 @@ object GilbertConsole {
             .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(n).map { it.key }
 
     private val FLAG = Regex("\\b(tomorrow|tonight|later|deadline|due|exam|quiz|meeting|class|schedule|bukas|mamaya|pay|bayad|send|submit|call me|asap|urgent|\\d{1,2}(:\\d{2})?\\s?(am|pm))\\b", RegexOption.IGNORE_CASE)
+
+    // ------------------------------------------------------------------ 00 MIND
+    private val TASK_W = Regex("\\b(need to|have to|must|todo|to-do|deadline|due|submit|pasa|ipasa|gawin|assignment|activity|report|exam|quiz|bukas|tomorrow)\\b", RegexOption.IGNORE_CASE)
+    private val PROBLEM_W = Regex("\\b(problem|issue|error|bug|crash|broken|not working|help|sira|ayaw|hindi gumagana|di gumagana|failed|urgent|asap|emergency)\\b", RegexOption.IGNORE_CASE)
+    private val IDEA_W = Regex("\\b(idea|what if|plan|maybe we|let's|lets|pwede natin|gawa tayo|project|concept|business)\\b", RegexOption.IGNORE_CASE)
+    private val hiddenThisOpen = HashSet<String>()
+
+    private class MindItem(val id: String, val kind: String, val title: String, val detail: String, val who: String?, val score: Float)
+
+    private fun mindItems(): Map<String, List<MindItem>> {
+        val a = act ?: return emptyMap()
+        fun id(k: String, t: String) = k + (t.hashCode() and 0x7fffffff).toString(16)
+        val out = LinkedHashMap<String, ArrayList<MindItem>>()
+        fun add(kind: String, title: String, detail: String, who: String?, base: Float) {
+            val i = id(kind, title + detail)
+            if (GilbertMind.dismissed(a, i)) return
+            val w = GilbertMind.weight(a, kind, who) * base
+            if (w < 0.25f) return
+            out.getOrPut(kind) { ArrayList() } += MindItem(i, kind, title, detail, who, w)
+        }
+        val u = updates()
+        u.filter { it.level == 3 }.forEach { add("PRIORITY", it.title, it.detail, it.who, 1f) }
+        val recent = messages(3)
+        recent.filter { TASK_W.containsMatchIn(it.text) }.distinctBy { it.text }.take(6)
+            .forEach { add("TASK", TASK_W.find(it.text)!!.value.uppercase() + " · " + it.who, it.text.take(120), it.who, 0.9f) }
+        GilbertMemory.facts(a).filter { TASK_W.containsMatchIn(it) }.take(4).forEach { add("TASK", "Your note", it, null, 1f) }
+        recent.filter { PROBLEM_W.containsMatchIn(it.text) }.distinctBy { it.text }.take(5)
+            .forEach { add("PROBLEM", PROBLEM_W.find(it.text)!!.value.uppercase() + " · " + it.who, it.text.take(120), it.who, 0.9f) }
+        GilbertMemory.facts(a).filter { IDEA_W.containsMatchIn(it) }.take(4).forEach { add("IDEA", "Your note", it, null, 1f) }
+        recent.filter { IDEA_W.containsMatchIn(it.text) }.distinctBy { it.text }.take(4)
+            .forEach { add("IDEA", "From ${it.who}", it.text.take(120), it.who, 0.7f) }
+        u.filter { it.level == 2 }.take(5).forEach { add("CHAT", it.title, it.detail, it.who, 0.8f) }
+        u.filter { it.level == 1 }.forEach { add("UPDATE", it.title, it.detail, it.who, 0.6f) }
+        return out.mapValues { (_, v) -> v.sortedByDescending { it.score } }
+    }
+
+    // ---- suggestions he needs your permission for
+    private class Proposal(val id: String, val title: String, val why: String, val run: () -> Unit)
+
+    private fun pkgFor(label: String): String? = runCatching {
+        val pm = act!!.packageManager
+        pm.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
+            .firstOrNull { it.loadLabel(pm).toString().equals(label, true) }?.activityInfo?.packageName
+    }.getOrNull()
+
+    private fun openApp(pkg: String, label: String) {
+        val a = act ?: return
+        a.packageManager.getLaunchIntentForPackage(pkg)?.let { runCatching { a.startActivity(it) } }
+        GilbertMind.log(a, "Opened $label — you allowed it")
+        closeConsole?.invoke()
+    }
+
+    private fun proposals(): List<Proposal> {
+        val a = act ?: return emptyList()
+        val out = ArrayList<Proposal>()
+        val fresh = updates().filter { it.level == 2 && it.who != null }
+        messages(1).firstOrNull()?.let { e ->
+            val pkg = pkgFor(e.app)
+            if (pkg != null && fresh.isNotEmpty()) out += Proposal("open:${e.app}", "Open ${e.app}?", "${spokenName(e.who)} wrote last: “${e.text.take(50)}”") { openApp(pkg, e.app) }
+        }
+        GilbertMind.usualAppNow(a)?.let { app ->
+            val pkg = pkgFor(app)
+            if (pkg != null && out.none { it.id == "open:$app" }) out += Proposal("habit:$app", "Open $app?", "You usually open it around this time.") { openApp(pkg, app) }
+        }
+        val h = runCatching { Gilbert.health(a) }.getOrNull()
+        if (h != null && h.battery in 0..20 && !h.charging) out += Proposal("saver", "Open Battery Saver?", "Battery is at ${h.battery}%.") {
+            runCatching { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS)) }
+            GilbertMind.log(a, "Opened Battery Saver — you allowed it"); closeConsole?.invoke()
+        }
+        if (Gilbert.heldCount() > 0) out += Proposal("inbox", "Show what I'm holding?", "${Gilbert.heldCount()} quiet notifications.") {
+            GilbertMind.log(a, "Opened the inbox — you allowed it"); thenHome(openInbox)
+        }
+        // Rule 2: changes to himself, only with your permission.
+        GilbertMemory.topPeople(a, 20).map { Gilbert.cleanTitle(it.first) }.firstOrNull { GilbertMind.dismissCount(a, it) >= 3 && !GilbertMind.muted(a, it) }?.let { who ->
+            out += Proposal("mute:$who", "Stop reporting ${spokenName(who)}?", "You removed them ${GilbertMind.dismissCount(a, who)} times. This changes how I work.") {
+                GilbertMind.mute(a, who); GilbertMind.log(a, "Stopped reporting $who — you allowed it")
+                GilbertNarrator.say(a, "Understood. I'll leave ${spokenName(who)} out."); select(0, animate = false)
+            }
+        }
+        return out.filter { it.id !in hiddenThisOpen && !GilbertMind.dismissed(a, "prop:" + it.id) }
+    }
+
+    private fun buildMind(p: LinearLayout) {
+        val a = act ?: return
+        val RED = 0xFFFF453A.toInt()
+        // ---- STATE: how he feels and how well he knows you
+        section(p, "STATE · ${GilbertMind.dominant(a).uppercase()} · ${GilbertMind.stageName(a)} · DAY ${maxOf(1, GilbertMind.daysKnown(a))}")
+        val st = box(p, 2)
+        for ((e, v) in GilbertMind.emotions(a)) {
+            val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(2)) }
+            r.addView(TextView(a).apply { text = e.uppercase(); textSize = 10f; typeface = mono; setTextColor(0x99FFFFFF.toInt()) }, LinearLayout.LayoutParams(dp(84), WRAP_CONTENT))
+            r.addView(Gilbert.SegBar(a, v, if (e == GilbertMind.dominant(a)) Hud.CYAN else Hud.a(Hud.SOFT, 150)), LinearLayout.LayoutParams(0, dp(12), 1f))
+            st.addView(r)
+        }
+        // ---- what's on his mind, by kind
+        val items = mindItems()
+        val labels = linkedMapOf("PRIORITY" to "PRIORITIES", "TASK" to "TASKS", "PROBLEM" to "PROBLEMS", "IDEA" to "IDEAS", "CHAT" to "CHATS", "UPDATE" to "UPDATES")
+        winInfo?.text = "${items.values.sumOf { it.size }} items"
+        if (items.isEmpty()) empty(p, "Nothing on my mind right now. Remarkably peaceful.")
+        for ((k, label) in labels) {
+            val list = items[k]?.filter { it.id !in hiddenThisOpen } ?: continue
+            if (list.isEmpty()) continue
+            section(p, "$label · ${list.size}")
+            for (it in list.take(6)) {
+                val b = box(p, 4)
+                val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                top.addView(TextView(a).apply { text = it.title; textSize = 13.5f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                    LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                val item = it
+                top.addView(TextView(a).apply {
+                    text = "✕"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); setPadding(dp(10), dp(2), dp(2), dp(2))
+                    setOnClickListener {
+                        // Remove it, and learn: less of this kind / person from now on.
+                        SoundFX.play(a, "tick")
+                        GilbertMind.dismiss(a, item.id, item.kind, item.who)
+                        hiddenThisOpen += item.id
+                        b.animate().alpha(0f).translationX(dp(40).toFloat()).setDuration(180).withEndAction { select(0, animate = false, scanOnly = true) }.start()
+                    }
+                })
+                b.addView(top)
+                b.addView(TextView(a).apply { text = item.detail; textSize = 12.5f; setTextColor(0xB3FFFFFF.toInt()); maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+                if (k == "PRIORITY" || k == "PROBLEM") b.background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(0x10FF453A); setStroke(maxOf(1, dp(1)), (RED and 0x00FFFFFF) or 0x66000000) }
+                item.who?.let { w -> b.setOnClickListener { openChat = w; select(3) } }
+            }
+        }
+        // ---- suggestions that need your permission
+        val props = proposals()
+        if (props.isNotEmpty()) {
+            section(p, "SUGGESTIONS · NEED YOUR PERMISSION")
+            for (pr in props) {
+                val b = box(p, 4)
+                b.addView(TextView(a).apply { text = pr.title; textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD })
+                b.addView(TextView(a).apply { text = pr.why; textSize = 12.5f; setTextColor(0xB3FFFFFF.toInt()) })
+                val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+                b.addView(row)
+                pill(row, "Allow") { pr.run() }
+                row.addView(View(a), LinearLayout.LayoutParams(dp(6), 1))
+                pill(row, "Not now") { hiddenThisOpen += pr.id; select(0, animate = false, scanOnly = true) }
+                row.addView(View(a), LinearLayout.LayoutParams(dp(6), 1))
+                pill(row, "Never") { GilbertMind.dismiss(a, "prop:" + pr.id, "SUGGESTION", null); select(0, animate = false, scanOnly = true) }
+            }
+        }
+        // ---- what he has learned about you
+        section(p, "WHAT I'VE LEARNED ABOUT YOU")
+        val lb = box(p, 2)
+        val traits = GilbertMind.traits(a)
+        if (traits.isEmpty()) lb.addView(TextView(a).apply { text = "Still observing. Give me a few days with you."; textSize = 13f; setTextColor(0xB3FFFFFF.toInt()) })
+        for ((k, v) in traits) lb.addView(TextView(a).apply {
+            text = "${k.uppercase()} · $v"; textSize = 12.5f; setTextColor(Color.WHITE); setPadding(0, dp(3), 0, dp(3)) })
+        lb.addView(TextView(a).apply {
+            text = "I only learn while you have me open: how you type here, how the phone moves, when you check in, what you remove. Nothing leaves this phone."
+            textSize = 11f; setTextColor(0x80FFFFFF.toInt()); setPadding(0, dp(6), 0, 0) })
+        val fr = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        lb.addView(fr)
+        pill(fr, "Forget what you learned") { GilbertMind.forget(a); GilbertMind.log(a, "Forgot everything learned — you asked"); select(0, animate = false) }
+        // ---- his rules and what he has done
+        section(p, "RULES")
+        val rb = box(p, 2)
+        GilbertMind.RULES.forEach { r -> rb.addView(TextView(a).apply { text = r; textSize = 12f; setTextColor(0xCCFFFFFF.toInt()); setPadding(0, dp(2), 0, dp(2)) }) }
+        val logs = GilbertMind.logs(a)
+        if (logs.isNotEmpty()) {
+            section(p, "ACTION LOG")
+            val lg = box(p, 2)
+            val f = java.text.SimpleDateFormat("MMM d HH:mm", java.util.Locale.getDefault())
+            logs.take(10).forEach { (t, w) -> lg.addView(TextView(a).apply { text = "${f.format(java.util.Date(t))}  $w"; textSize = 11.5f; typeface = mono; setTextColor(0xB3FFFFFF.toInt()) }) }
+        }
+    }
+
+    /** Small talk once he knows you (from what he has actually seen). */
+    private fun chatter(): String? {
+        val a = act ?: return null
+        val name = GilbertNarrator.title(a)
+        if (GilbertMind.stage(a) == 0 && Math.random() < 0.5) return listOf("I'm still learning how you work, $name. Give me a few days.",
+            "Day ${maxOf(1, GilbertMind.daysKnown(a))} of getting to know you. So far, so interesting.").random()
+        val c = ArrayList<String>()
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val pr = a.getSharedPreferences("gil_mind", android.content.Context.MODE_PRIVATE)
+        if (pr.getFloat("typing", 0f) > 6f && (h >= 22 || h < 4)) c += "You type fast at this hour. Deadline, or inspiration?"
+        GilbertMind.usualAppNow(a)?.let { c += "You usually open $it around now. Want it?" }
+        messages(1).filter { it.today }.groupBy { it.who }.maxByOrNull { it.value.size }?.let { (w, l) -> if (l.size >= 4) c += "${spokenName(w)} has been busy today. ${l.size} messages." }
+        mindItems()["PROBLEM"]?.firstOrNull()?.let { c += "One thing bothers me: ${it.title.substringAfter(" · ")} mentioned a problem." }
+        mindItems()["TASK"]?.firstOrNull()?.let { c += "Don't forget: ${it.title.lowercase().substringBefore(" · ")}, from ${it.title.substringAfter(" · ")}." }
+        when (GilbertMind.dominant(a)) {
+            "amused" -> c += "You do enjoy tapping me, $name."
+            "tired" -> c += "It's late, $name. Even I'm running on low power."
+            "happy" -> c += "Good to have you back, $name."
+            else -> {}
+        }
+        runCatching { narrate(a, current) }.getOrNull()?.let { c += it }
+        return c.randomOrNull()
+    }
 
     // ------------------------------------------------------------------ 00 UPDATES
     /** One thing that changed since your last briefing. level: 3 high, 2 medium, 1 low. */
@@ -905,6 +1150,7 @@ object GilbertConsole {
         ab.addView(nameF)
         val aboutF = field("Paste anything about you: school, work, projects, goals, how you like help…", prof.getString("about", "") ?: "", 8)
         ab.addView(aboutF, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+        watchTyping(nameF); watchTyping(aboutF)
         val saveRow = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         ab.addView(saveRow)
         pill(saveRow, "Save") {
@@ -932,6 +1178,7 @@ object GilbertConsole {
             setOnClickListener { add() }
         }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(8) })
         input.setOnEditorActionListener { _, _, _ -> add(); true }
+        watchTyping(input)
         p.addView(inputRow)
 
         section(p, "YOUR NOTES")

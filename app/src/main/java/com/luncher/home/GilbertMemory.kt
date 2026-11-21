@@ -47,6 +47,7 @@ object GilbertMemory {
         if (label.isBlank() || label == lastApp) return
         lastApp = label
         bump(ctx, "apps", label)
+        runCatching { GilbertMind.recordApp(ctx, label) }
     }
 
     fun person(ctx: Context, name: String) {
