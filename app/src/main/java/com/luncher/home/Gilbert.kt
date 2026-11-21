@@ -454,7 +454,7 @@ object Gilbert {
     }
 
     /** The striped meter: rounded vertical sticks, lit up to [frac] and growing in when shown. */
-    private class SegBar(ctx: Context, private val frac: Float, private val color: Int) : View(ctx) {
+    class SegBar(ctx: Context, private val frac: Float, private val color: Int) : View(ctx) {
         private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
         private var shown = 0f
         private val rect = android.graphics.RectF()

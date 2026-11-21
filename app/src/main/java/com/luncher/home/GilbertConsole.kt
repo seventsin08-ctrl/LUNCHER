@@ -54,6 +54,7 @@ object GilbertConsole {
     private var ticker: TextView? = null
     private var frame: HudFrame? = null
     private var flashWho: String? = null
+    private var prevHeld: (() -> Unit)? = null
 
     fun show(a: Activity, root: FrameLayout, s: Settings, onClosed: (() -> Unit)? = null) {
         act = a
@@ -101,6 +102,7 @@ object GilbertConsole {
         col.addView(ticker, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
 
         wins = listOf(
+            Win("00", "NOW", "NOW") { buildNow(it, s) },
             Win("01", "DIGEST", "SUMMARY") { buildSummary(it) },
             Win("02", "CHAT.LOG", "CHATS") { buildChats(it) },
             Win("03", "PEOPLE.IDX", "NAMES") { buildNames(it) },
@@ -138,8 +140,10 @@ object GilbertConsole {
 
         layer.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        closeConsole = { close() }
         close = {
-            PocherFiles.onChanged = null; GilbertArchive.onSaved = null
+            closeConsole = null
+            PocherFiles.onChanged = null; GilbertArchive.onSaved = null; Gilbert.onHeldChanged = prevHeld
             rings = null; face = null; ticker = null; frame = null
             layer.animate().alpha(0f).scaleX(1.04f).scaleY(1.04f).setDuration(180).withEndAction { root.removeView(layer); onClosed?.invoke() }.start()
         }
@@ -161,8 +165,11 @@ object GilbertConsole {
         }, 900)
 
         // ---- Live updates: new data → ping, ticker, refresh the open window.
-        PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 4) }
+        PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 5) }
         GilbertArchive.onSaved = { app, who -> update("NEW · ${who.uppercase()} · ${app.uppercase()}", who, -1) }
+        val prev = Gilbert.onHeldChanged
+        prevHeld = prev
+        Gilbert.onHeldChanged = { prev?.invoke(); if (current == 0) layer.post { select(0, animate = false, scanOnly = true) } }
     }
 
     /** New data arrived while the console is open. */
@@ -171,7 +178,7 @@ object GilbertConsole {
         type("▲ $msg")
         flashWho = who
         if (onlyWin < 0 || current == onlyWin) {
-            if (current != 3) select(current, animate = false, scanOnly = true)   // don't wipe a note you're typing
+            if (current != 4) select(current, animate = false, scanOnly = true)   // don't wipe a note you're typing
         }
     }
 
@@ -286,6 +293,155 @@ object GilbertConsole {
 
     private val FLAG = Regex("\\b(tomorrow|tonight|later|deadline|due|exam|quiz|meeting|class|schedule|bukas|mamaya|pay|bayad|send|submit|call me|asap|urgent|\\d{1,2}(:\\d{2})?\\s?(am|pm))\\b", RegexOption.IGNORE_CASE)
 
+    // ------------------------------------------------------------------ 00 NOW (what his card used to show)
+    /** Set by the launcher: open the message history / the tools. */
+    var openInbox: (() -> Unit)? = null
+    var openTools: (() -> Unit)? = null
+    private var closeConsole: (() -> Unit)? = null
+
+    /** Close the console, then run [fn] on the home screen. */
+    private fun thenHome(fn: (() -> Unit)?) {
+        val a = act ?: return
+        closeConsole?.invoke()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ fn?.invoke() }, 260)
+        if (a.isFinishing) Unit
+    }
+
+    private fun appIcon(pkg: String): android.graphics.drawable.Drawable? =
+        runCatching { act!!.packageManager.getApplicationIcon(pkg) }.getOrNull()
+    private fun appName(pkg: String): String = runCatching {
+        act!!.packageManager.getApplicationLabel(act!!.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+
+    private fun tag(t: String, color: Int) = TextView(act).apply {
+        text = t.uppercase(); textSize = 9.5f; setTextColor(color); typeface = monoBold; letterSpacing = 0.06f
+        setPadding(dp(7), dp(2), dp(7), dp(3))
+        background = GradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor((color and 0x00FFFFFF) or 0x1F000000)
+            setStroke(maxOf(1, dp(1)), (color and 0x00FFFFFF) or 0x80000000.toInt()) }
+    }
+
+    private fun meter(p: LinearLayout, label: String, pct: Int, color: Int, value: String) {
+        val a = act ?: return
+        val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(5), 0, dp(5)) }
+        r.addView(TextView(a).apply { text = label; textSize = 12.5f; setTextColor(0x99FFFFFF.toInt()) }, LinearLayout.LayoutParams(dp(92), WRAP_CONTENT))
+        r.addView(Gilbert.SegBar(a, pct.coerceIn(0, 100) / 100f, color), LinearLayout.LayoutParams(0, dp(18), 1f))
+        r.addView(TextView(a).apply { text = value; textSize = 12.5f; setTextColor(Color.WHITE); typeface = monoBold; gravity = Gravity.END },
+            LinearLayout.LayoutParams(dp(70), WRAP_CONTENT))
+        p.addView(r)
+    }
+
+    private fun appRow(p: LinearLayout, pkg: String, title: String, trail: View?, onClick: (() -> Unit)?) {
+        val a = act ?: return
+        val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(6)) }
+        r.addView(ImageView(a).apply { setImageDrawable(appIcon(pkg)) }, LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(10) })
+        r.addView(TextView(a).apply { text = title; textSize = 14f; setTextColor(Color.WHITE); maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+            LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        trail?.let { r.addView(it) }
+        onClick?.let { c -> r.setOnClickListener { SoundFX.play(act!!, "tick"); c() } }
+        p.addView(r)
+    }
+
+    private fun buildNow(p: LinearLayout, s: Settings) {
+        val a = act ?: return
+        val GOOD = Hud.CYAN; val AMBER = 0xFFFFC53D.toInt(); val RED = 0xFFFF453A.toInt()
+        val h = Gilbert.health(a)
+        val hc = Gilbert.heldCount()
+        val mentions = Gilbert.notes(a).filter { it.mention && android.text.format.DateUtils.isToday(it.time) }
+
+        // Status
+        section(p, "STATUS")
+        val st = box(p, 2)
+        val (cTxt, cCol) = when {
+            mentions.isNotEmpty() -> "Mentions" to RED
+            hc > 0 -> "Holding $hc" to AMBER
+            (h.tempC ?: 0f) >= 42f || (h.battery in 0..15 && !h.charging) -> "Check" to AMBER
+            else -> "Ready" to GOOD
+        }
+        st.addView(LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(a).apply { text = Gilbert.mood(a, h); textSize = 14f; setTextColor(Color.WHITE) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(tag(cTxt, cCol))
+        })
+        val bat = h.battery.coerceAtLeast(0)
+        meter(st, "Battery", bat, if (bat <= 20) RED else if (bat <= 45) AMBER else GOOD, if (h.battery >= 0) "$bat%${if (h.charging) " ⚡" else ""}" else "—")
+        val calm = (100 - hc * 12).coerceIn(0, 100)
+        meter(st, "Calm", calm, if (calm < 40) AMBER else GOOD, "$calm%")
+
+        // Held for you
+        section(p, "HELD FOR YOU")
+        val hb = box(p, 2)
+        hb.addView(LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(a).apply {
+                text = if (Gilbert.held.isEmpty()) "Nothing waiting — all quiet" else "${Gilbert.held.size} app${if (Gilbert.held.size > 1) "s" else ""} waiting · tap one to open it"
+                textSize = 13.5f; setTextColor(0xCCFFFFFF.toInt()) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(tag(if (hc > 0) "$hc waiting" else "Clear", if (hc > 0) AMBER else GOOD))
+        })
+        if (Gilbert.held.isNotEmpty()) {
+            val total = Gilbert.countsToday(a).sumOf { it.second }.coerceAtLeast(hc)
+            meter(hb, "Kept quiet", if (total > 0) hc * 100 / total else 0, AMBER, "$hc of $total")
+            for ((pkg, n) in Gilbert.held.entries.reversed().toList()) {
+                appRow(hb, pkg, appName(pkg), tag("$n", AMBER)) {
+                    Gilbert.held.remove(pkg); Gilbert.onHeldChanged?.invoke()
+                    a.packageManager.getLaunchIntentForPackage(pkg)?.let { runCatching { a.startActivity(it) } }
+                    closeConsole?.invoke()
+                }
+            }
+            val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+            hb.addView(row)
+            pill(row, "◐ Open inbox") { thenHome(openInbox) }
+            row.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
+            pill(row, "Clear all") { Gilbert.clearHeld(); select(0, animate = false) }
+        }
+
+        // Noisiest apps: tap the tag to cycle Normal → Priority → Quiet
+        val counts = Gilbert.countsToday(a).take(5)
+        if (counts.isNotEmpty()) {
+            section(p, "NOISIEST TODAY · TAP TAG: NORMAL › PRIORITY › QUIET")
+            val nb = box(p, 2)
+            for ((pkg, n) in counts) {
+                fun label() = when { pkg in s.gilbertPriority -> "★ Priority"; pkg in s.gilbertQuiet -> "Quiet"; else -> "Normal" }
+                fun col() = when { pkg in s.gilbertPriority -> AMBER; pkg in s.gilbertQuiet -> 0xFF8E8E93.toInt(); else -> GOOD }
+                val t = tag(label(), col())
+                t.setOnClickListener {
+                    SoundFX.play(a, "pop")
+                    when {
+                        pkg in s.gilbertPriority -> { s.gilbertPriority = s.gilbertPriority - pkg; s.gilbertQuiet = s.gilbertQuiet + pkg }
+                        pkg in s.gilbertQuiet -> s.gilbertQuiet = s.gilbertQuiet - pkg
+                        else -> s.gilbertPriority = s.gilbertPriority + pkg
+                    }
+                    select(0, animate = false)
+                }
+                appRow(nb, pkg, "${appName(pkg)} · $n", t, null)
+            }
+        }
+
+        // Phone check
+        section(p, "PHONE CHECK")
+        val pb = box(p, 2)
+        val tc = h.tempC
+        meter(pb, "Temperature", tc?.let { ((it - 20f) / 30f * 100).roundToInt() } ?: 0,
+            if ((tc ?: 0f) >= 42f) RED else if ((tc ?: 0f) >= 37f) AMBER else GOOD, tc?.let { "${it.roundToInt()}°C" } ?: "—")
+        val stPct = if (h.storageTotalGb > 0) (h.storageFreeGb / h.storageTotalGb * 100).roundToInt() else 0
+        meter(pb, "Storage free", stPct, if (stPct < 10) RED else if (stPct < 25) AMBER else GOOD,
+            if (h.storageTotalGb > 0) "${"%.0f".format(h.storageFreeGb)} GB" else "—")
+        meter(pb, "Memory free", h.ramFreePct.coerceAtLeast(0), if (h.ramFreePct in 0..15) AMBER else GOOD,
+            if (h.ramFreePct >= 0) "${h.ramFreePct}%" else "—")
+
+        // Quick actions
+        section(p, "QUICK ACTIONS")
+        val qa = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        p.addView(qa)
+        pill(qa, "☰ Tools") { thenHome(openTools) }
+        qa.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
+        pill(qa, "◐ Inbox") { thenHome(openInbox) }
+        qa.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
+        pill(qa, "▣ Scan image") {
+            val i = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("image/*")
+            runCatching { a.startActivityForResult(i, REQ_SCAN) }
+        }
+    }
+
     // ------------------------------------------------------------------ 01 DIGEST
     private fun buildSummary(p: LinearLayout) {
         val a = act ?: return
@@ -314,7 +470,7 @@ object GilbertConsole {
                 text = "${list.first().app} · last ${list.first().time}" + if (kw.isNotEmpty()) " · about: ${kw.joinToString(", ")}" else ""
                 textSize = 12f; setTextColor(0x99FFFFFF.toInt()) })
             b.addView(TextView(a).apply { text = "“${list.first().text.take(90)}”"; textSize = 13f; setTextColor(0xCCFFFFFF.toInt()); maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
-            b.setOnClickListener { openChat = who; select(1) }
+            b.setOnClickListener { openChat = who; select(2) }
             if (who == flashWho) flash(b)
         }
 
@@ -338,7 +494,7 @@ object GilbertConsole {
                     dt.text = "PROCESSING ${today.size} MESSAGES…"; dt.typeface = mono
                     GilbertBrain.digest(a, today.take(40).reversed().map { "${it.time} ${it.who}: ${it.text}" }) { r ->
                         digestText = r ?: ("Couldn't write the digest — " + (GilbertBrain.lastError ?: "the brain didn't answer") + ".")
-                        if (current == 0) select(0, animate = false)
+                        if (current == 1) select(1, animate = false)
                     }
                 }
             }
@@ -433,7 +589,7 @@ object GilbertConsole {
             col.addView(TextView(a).apply {
                 text = "$apps · today $today · last ${list.first().stamp}"; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
             row.addView(col, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-            row.setOnClickListener { openChat = who; select(1) }
+            row.setOnClickListener { openChat = who; select(2) }
             p.addView(row)
         }
     }
@@ -450,7 +606,7 @@ object GilbertConsole {
         inputRow.addView(input, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         fun add() {
             val t = input.text.toString().trim()
-            if (t.isNotEmpty()) { GilbertMemory.addFact(a, t); input.setText(""); SoundFX.play(a, "success"); select(3, animate = false) }
+            if (t.isNotEmpty()) { GilbertMemory.addFact(a, t); input.setText(""); SoundFX.play(a, "success"); select(4, animate = false) }
         }
         inputRow.addView(TextView(a).apply {
             text = "＋"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
@@ -469,7 +625,7 @@ object GilbertConsole {
             r.addView(TextView(a).apply { text = f; textSize = 14f; setTextColor(Color.WHITE) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             r.addView(TextView(a).apply {
                 text = "✕"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); setPadding(dp(10), dp(4), dp(4), dp(4))
-                setOnClickListener { GilbertMemory.removeFact(a, f); select(3, animate = false) }
+                setOnClickListener { GilbertMemory.removeFact(a, f); select(4, animate = false) }
             })
             b.addView(r)
         }
@@ -488,7 +644,7 @@ object GilbertConsole {
             val hit = FLAG.find(e.text)?.value?.uppercase() ?: ""
             b.addView(TextView(a).apply { text = "⚑ $hit · ${e.who} · ${e.stamp}"; textSize = 10.5f; typeface = monoBold; setTextColor(IconFactory.blend(tint, Color.WHITE, 0.4f)) })
             b.addView(TextView(a).apply { text = e.text.take(160); textSize = 13.5f; setTextColor(Color.WHITE) })
-            b.setOnClickListener { openChat = e.who; select(1) }
+            b.setOnClickListener { openChat = e.who; select(2) }
         }
     }
 
@@ -573,7 +729,7 @@ object GilbertConsole {
         android.widget.Toast.makeText(a, "Scanning…", android.widget.Toast.LENGTH_SHORT).show()
         PocherFiles.scanPicked(a, uri) { ok ->
             if (!ok) android.widget.Toast.makeText(a, "Couldn't open that image", android.widget.Toast.LENGTH_SHORT).show()
-            select(4, animate = false)
+            select(5, animate = false)
         }
     }
 

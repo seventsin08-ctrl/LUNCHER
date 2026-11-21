@@ -297,8 +297,11 @@ class MainActivity : Activity() {
 
     /** Tap Gilbert: his card (held notifications, noisiest apps, phone check). */
     private fun openGilbert() {
-        // Over other apps: tapping Gilbert opens his chat right there.
-        if (!isActive) { GilbertLauncher.open(this); return }
+        // One place for everything: his HUD console (00 NOW has what the card used to show).
+        GilbertConsole.openInbox = { if (::sideHud.isInitialized) sideHud.openHistory(); Gilbert.clearHeld() }
+        GilbertConsole.openTools = { if (::island.isInitialized) island.toggleTools() }
+        GilbertLauncher.open(this)
+        if (true) return
         Gilbert.showPanel(this, root, settings,
             appInfo = { pkg -> allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label } },
             openApp = { pkg ->
@@ -516,6 +519,8 @@ class MainActivity : Activity() {
         NotificationService.onOngoing = { refreshOngoing() }
         startPrivacyWatch()
         sideHud = SideHud(this, settings)
+        GilbertConsole.openInbox = { sideHud.openHistory(); Gilbert.clearHeld() }
+        GilbertConsole.openTools = { if (::island.isInitialized) island.toggleTools() }
         sideHud.onPlayPause = { togglePlay() }
         sideHud.onMoved = { setupSidebar() }
         NotificationService.loadHistory(this)
