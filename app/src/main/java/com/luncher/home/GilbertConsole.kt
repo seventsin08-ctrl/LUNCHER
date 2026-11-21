@@ -146,6 +146,7 @@ object GilbertConsole {
         closeConsole = { close() }
         close = {
             closeConsole = null
+            GilbertNarrator.onSpeaking = null; GilbertNarrator.stop()
             PocherFiles.onChanged = null; GilbertArchive.onSaved = null; Gilbert.onHeldChanged = prevHeld
             rings = null; face = null; ticker = null; frame = null
             layer.animate().alpha(0f).scaleX(1.04f).scaleY(1.04f).setDuration(180).withEndAction { root.removeView(layer); onClosed?.invoke() }.start()
@@ -163,24 +164,116 @@ object GilbertConsole {
         layer.postDelayed({
             strip.animate().alpha(1f).setDuration(220).start()
             fr.animate().alpha(1f).setDuration(200).start()
+            booting = true
             select(startWin.coerceIn(0, wins.size - 1)); startWin = 0
+            booting = false
             SoundFX.play(a, "success")
+            // He greets you and briefs you.
+            GilbertNarrator.say(a, briefing())
         }, 900)
+
+        // While he talks: the globe "listens"/pulses and his words show as subtitles in the ticker.
+        GilbertNarrator.start(a)
+        GilbertNarrator.onSpeaking = { line ->
+            if (line != null) { face?.react("listening", 60_000); type(line.uppercase()) }
+            else face?.react("happy", 600)
+        }
 
         // ---- Live updates: new data → ping, ticker, refresh the open window.
         PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 5) }
-        GilbertArchive.onSaved = { app, who -> update("NEW · ${who.uppercase()} · ${app.uppercase()}", who, -1) }
+        GilbertArchive.onSaved = { app, who -> update("NEW · ${who.uppercase()} · ${app.uppercase()}", who, -1,
+            "New message from ${who.substringAfterLast(": ")}, on $app.") }
         val prev = Gilbert.onHeldChanged
         prevHeld = prev
         Gilbert.onHeldChanged = { prev?.invoke(); if (current == 0) layer.post { select(0, animate = false, scanOnly = true) } }
+    }
+
+    private var booting = false
+
+    // ------------------------------------------------------------------ what Gilbert says
+    private val ENDINGS = listOf("What's the task for today?", "What shall we tackle first?", "What's on the agenda?",
+        "How can I help you get ahead today?", "Where would you like to start?")
+
+    /** Greeting + a short briefing from the data (spoken when the console opens). */
+    private fun briefing(): String {
+        val a = act ?: return ""
+        val sb = StringBuilder(GilbertNarrator.greeting(a))
+        val sir = GilbertNarrator.title(a)
+        val today = messages(1).filter { it.today }
+        val h = runCatching { Gilbert.health(a) }.getOrNull()
+        if (today.isEmpty()) sb.append(" All quiet so far, no messages today.")
+        else {
+            val top = today.groupBy { it.who }.maxByOrNull { it.value.size }
+            sb.append(" You have ${GilbertNarrator.plural(today.size, "message")} from ${GilbertNarrator.plural(today.map { it.who }.distinct().size, "person", "people")}")
+            top?.let { sb.append(", mostly ${spokenName(it.key)}") }
+            sb.append(".")
+        }
+        val mentions = Gilbert.notes(a).count { it.mention && android.text.format.DateUtils.isToday(it.time) }
+        if (mentions > 0) sb.append(" ${GilbertNarrator.plural(mentions, "person")} mentioned you.")
+        val held = Gilbert.heldCount()
+        if (held > 0) sb.append(" I'm holding ${GilbertNarrator.plural(held, "notification")} for you.")
+        messages(1).firstOrNull { it.today && FLAG.containsMatchIn(it.text) }?.let { e ->
+            sb.append(" ${spokenName(e.who)} mentioned ${FLAG.find(e.text)?.value?.lowercase()}, worth a look.")
+        }
+        h?.let {
+            if (it.battery in 0..20 && !it.charging) sb.append(" Battery is at ${it.battery} percent, you may want to charge.")
+            if ((it.tempC ?: 0f) >= 42f) sb.append(" The phone is running hot.")
+        }
+        if (!GilbertBrain.installed(a)) Unit
+        sb.append(" ").append(ENDINGS.random())
+        if (sir == "sir" && Math.random() < 0.3) Unit
+        return sb.toString()
+    }
+
+    /** "BSIT 1-C (2026-2027): John Cedrick Culia" → "John Cedrick Culia in BSIT 1-C". */
+    private fun spokenName(who: String): String {
+        val parts = who.split(": ", limit = 2)
+        val group = parts[0].replace(Regex("\\(\\d{4}-\\d{4}\\)"), "").trim()
+        return if (parts.size == 2) "${parts[1].trim()} in $group" else group
+    }
+
+    /** What he says when you open a window. */
+    private fun narrate(a: Activity, i: Int): String? {
+        val sir = GilbertNarrator.title(a)
+        return when (i) {
+            0 -> {
+                val h = Gilbert.health(a); val held = Gilbert.heldCount()
+                "Status. " + (if (held > 0) "${GilbertNarrator.plural(held, "notification")} waiting. " else "Nothing waiting. ") +
+                    "Battery ${h.battery} percent${if (h.charging) " and charging" else ""}."
+            }
+            1 -> {
+                val today = messages(1).filter { it.today }
+                if (today.isEmpty()) "Nothing to summarise yet, $sir."
+                else {
+                    val top = today.groupBy { it.who }.entries.sortedByDescending { it.value.size }.take(2).map { spokenName(it.key) }
+                    "Today's summary. ${GilbertNarrator.plural(today.size, "message")}. Most active: ${top.joinToString(" and ")}."
+                }
+            }
+            2 -> messages(3).firstOrNull()?.let { "Your chats. The latest is from ${spokenName(it.who)}: ${it.text.take(80)}" } ?: "No chats yet."
+            3 -> messages(7).groupBy { it.who }.maxByOrNull { it.value.size }?.let {
+                "Your people. Top contact this week is ${spokenName(it.key)}, with ${GilbertNarrator.plural(it.value.size, "message")}." } ?: "No names yet."
+            4 -> {
+                val notes = GilbertMemory.facts(a).size
+                val flagged = messages(3).count { FLAG.containsMatchIn(it.text) }
+                "Notes. You have ${GilbertNarrator.plural(notes, "note")}, and I flagged ${GilbertNarrator.plural(flagged, "item")} that look like tasks or dates."
+            }
+            5 -> {
+                val f = PocherFiles.list(a)
+                "Files. ${GilbertNarrator.plural(f.size, "file")}, ${f.count { it.img != null }} scanned."
+            }
+            6 -> if (GilbertBrain.installed(a)) "System. Brain ${if (GilbertBrain.loaded) "online" else "standing by"}: ${GilbertBrain.modelName(a) ?: "installed"}."
+                else "System. Running on memory, no brain installed."
+            else -> null
+        }
     }
 
     /** Redraw the open window. */
     fun refresh() { if (act != null) select(current, animate = false, scanOnly = true) }
 
     /** New data arrived while the console is open. */
-    private fun update(msg: String, who: String?, onlyWin: Int) {
+    private fun update(msg: String, who: String?, onlyWin: Int, spoken: String? = null) {
         rings?.ping(); face?.ping()
+        act?.let { a -> spoken?.let { GilbertNarrator.say(a, it, flush = false) } }
         type("▲ $msg")
         flashWho = who
         if (onlyWin < 0 || current == onlyWin) {
@@ -227,6 +320,8 @@ object GilbertConsole {
                 v.animate().alpha(1f).translationX(0f).setStartDelay(minOf(k, 12) * 35L).setDuration(220).start()
             }
             if (!scanOnly) type("OPEN · WIN ${w.num} · ${w.prog}")
+            // He talks you through the window you opened (not during start-up — that's the briefing).
+            if (!booting) act?.let { a -> runCatching { narrate(a, i) }.getOrNull()?.let { GilbertNarrator.say(a, it) } }
         }
         tabs.getOrNull(i)?.let { t -> (t.parent?.parent as? HorizontalScrollView)?.smoothScrollTo(maxOf(0, t.left - dp(40)), 0) }
     }
@@ -500,6 +595,7 @@ object GilbertConsole {
                     dt.text = "PROCESSING ${today.size} MESSAGES…"; dt.typeface = mono
                     GilbertBrain.digest(a, today.take(40).reversed().map { "${it.time} ${it.who}: ${it.text}" }) { r ->
                         digestText = r ?: ("Couldn't write the digest — " + (GilbertBrain.lastError ?: "the brain didn't answer") + ".")
+                        GilbertNarrator.say(a, if (r != null) "Here's your digest. " + r.replace("•", ". ") else "I couldn't write the digest this time.")
                         if (current == 1) select(1, animate = false)
                     }
                 }

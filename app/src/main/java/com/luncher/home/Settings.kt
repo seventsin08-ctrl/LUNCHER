@@ -482,10 +482,14 @@ class Settings(ctx: Context) {
     var gilbertArchive: Boolean
         get() = p.getBoolean("s_gil_archive", true)
         set(v) = put("s_gil_archive", v)
-    /** When you talk to Gilbert with your voice, he answers out loud. */
+    /** Gilbert's voice in his console (greets you, talks you through each window). */
     var gilbertSpeaks: Boolean
-        get() = p.getBoolean("s_gil_speaks", true)
-        set(v) = put("s_gil_speaks", v)
+        get() = p.getBoolean("s_gil_voice", true)
+        set(v) = put("s_gil_voice", v)
+    /** How Gilbert addresses you: "sir", "ma'am", "boss" or "name". */
+    var gilbertTitle: String
+        get() = p.getString("s_gil_title", "sir") ?: "sir"
+        set(v) = put("s_gil_title", v)
     /** Sound effects still play during Do Not Disturb. */
     var soundsInDnd: Boolean
         get() = p.getBoolean("s_sfx_dnd", true)
