@@ -697,6 +697,7 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("s_apply_wallpaper", false).apply()
             applyGlassWallpaper()
         }
+        if (::landscape.isInitialized && landscape.isShowing) root.postDelayed({ if (landscape.isShowing) landscapeChrome(false) }, 120)
         if (settings.pendingEdit) {
             settings.pendingEdit = false
             mainHandler.postDelayed({ enterEditMode() }, 250)
@@ -765,9 +766,9 @@ class MainActivity : Activity() {
             ::controlCenter.isInitialized && controlCenter.isShowing -> controlCenter.hide()
             ::nc.isInitialized && nc.isShowing -> nc.hide()
             ::todayView.isInitialized && todayView.isShowing -> todayView.hide()
-            ::standBy.isInitialized && standBy.isShowing -> standBy.hide()
+            ::standBy.isInitialized && standBy.isShowing -> { tilt.dismissed = true; standBy.hide() }
             ::lockCover.isInitialized && lockCover.isShowing -> lockCover.hide()
-            ::landscape.isInitialized && landscape.isShowing -> landscape.hide()
+            ::landscape.isInitialized && landscape.isShowing -> if (!landscape.back()) { tilt.dismissed = true; landscape.hide() }
             searchOverlay.visibility == View.VISIBLE -> closeSearch()
             editMode -> exitEditMode()
             pager.currentItem != homePageIndex() -> pager.currentItem = homePageIndex()
@@ -6696,7 +6697,7 @@ class MainActivity : Activity() {
             onSummaryRead = { clearSummary() }
         }
         todayView = TodayView(this, root, stage).apply { onBlur = blur; cards = { todayCards() }; onEdit = { showWidgetGallery() } }
-        standBy = StandBy(this, root, stage).apply { battery = { batteryLevel }; photo = { photoCache.values.firstOrNull() } }
+        standBy = StandBy(this, root, stage).apply { battery = { batteryLevel }; photo = { photoCache.values.firstOrNull() }; onUserClose = { tilt.dismissed = true } }
         lockCover = LockCover(this, root, stage).apply {
             onBlur = blur
             info = { listOfNotNull("⚡ $batteryLevel%", InfoData.weather?.let { "${it.temp}°" }).joinToString("  ·  ") }
@@ -6706,6 +6707,13 @@ class MainActivity : Activity() {
             apps = { pages.filterIsInstance<Page.Home>().flatMap { p -> p.apps.map { it.first } } }
             dock = { dockApps() }
             onLaunch = { a, v -> launch(a, v) }
+            folderOf = { a ->
+                folderId(a)?.let { id -> folders().firstOrNull { it.id == id } }?.let { g ->
+                    val byKey = allApps.associateBy { it.key }
+                    g.name to g.keys.mapNotNull { byKey[it] }
+                }
+            }
+            onChrome = { show -> landscapeChrome(show) }
             battery = { batteryLevel }
             charging = { batteryCharging }
         }
@@ -6857,25 +6865,40 @@ class MainActivity : Activity() {
     }
 
     // ---- StandBy (feature 31): phone on its side while charging.
+    private val tilt = Ios.TiltMachine()
+
+    /** Phone angle → StandBy / Landscape Home (rules + tests in Ios.TiltMachine). */
     private fun onTilt(deg: Int) {
-        if (deg == android.view.OrientationEventListener.ORIENTATION_UNKNOWN || !::standBy.isInitialized || !::landscape.isInitialized) return
-        val dir = when (deg) { in 65..115 -> -90f; in 245..295 -> 90f; in 0..25, in 335..359 -> 0f; else -> return }
-        val now = System.currentTimeMillis()
-        if (dir != sidewaysDir) { sidewaysDir = dir; sidewaysSince = now }
-        // Back upright: leave right away (no waiting), like the iPhone rotating back.
-        if (dir == 0f) { if (standBy.isShowing) standBy.hide(); if (landscape.isShowing) landscape.hide(); return }
-        val steadyMs = now - sidewaysSince
-        // Turned to the other side while sideways: turn the page round.
-        if (landscape.isShowing && landscape.turn != dir && steadyMs > 400) { landscape.hide(immediate = true); landscape.turn = dir; landscape.show(); return }
-        if (standBy.isShowing || landscape.isShowing) return
-        val free = isActive && !overlayOpen() && !editMode && drag == null
-        if (steadyMs > 1200 && Ios.standby(settings.ios("standby"), batteryCharging, true, free)) {
-            standBy.turn = dir; standBy.show(); return
+        if (!::standBy.isInitialized || !::landscape.isInitialized) return
+        // Keep the machine in step with what's really on screen (a panel may have been closed by Back).
+        tilt.showing = when { landscape.isShowing -> "landscape"; standBy.isShowing -> "standby"; else -> null }
+        if (tilt.showing != null) tilt.showingTurn = if (landscape.isShowing) landscape.turn else standBy.turn
+        val free = isActive && !editMode && drag == null && widgetDrag == null &&
+            !(overlayOpen() && !landscape.isShowing && !standBy.isShowing)
+        when (val t = tilt.feed(deg, System.currentTimeMillis(), batteryCharging, settings.ios("standby"),
+            settings.ios("landscape"), autoRotateOn(), free)) {
+            is Ios.Tilt.Hide -> { landscape.hide(); standBy.hide() }
+            is Ios.Tilt.Flip -> { landscape.hide(immediate = true); landscape.turn = t.turn; landscape.showLabels = settings.showLabels; landscape.show() }
+            is Ios.Tilt.ShowStandby -> { landscape.hide(immediate = true); standBy.turn = t.turn; standBy.show() }
+            is Ios.Tilt.ShowLandscape -> { landscape.turn = t.turn; landscape.showLabels = settings.showLabels; landscape.show() }
+            else -> {}
         }
-        if (steadyMs > 500 && Ios.landscape(settings.ios("landscape"), autoRotateOn(), free) && !(batteryCharging && settings.ios("standby"))) {
-            landscape.turn = dir
-            landscape.showLabels = settings.showLabels
-            landscape.show()
+    }
+
+    /** Hide (false) or bring back (true) the floating extras that would sit wrongly over the landscape page. */
+    private fun landscapeChrome(show: Boolean) {
+        if (!show) {
+            tapZone?.setHidden(true)
+            ToolsBar.current?.setSearching(true)
+            if (::sideHud.isInitialized) runCatching { sideHud.dismiss() }
+            sidebar?.detach()
+            if (::island.isInitialized) island.enabled = false
+        } else {
+            tapZone?.setHidden(GameState.playing || searchingNow)
+            ToolsBar.current?.setSearching(false)
+            if (::sideHud.isInitialized) runCatching { sideHud.rest() }
+            setupSidebar()
+            if (::island.isInitialized) island.enabled = settings.island
         }
     }
 

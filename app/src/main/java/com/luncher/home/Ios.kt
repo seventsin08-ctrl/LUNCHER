@@ -350,6 +350,77 @@ object Ios {
     fun standby(enabled: Boolean, charging: Boolean, landscape: Boolean, onHome: Boolean) =
         enabled && charging && landscape && onHome
 
+    // ------------------------------------------------------------------ 36. landscape: tilt + layout
+
+    sealed class Tilt {
+        object None : Tilt()
+        object Hide : Tilt()
+        class ShowLandscape(val turn: Float) : Tilt()
+        class ShowStandby(val turn: Float) : Tilt()
+        class Flip(val turn: Float) : Tilt()
+    }
+
+    /**
+     * Turns raw phone-angle readings into decisions. Upright hides at once; sideways must be held
+     * steady (landscape 0.5 s, StandBy 1.2 s) so a wobble never flickers the screen. Diagonal angles
+     * are ignored. StandBy wins while charging (if on); the rotation lock is respected.
+     */
+    class TiltMachine {
+        var dir = 0f; private set
+        private var since = 0L
+        /** What is on screen now: null, "landscape" or "standby"; and which way it's turned. */
+        var showing: String? = null
+        var showingTurn = 0f
+        /** Set when you closed it with Back while still sideways: stays closed until you go upright. */
+        var dismissed = false
+
+        fun feed(deg: Int, now: Long, charging: Boolean, standbyOn: Boolean, landscapeOn: Boolean,
+                 autoRotate: Boolean, free: Boolean): Tilt {
+            val d = when (deg) { in 65..115 -> -90f; in 245..295 -> 90f; in 0..25, in 335..359 -> 0f; else -> return Tilt.None }
+            if (d != dir) { dir = d; since = now }
+            if (d == 0f) { dismissed = false; return if (showing != null) Tilt.Hide.also { showing = null } else Tilt.None }
+            if (dismissed && showing == null) return Tilt.None
+            val steady = now - since
+            if (showing == "landscape" && showingTurn != d) {
+                return if (steady > 400) Tilt.Flip(d).also { showingTurn = d } else Tilt.None
+            }
+            if (showing == "landscape" && charging && standbyOn && steady > 1200 && free) {
+                showing = "standby"; showingTurn = d; return Tilt.ShowStandby(d)
+            }
+            if (showing != null) return Tilt.None
+            if (steady > 1200 && standby(standbyOn, charging, true, free)) { showing = "standby"; showingTurn = d; return Tilt.ShowStandby(d) }
+            if (steady > 500 && landscape(landscapeOn, autoRotate, free) && !(charging && standbyOn)) {
+                showing = "landscape"; showingTurn = d; return Tilt.ShowLandscape(d)
+            }
+            return Tilt.None
+        }
+    }
+
+    class LandLayout(val left: Int, val widget: Int, val gridLeft: Int, val gridW: Int, val cols: Int, val rows: Int,
+                     val cellW: Int, val cellH: Int, val dockLeft: Int, val dockW: Int, val top: Int, val innerH: Int,
+                     /** How many dock icons fit standing up (56dp icon + 10dp gap each). */
+                     val dockSlots: Int)
+
+    /**
+     * Landscape page layout in px: widget column | app grid | dock, with safe side margins (camera).
+     * [dp] = density. Guarantees: nothing overlaps, everything inside the screen, icons fit their cells.
+     */
+    fun landLayout(W: Int, H: Int, dp: Float, labels: Boolean, hasDock: Boolean): LandLayout {
+        fun px(v: Int) = (v * dp).toInt()
+        val side = px(34); val vpad = px(14); val gap = px(16)
+        val innerH = H - vpad * 2
+        val widget = ((innerH - px(14)) / 2).coerceAtMost(px(170)).coerceAtLeast(px(60))
+        val dockW = if (hasDock) px(78) else 0
+        val gridLeft = side + widget + gap
+        val gridW = (W - side - (if (hasDock) dockW + gap else 0) - gridLeft).coerceAtLeast(px(84))
+        val cols = (gridW / px(84)).coerceIn(2, 7)
+        val rowH = px(if (labels) 86 else 72)
+        val rows = ((innerH - px(16)) / rowH).coerceIn(1, 5)
+        val dockSlots = if (hasDock) ((innerH - px(24)) / px(66)).coerceIn(0, 5) else 0
+        return LandLayout(side, widget, gridLeft, gridW, cols, rows, gridW / cols, (innerH - px(16)) / rows,
+            W - side - dockW, dockW, vpad, innerH, dockSlots)
+    }
+
     /** Landscape Home: only with the feature on, rotation lock off, and the Home Screen free. */
     fun landscape(enabled: Boolean, autoRotate: Boolean, onHomeFree: Boolean) = enabled && autoRotate && onHomeFree
 

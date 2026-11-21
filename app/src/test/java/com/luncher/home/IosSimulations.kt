@@ -40,6 +40,8 @@ object IosSimulations {
         suggestions(r, rnd)
         standbyCharging(r)
         sky(r)
+        landscapeTilt(r, rnd)
+        landscapeLayout(r)
         return r
     }
 
@@ -342,5 +344,82 @@ object IosSimulations {
         }
         r.check("33 weatherwall", Ios.sky(61, 12) == Ios.Sky.RAIN && Ios.sky(0, 23) == Ios.Sky.CLEAR_NIGHT &&
             Ios.sky(95, 12) == Ios.Sky.STORM && Ios.sky(73, 9) == Ios.Sky.SNOW && Ios.sky(45, 9) == Ios.Sky.FOG) { "weather code mapping" }
+    }
+
+    // ---------------------------------------------------------------- 36 landscape: phone tilting
+    private fun landscapeTilt(r: Report, rnd: Random) {
+        repeat(1500) { session ->
+            val m = Ios.TiltMachine()
+            var now = 1_000_000L
+            var shown: String? = null; var shownTurn = 0f
+            var lastDir = 0f; var dirSince = now
+            var shows = 0
+            val charging = rnd.nextInt(4) == 0; val sbOn = rnd.nextBoolean(); val lsOn = rnd.nextInt(5) != 0
+            val auto = rnd.nextInt(5) != 0
+            var target = 0      // where the hand is heading: 0 upright, 90, 270 or a diagonal
+            repeat(400) {
+                now += rnd.nextLong(30, 120)                      // sensor every 30–120 ms
+                if (rnd.nextInt(40) == 0) target = listOf(0, 90, 270, 45, 135, 0, 90)[rnd.nextInt(7)]
+                val noise = rnd.nextInt(-14, 15)
+                val deg = ((target + noise) % 360 + 360) % 360
+                val free = rnd.nextInt(30) != 0
+                if (rnd.nextInt(200) == 0 && shown != null) { m.dismissed = true; shown = null; m.showing = null }   // Back pressed
+                val dirNow = when (deg) { in 65..115 -> -90f; in 245..295 -> 90f; in 0..25, in 335..359 -> 0f; else -> null }
+                if (dirNow != null && dirNow != lastDir) { lastDir = dirNow; dirSince = now }
+                val t = m.feed(deg, now, charging, sbOn, lsOn, auto, free)
+                when (t) {
+                    is Ios.Tilt.Hide -> {
+                        r.check("36 landscape", shown != null) { "session $session: hide with nothing shown" }
+                        r.check("36 landscape", dirNow == 0f) { "session $session: hid while not upright ($deg°)" }
+                        shown = null
+                    }
+                    is Ios.Tilt.ShowLandscape -> {
+                        shows++
+                        r.check("36 landscape", shown == null) { "session $session: two pages at once" }
+                        r.check("36 landscape", lsOn && auto && free) { "session $session: landscape against settings/rotation lock" }
+                        r.check("36 landscape", !(charging && sbOn)) { "session $session: landscape instead of StandBy while charging" }
+                        r.check("36 landscape", now - dirSince > 500 && t.turn == dirNow) { "session $session: shown before the phone was steady" }
+                        shown = "landscape"; shownTurn = t.turn
+                    }
+                    is Ios.Tilt.ShowStandby -> {
+                        shows++
+                        r.check("31 standby", charging && sbOn && free) { "session $session: StandBy without charging" }
+                        r.check("31 standby", now - dirSince > 1200) { "session $session: StandBy before steady" }
+                        shown = "standby"; shownTurn = t.turn
+                    }
+                    is Ios.Tilt.Flip -> {
+                        r.check("36 landscape", shown == "landscape" && t.turn != shownTurn && t.turn == dirNow) { "session $session: bad flip" }
+                        shownTurn = t.turn
+                    }
+                    else -> {}
+                }
+                if (dirNow == null) r.check("36 landscape", t is Ios.Tilt.None) { "session $session: diagonal angle changed the screen" }
+                if (dirNow == 0f && shown != null) r.check("36 landscape", false) { "session $session: still sideways page while upright" }
+                if (m.dismissed && dirNow != 0f) r.check("36 landscape", t !is Ios.Tilt.ShowLandscape && t !is Ios.Tilt.ShowStandby) { "session $session: came back after Back" }
+            }
+            r.check("performance", shows <= 60) { "session $session: flickered $shows times" }
+        }
+    }
+
+    // ---------------------------------------------------------------- 36 landscape: layout on many phones
+    private fun landscapeLayout(r: Report) {
+        for (density in listOf(1.5f, 2f, 2.625f, 2.75f, 3f, 3.5f, 4f))
+            for (shortDp in listOf(320, 340, 360, 375, 393, 412, 430, 480))
+                for (longDp in listOf(640, 700, 760, 800, 852, 915, 932, 1000))
+                    for (labels in listOf(true, false)) for (dock in listOf(true, false)) {
+                        val W = (longDp * density).toInt(); val H = (shortDp * density).toInt()
+                        val g = Ios.landLayout(W, H, density, labels, dock)
+                        fun dp(v: Int) = (v * density).toInt()
+                        val tag = "${longDp}x$shortDp@$density"
+                        r.check("36 landscape", g.left >= dp(30) && g.left + g.widget < g.gridLeft) { "$tag widgets overlap the grid" }
+                        r.check("36 landscape", g.top + g.widget * 2 + dp(14) <= g.top + g.innerH) { "$tag widgets taller than the screen" }
+                        r.check("36 landscape", g.gridLeft + g.gridW <= (if (dock) g.dockLeft else W - g.left) + 1) { "$tag grid runs into the dock/edge" }
+                        r.check("36 landscape", !dock || g.dockLeft + g.dockW <= W - dp(30)) { "$tag dock off the edge (camera side)" }
+                        r.check("36 landscape", g.cellW >= dp(60)) { "$tag icon cell too narrow (${g.cellW / density}dp)" }
+                        r.check("36 landscape", g.cellH >= dp(if (labels) 76 else 60)) { "$tag icon cell too short (${g.cellH / density}dp)" }
+                        r.check("36 landscape", g.cols in 2..7 && g.rows in 1..5) { "$tag grid ${g.cols}×${g.rows}" }
+                        r.check("36 landscape", !dock || g.dockSlots * dp(66) + dp(24) <= g.innerH) { "$tag dock icons don't fit" }
+                        r.check("36 landscape", !dock || g.dockSlots >= 3) { "$tag dock shows fewer than 3 apps" }
+                    }
     }
 }

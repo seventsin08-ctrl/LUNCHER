@@ -370,10 +370,14 @@ class StandBy(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLayer(act
     var turn = 90f
     var battery: (() -> Int)? = null
     var photo: (() -> Bitmap?)? = null
+    /** Tapped away by you (so it doesn't come straight back while the phone is still sideways). */
+    var onUserClose: (() -> Unit)? = null
 
     override fun build(l: FrameLayout) {
         l.setBackgroundColor(Color.BLACK)
-        val sw = act.resources.displayMetrics.widthPixels; val sh = act.resources.displayMetrics.heightPixels
+        // The real window size (the display size can leave out the navigation bar).
+        val sw = root.width.takeIf { it > 0 } ?: act.resources.displayMetrics.widthPixels
+        val sh = root.height.takeIf { it > 0 } ?: act.resources.displayMetrics.heightPixels
         // The launcher stays portrait; StandBy draws its own landscape page rotated to match the phone.
         val land = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -400,7 +404,7 @@ class StandBy(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLayer(act
         land.addView(right, LinearLayout.LayoutParams(0, MATCH_PARENT, 1f).apply { marginStart = act.dpx(20) })
         // A sh×sw box rotated 90° fills the portrait window exactly.
         l.addView(land, FrameLayout.LayoutParams(sh, sw, Gravity.CENTER))
-        l.setOnClickListener { hide() }
+        l.setOnClickListener { onUserClose?.invoke(); hide() }
     }
 }
 

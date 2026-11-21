@@ -21,6 +21,11 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        186 to listOf("📱 Landscape fixed: folders now open sideways inside the landscape page (they used to pop up upright on top)",
+            "🔧 Landscape: the island, side bars, side island and tools circle hide while it shows and come back after",
+            "🎨 Landscape: clock and status rings on dark frosted glass; rings show battery %, steps, date and temperature as text (no broken icons)",
+            "🔧 Landscape: fills the whole screen, the dock only shows as many apps as fit, Back closes a folder first, and after Back it stays closed until you turn the phone upright",
+            "✅ Turning is steady: upright closes at once, sideways must be held ~½ s, diagonal angles are ignored — checked with 1.1 million simulated checks"),
         185 to listOf("📅 Today View redesigned: fixed header below the status bar, dark frosted cards, cards float in one by one, press effect, large title shrinks as you scroll, Edit button",
             "🔧 Today: no more empty weather box (slim 'tap to update' row) and the steps chart no longer shows a green blob",
             "👋 New iPhone-style hello: one flowing pen stroke on a slate screen, soft glow, 'Swipe up to begin'",

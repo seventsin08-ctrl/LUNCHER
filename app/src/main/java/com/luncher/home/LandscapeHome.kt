@@ -49,44 +49,45 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
     private val ease = PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
 
+    /** A folder's name and apps, or null if [AppInfo] isn't a folder. */
+    var folderOf: ((AppInfo) -> Pair<String, List<AppInfo>>?)? = null
+    /** Hide / bring back the launcher's floating extras (island, sidebars, tools) around this page. */
+    var onChrome: ((Boolean) -> Unit)? = null
+    private var pageLayer: FrameLayout? = null
+    private var folderLayer: View? = null
+    private var W = 0
+    private var H = 0
+
     override fun build(l: FrameLayout) {
-        l.setBackgroundColor(0x26000000)
-        val dm = act.resources.displayMetrics
-        val W = maxOf(dm.widthPixels, dm.heightPixels)   // landscape width
-        val H = minOf(dm.widthPixels, dm.heightPixels)   // landscape height
-        val side = dp(34); val vpad = dp(14)
-        val row = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(side, vpad, side, vpad)
-            rotation = turn
-        }
-        land = row
-        val innerH = H - vpad * 2
+        pageLayer = l
+        l.setBackgroundColor(0x33000000)
+        // Use the real window size (bars hide while this shows), not the smaller display size.
+        val rw = root.width.takeIf { it > 0 } ?: act.resources.displayMetrics.widthPixels
+        val rh = root.height.takeIf { it > 0 } ?: act.resources.displayMetrics.heightPixels
+        W = maxOf(rw, rh); H = minOf(rw, rh)
+        val dockApps = dock?.invoke().orEmpty().take(5)
+        val g = Ios.landLayout(W, H, act.resources.displayMetrics.density, showLabels, dockApps.isNotEmpty())
+        val page = FrameLayout(act).apply { rotation = turn; clipChildren = false }
+        land = page
 
-        // ---- Left: two square widgets (clock, status rings), like the picture.
-        val wsz = ((innerH - dp(14)) / 2).coerceAtMost(dp(170))
-        val left = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        left.addView(FrameLayout(act).apply {
-            background = GradientDrawable().apply { cornerRadius = dp(28).toFloat(); setColor(Color.WHITE) }
-            addView(AnalogClockView(act), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
-        }, LinearLayout.LayoutParams(wsz, wsz))
-        left.addView(rings(), LinearLayout.LayoutParams(wsz, wsz).apply { topMargin = dp(14) })
-        row.addView(left, LinearLayout.LayoutParams(WRAP_CONTENT, MATCH_PARENT))
+        // ---- Left: clock and status rings.
+        page.addView(FrameLayout(act).apply {
+            background = material(28)
+            addView(AnalogClockView(act), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT).apply { setMargins(dp(10), dp(10), dp(10), dp(10)) })
+            setOnClickListener { runCatching { act.startActivity(android.content.Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+        }, at(g.left, g.top, g.widget, g.widget))
+        page.addView(rings(), at(g.left, g.top + g.widget + dp(14), g.widget, g.widget))
 
-        // ---- Middle: your apps, paged.
-        val dockW = dp(78)
-        val gridW = W - side * 2 - wsz - dockW - dp(16) * 2
-        val cell = dp(84)
-        val cols = (gridW / cell).coerceIn(3, 7)
-        val rows = ((innerH - dp(16)) / dp(if (showLabels) 86 else 72)).coerceIn(2, 5)
+        // ---- Middle: your apps (folders open sideways too), paged.
         val list = apps?.invoke().orEmpty()
-        val per = cols * rows
+        val per = g.cols * g.rows
         val pageCount = ((list.size + per - 1) / per).coerceAtLeast(1)
-        val pages = (0 until pageCount).map { p -> grid(list.drop(p * per).take(per), cols, rows) }
+        val pages = (0 until pageCount).map { p -> grid(list.drop(p * per).take(per), g.cols, g.rows) }
         val middle = FrameLayout(act)
         val vp = ViewPager2(act).apply { adapter = Pages(pages); offscreenPageLimit = 1 }
         (vp.getChildAt(0) as? RecyclerView)?.overScrollMode = View.OVER_SCROLL_NEVER
-        middle.addView(vp, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT).apply { bottomMargin = dp(14) })
+        middle.addView(vp, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT).apply { bottomMargin = dp(16) })
         val dots = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         val dotViews = (0 until pageCount).map { i -> View(act).apply { background = Glass.circle(Color.WHITE); alpha = if (i == 0) 1f else 0.35f } }
         if (pageCount > 1) dotViews.forEach { dots.addView(it, LinearLayout.LayoutParams(dp(6), dp(6)).apply { setMargins(dp(4), 0, dp(4), 0) }) }
@@ -94,24 +95,70 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
         vp.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 dotViews.forEachIndexed { i, d -> d.animate().alpha(if (i == position) 1f else 0.35f).setDuration(150).start() }
-                vp.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                if (position > 0) vp.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             }
         })
-        row.addView(middle, LinearLayout.LayoutParams(0, MATCH_PARENT, 1f).apply { setMargins(dp(16), 0, dp(16), 0) })
+        page.addView(middle, at(g.gridLeft, g.top, g.gridW, g.innerH))
 
-        // ---- Right: the dock, standing up.
-        val dockApps = dock?.invoke().orEmpty().take(5)
-        val dockCol = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setPadding(dp(10), dp(12), dp(10), dp(12))
-            background = Glass.panel(act, 30f)
+        // ---- Right: the dock, standing up, centred.
+        val shownDock = dockApps.take(g.dockSlots)
+        if (shownDock.isNotEmpty()) {
+            val dockCol = LinearLayout(act).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                setPadding(dp(10), dp(12), dp(10), dp(12))
+                background = Glass.panel(act, 30f)
+            }
+            for (a in shownDock) dockCol.addView(icon(a, false), LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(0, dp(5), 0, dp(5)) })
+            val dockH = (shownDock.size * dp(66) + dp(24)).coerceAtMost(g.innerH)
+            page.addView(dockCol, at(g.dockLeft, g.top + (g.innerH - dockH) / 2, g.dockW, dockH))
         }
-        for (a in dockApps) dockCol.addView(icon(a, false), LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(0, dp(5), 0, dp(5)) })
-        if (dockApps.isNotEmpty()) row.addView(dockCol, LinearLayout.LayoutParams(dockW, WRAP_CONTENT))
 
         // A W×H box turned 90° fills the portrait window exactly.
-        l.addView(row, FrameLayout.LayoutParams(W, H, Gravity.CENTER))
+        l.addView(page, FrameLayout.LayoutParams(W, H, Gravity.CENTER))
     }
+
+    private fun at(x: Int, y: Int, w: Int, h: Int) = FrameLayout.LayoutParams(w, h).apply { leftMargin = x; topMargin = y }
+
+    /** The same dark frosted material as the Today View cards. */
+    private fun material(r: Int) = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(Color.argb(150, 44, 44, 50), Color.argb(170, 24, 24, 28))).apply {
+        cornerRadius = dp(r).toFloat(); setStroke(maxOf(1, dp(1) / 2 + 1), Color.argb(34, 255, 255, 255))
+    }
+
+    /** A folder opened in landscape: a glass panel that zooms up in the middle, turned like the page. */
+    private fun openFolder(name: String, members: List<AppInfo>, from: View) {
+        val l = pageLayer ?: return
+        closeFolder(immediate = true)
+        val holder = FrameLayout(act).apply { rotation = turn; setBackgroundColor(0x66000000); isClickable = true; setOnClickListener { closeFolder() } }
+        val cols = if (members.size <= 4) 2 else if (members.size <= 9) 3 else 4
+        val panel = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL; isClickable = true
+            setPadding(dp(18), dp(14), dp(18), dp(14))
+            background = material(30)
+        }
+        panel.addView(TextView(act).apply { text = name; textSize = 20f; setTextColor(Color.WHITE); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD) })
+        val g = GridLayout(act).apply { columnCount = cols }
+        for (a in members) g.addView(icon(a, true, inFolder = true), GridLayout.LayoutParams().apply { width = dp(84); height = dp(88) })
+        val sv = android.widget.ScrollView(act).apply { isVerticalScrollBarEnabled = false; addView(g) }
+        panel.addView(sv, LinearLayout.LayoutParams(WRAP_CONTENT, minOf(((members.size + cols - 1) / cols) * dp(88), H - dp(110))).apply { topMargin = dp(8) })
+        holder.addView(panel, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER))
+        l.addView(holder, FrameLayout.LayoutParams(W, H, Gravity.CENTER))
+        folderLayer = holder
+        holder.alpha = 0f
+        holder.animate().alpha(1f).setDuration(180).start()
+        Motion.scaleTo(panel, 1f, Motion.FLUID, start = 0.4f)
+        from.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+
+    private fun closeFolder(immediate: Boolean = false) {
+        val f = folderLayer ?: return
+        folderLayer = null
+        if (immediate) { pageLayer?.removeView(f); return }
+        f.animate().alpha(0f).setDuration(160).withEndAction { pageLayer?.removeView(f) }.start()
+    }
+
+    /** Back closes an open folder first. */
+    fun back(): Boolean { if (folderLayer != null) { closeFolder(); return true }; return false }
 
     private class Pages(private val views: List<View>) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         override fun getItemCount() = views.size
@@ -135,7 +182,7 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
         return g
     }
 
-    private fun icon(a: AppInfo, label: Boolean): View {
+    private fun icon(a: AppInfo, label: Boolean, inFolder: Boolean = false): View {
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
         col.addView(ImageView(act).apply { setImageBitmap(a.icon) }, LinearLayout.LayoutParams(dp(54), dp(54)))
         if (label) col.addView(TextView(act).apply {
@@ -149,7 +196,13 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
             }
             false
         }
-        col.setOnClickListener { v -> v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); onLaunch?.invoke(a, v) }
+        col.setOnClickListener { v ->
+            val folder = if (inFolder) null else folderOf?.invoke(a)
+            if (folder != null) { openFolder(folder.first, folder.second, v); return@setOnClickListener }
+            v.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+            closeFolder(immediate = true)
+            onLaunch?.invoke(a, v)
+        }
         return col
     }
 
@@ -158,17 +211,20 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
         val box = GridLayout(act).apply {
             columnCount = 2; rowCount = 2
             setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = GradientDrawable().apply { cornerRadius = dp(28).toFloat(); setColor(0x33FFFFFF); setStroke(1, 0x33FFFFFF) }
+            background = material(28)
         }
         val lvl = battery?.invoke() ?: 0
         val steps = InfoData.stepsToday
         val cal = Calendar.getInstance()
         val dayFrac = cal.get(Calendar.DAY_OF_MONTH) / cal.getActualMaximum(Calendar.DAY_OF_MONTH).toFloat()
+        val temp = InfoData.weather?.temp
         val items = listOf(
-            Triple(if (charging?.invoke() == true) "⚡" else "📱", lvl / 100f, if (lvl <= 20) 0xFFFF453A.toInt() else 0xFF30D158.toInt()),
-            Triple("👟", if (steps < 0) 0f else (steps / 10_000f).coerceAtMost(1f), 0xFF30D158.toInt()),
+            Triple(if (charging?.invoke() == true) "⚡$lvl" else "$lvl%", lvl / 100f, if (lvl <= 20) 0xFFFF453A.toInt() else 0xFF30D158.toInt()),
+            Triple(when { steps < 0 -> "—"; steps >= 1000 -> String.format(java.util.Locale.US, "%.1fk", steps / 1000f); else -> "$steps" },
+                if (steps < 0) 0f else (steps / 10_000f).coerceAtMost(1f), 0xFF34C759.toInt()),
             Triple("${cal.get(Calendar.DAY_OF_MONTH)}", dayFrac, 0xFFFF9F0A.toInt()),
-            Triple("☀", (cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)) / 1440f, 0xFF64D2FF.toInt())
+            Triple(if (temp != null) "$temp°" else android.text.format.DateFormat.format("H:mm", cal).toString(),
+                (cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)) / 1440f, 0xFF64D2FF.toInt())
         )
         for ((t, f, c) in items) box.addView(Ring(act, t, f, c), GridLayout.LayoutParams(
             GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply {
@@ -197,7 +253,7 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
             box.set(l, t, l + s - sw * 2, t + s - sw * 2)
             cv.drawArc(box, 0f, 360f, false, track)
             cv.drawArc(box, -90f, 360f * frac.coerceIn(0f, 1f) * shown, false, arc)
-            txt.textSize = s * (if (label.length > 2) 0.26f else 0.32f)
+            txt.textSize = s * (if (label.length > 3) 0.2f else if (label.length > 2) 0.24f else 0.3f)
             cv.drawText(label, width / 2f, height / 2f + txt.textSize * 0.36f, txt)
         }
     }
@@ -213,6 +269,7 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
             v.visibility = View.INVISIBLE
         }
         setBars(false)
+        onChrome?.invoke(false)
         l.alpha = 0f
         l.animate().alpha(1f).setDuration((260 * Motion.scale).toLong()).start()
         // Rotate into place, like the iPhone turning its Home Screen.
@@ -228,6 +285,8 @@ class LandscapeHome(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLay
     }
 
     override fun onHidden() {
+        folderLayer = null; pageLayer = null
+        onChrome?.invoke(true)
         for ((v, vis) in hiddenUnder) v.visibility = vis
         hiddenUnder.clear()
         setBars(true)
