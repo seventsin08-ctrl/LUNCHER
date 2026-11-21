@@ -56,6 +56,7 @@ class CameraTapZone(private val act: Activity, private val settings: Settings, p
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(v, l) }.isFailure) return
+        DragPass.watch(w, v)
         wm = w; view = v; lp = l
         place()
         if (hidden) setHidden(true)

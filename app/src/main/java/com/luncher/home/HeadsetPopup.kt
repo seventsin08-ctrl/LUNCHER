@@ -289,6 +289,7 @@ class HeadsetPopup private constructor(private val app: Context) {
                 false
             }
             if (runCatching { wm.addView(win, lp) }.isFailure) return
+            DragPass.watch(wm, win)
             overlay = win
             overlayWm = wm
             root = win

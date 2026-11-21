@@ -114,6 +114,7 @@ class Sidebar(
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(h, lp) }.isFailure) return
+        DragPass.watch(w, h)
         wm = w; handle = h; handleLp = lp
         h.alpha = 0f
         h.animate().alpha(1f).setDuration(300).start()
@@ -248,6 +249,7 @@ class Sidebar(
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(root, lp) }.isFailure) return
+        DragPass.watch(w, root)
         panelRoot = root; panel = card
         SoundFX.play(act, "open")
         // Make room for the island: when it opens at the top, the panel's top slides down

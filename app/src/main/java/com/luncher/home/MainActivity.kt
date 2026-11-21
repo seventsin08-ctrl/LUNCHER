@@ -1102,6 +1102,7 @@ class MainActivity : Activity() {
             }
         }
         if (runCatching { wm.addView(holder, lp) }.isFailure) return
+        DragPass.watch(wm, holder)
         overlayIsland = ov; overlayRoot = holder; overlayWm = wm; overlayLp = lp
         if (GameState.playing) holder.visibility = View.GONE
         island.mirror = ov

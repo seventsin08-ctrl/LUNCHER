@@ -263,6 +263,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
+        DragPass.watch(w, root)
         me = Card(chat.pkg, root, l).also { it.wantW = width }
         cards[chat.pkg] = me
         cardOf[root] = me
@@ -737,6 +738,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
+        DragPass.watch(w, root)
         clipPanel = root; clipLp = l
         // Dragging the strip remembers where it sits relative to the chat window.
         dragBy(head, root, l, onEnd = {
@@ -878,6 +880,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(v, l) }.isFailure) return null
+        DragPass.watch(w, v)
         wm = w; lp = l; view = v; createdRight = isRight
         OverlayZones.listen(zoneFit)
         recentsAt = 0L
@@ -1197,6 +1200,7 @@ class SideHud(private val act: Activity, private val settings: Settings, private
             token = hudLp.token
         }
         if (runCatching { w.addView(root, l) }.isFailure) return
+        DragPass.watch(w, root)
         histPanel = root; histPanelLp = l; keepGravity = l.gravity
         dragBy(head, root, l)
         resizeBy(histGrip, root, l, scroll, "hist", minW = dp(260))

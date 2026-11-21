@@ -93,6 +93,7 @@ class GameBall(private val ctx: Context, private val apps: () -> List<AppInfo>) 
         place(lp)
         holder.setOnTouchListener(DragTouch())
         if (runCatching { w.addView(holder, lp) }.isFailure) return
+        DragPass.watch(w, holder)
         wm = w; ball = holder; face = fc; badge = b; ballLp = lp; instance = this
         holder.scaleX = 0.2f; holder.scaleY = 0.2f; holder.alpha = 0f
         holder.animate().alpha(1f).setDuration(200).start()
@@ -216,6 +217,7 @@ class GameBall(private val ctx: Context, private val apps: () -> List<AppInfo>) 
         lp.gravity = Gravity.TOP or (if (right) Gravity.RIGHT else Gravity.LEFT)
         lp.x = size + dp(16); lp.y = blp0.y + dp(4)
         if (runCatching { w.addView(row, lp) }.isFailure) return
+        DragPass.watch(w, row)
         banner = row
         row.alpha = 0f; row.translationX = dpf(if (right) 30f else -30f)
         row.animate().alpha(1f).translationX(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).start()
@@ -345,6 +347,7 @@ class GameBall(private val ctx: Context, private val apps: () -> List<AppInfo>) 
         lp.y = (blp.y - dp(10)).coerceIn(dp(8), (dm.heightPixels - ch - dp(8)).coerceAtLeast(dp(8)))
         card.setOnTouchListener { _, e -> if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) { closePanel(); true } else false }
         if (runCatching { w.addView(card, lp) }.isFailure) return
+        DragPass.watch(w, card)
         panel = card
         card.pivotX = if (right) cw.toFloat() else 0f; card.pivotY = dpf(30f)
         card.alpha = 0f; card.scaleX = 0.4f; card.scaleY = 0.4f

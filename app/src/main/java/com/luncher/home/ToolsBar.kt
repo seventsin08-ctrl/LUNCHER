@@ -83,6 +83,7 @@ class ToolsBar(private val ctx: Context) {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         if (runCatching { w.addView(r, l) }.isFailure) return
+        DragPass.watch(w, r)
         wm = w; root = r; lp = l; current = this
         push = 0; yielding = false
         OverlayZones.listen(zoneFit)

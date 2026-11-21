@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        183 to listOf("🔧 Dragging files, photos or text into the share bar (Messenger, Telegram, Save to Files…) now works everywhere: the launcher’s floating pieces — tools circle, side island, side bars, game ball, pop-ups — turn see-through while you drag, then come back"),
         182 to listOf("🎯 Tools button: its touch area is now only its own circle — taps beside it (and the old tap line to its left) go through to whatever is underneath", "🔧 The tap ripple stays inside the circle; the unused Tap Line Length slider is gone"),
         181 to listOf("⬇ Classic launcher: Gilbert and All Father are removed — no orb, console, voice, brain, files, wake word, archive, Quick Settings tile or Share to Gilbert", "🔧 Everything else stays the same: Dynamic Island, lyrics and player styles, side island, sidebar, dock, App Library, themes, pop-ups, game mode and all settings (Settings › Notifications keeps Calm Mode, Priority and Quiet apps)", "🔧 If All Father mode had turned off the island, tools or side bars, they're switched back on"),
         180 to listOf("⬆ Everything can be turned on and off: All Father › ☰ › SWITCHES — All Father himself, his auto-acting, All Father mode, Gilbert, his voice, talk bubbles, wake word, archive, Dynamic Island, tools tab, side island, sidebar, dock, App Library, sound effects, Simple mode — plus EVERY other switch in the launcher"),
