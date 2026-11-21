@@ -443,10 +443,10 @@ class Settings(ctx: Context) {
     var gilbertColors: String
         get() = p.getString("s_gil_colors", "theme") ?: "theme"
         set(v) = put("s_gil_colors", v)
-    /** classic °~°, happy ^‿^, dots •‿•, sleepy -o- */
+    /** orb (the cyan globe — default), classic °~°, happy ^‿^, dots •‿•, sleepy -o- */
     var gilbertFace: String
-        get() = p.getString("s_gil_face", "classic") ?: "classic"
-        set(v) = put("s_gil_face", v)
+        get() = p.getString("s_gil_face2", "orb") ?: "orb"
+        set(v) = put("s_gil_face2", v)
     var gilbertDensity: Int
         get() = p.getInt("s_gil_density", 240)
         set(v) = put("s_gil_density", v)

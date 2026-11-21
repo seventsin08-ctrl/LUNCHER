@@ -20,7 +20,7 @@ import android.widget.TextView
 import kotlin.math.roundToInt
 
 /**
- * Pocher's console. He doesn't chat — he gives you data, split into windows. Each window is
+ * Gilbert's console (HUD). He doesn't chat — he gives you data, split into windows. Each window is
  * one of his programs:
  *   01 DIGEST  – today's summary (counts, top chats, by app, a written digest with the brain)
  *   02 CHATS   – every conversation, tap to read it
@@ -29,7 +29,7 @@ import kotlin.math.roundToInt
  *   05 FILES   – photos & attachments from chats, scanned (text + what's in them)
  *   06 SYSTEM  – his brain and storage
  */
-object PocherConsole {
+object GilbertConsole {
     const val REQ_SCAN = 5141
 
     private class Win(val num: String, val prog: String, val tab: String, val build: (LinearLayout) -> Unit)
@@ -49,112 +49,185 @@ object PocherConsole {
     private val mono: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
     private val monoBold: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
 
+    private var rings: HudRings? = null
+    private var face: IslandFace? = null
+    private var ticker: TextView? = null
+    private var frame: HudFrame? = null
+    private var flashWho: String? = null
+
     fun show(a: Activity, root: FrameLayout, s: Settings, onClosed: (() -> Unit)? = null) {
         act = a
-        tint = if (ThemeEngine.colorful) ThemeEngine.accent else 0xFF8E8E93.toInt()
-        digestText = null; openChat = null
-        val layer = FrameLayout(a).apply { setBackgroundColor(Color.argb(160, 0, 0, 0)); isClickable = true }
-        val card = LinearLayout(a).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
-                IconFactory.blend(0xFF2E2E32.toInt(), tint, 0.16f), IconFactory.blend(0xFF111113.toInt(), tint, 0.06f))).apply {
-                cornerRadius = dp(28).toFloat(); setStroke(maxOf(1, dp(1)), ThemeEngine.alpha(tint, 100)) }
-            elevation = dp(16).toFloat(); isClickable = true
-        }
+        tint = Hud.CYAN
+        digestText = null; openChat = null; flashWho = null
+        val sw = a.resources.displayMetrics.widthPixels
+        val sh = a.resources.displayMetrics.heightPixels
+        // Full-screen HUD on black.
+        val layer = FrameLayout(a).apply { setBackgroundColor(Color.argb(238, 0, 4, 8)); isClickable = true }
+        val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(40), dp(14), dp(18)) }
         lateinit var close: () -> Unit
-        // ---- Header: face · Pocher · close
-        card.addView(LinearLayout(a).apply {
+
+        // ---- Top bar: name · status · close
+        col.addView(LinearLayout(a).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            addView(FrameLayout(a).apply {
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(dp(2), ThemeEngine.alpha(tint, 170)) }
-                addView(IslandFace(a).apply { configure(s) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-            }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(10) })
             addView(LinearLayout(a).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(TextView(a).apply { text = "Pocher"; textSize = 18f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD })
+                addView(TextView(a).apply { text = "GILBERT"; textSize = 17f; setTextColor(Color.WHITE); typeface = monoBold; letterSpacing = 0.25f })
                 addView(TextView(a).apply {
-                    text = "DATA CONSOLE · ${if (GilbertBrain.installed(a)) "BRAIN ON" else "MEMORY MODE"} · LOCAL"
-                    textSize = 10.5f; typeface = mono; letterSpacing = 0.06f; setTextColor(ThemeEngine.alpha(IconFactory.blend(tint, Color.WHITE, 0.5f), 200))
+                    text = "DATA SYSTEM · ${if (GilbertBrain.installed(a)) "BRAIN ON" else "MEMORY MODE"} · LOCAL"
+                    textSize = 9.5f; typeface = mono; letterSpacing = 0.08f; setTextColor(Hud.a(Hud.SOFT, 190))
                 })
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             addView(TextView(a).apply {
-                text = "✕"; textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x33FFFFFF) }
+                text = "✕"; textSize = 14f; setTextColor(Hud.SOFT); gravity = Gravity.CENTER
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x14FFFFFF); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 120)) }
                 setOnClickListener { close() }
             }, LinearLayout.LayoutParams(dp(34), dp(34)))
         })
 
-        wins = listOf(
-            Win("01", "DIGEST", "◉ Summary") { buildSummary(it) },
-            Win("02", "CHAT.LOG", "💬 Chats") { buildChats(it) },
-            Win("03", "PEOPLE.IDX", "👤 Names") { buildNames(it) },
-            Win("04", "NOTES", "📝 Notes") { buildNotes(it) },
-            Win("05", "SCAN", "🖼 Files") { buildFiles(it) },
-            Win("06", "SYSTEM", "🧠 System") { buildSystem(it, s) })
+        // ---- The HUD: rings + brackets + his globe face in the middle
+        val hudH = (sh * 0.24f).toInt().coerceIn(dp(150), dp(230))
+        val hud = FrameLayout(a)
+        val rg = HudRings(a); rings = rg
+        hud.addView(rg, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        val fc = IslandFace(a).apply { configure(s) }; face = fc
+        val fs = (hudH * 0.58f).toInt()
+        hud.addView(fc, FrameLayout.LayoutParams(fs, fs, Gravity.CENTER))
+        col.addView(hud, LinearLayout.LayoutParams(MATCH_PARENT, hudH).apply { topMargin = dp(4) })
+        // ticker: what he's doing / what just came in
+        ticker = TextView(a).apply {
+            textSize = 10.5f; typeface = mono; letterSpacing = 0.06f; setTextColor(Hud.SOFT); gravity = Gravity.CENTER
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+        }
+        col.addView(ticker, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
 
-        // ---- Window tabs
+        wins = listOf(
+            Win("01", "DIGEST", "SUMMARY") { buildSummary(it) },
+            Win("02", "CHAT.LOG", "CHATS") { buildChats(it) },
+            Win("03", "PEOPLE.IDX", "NAMES") { buildNames(it) },
+            Win("04", "NOTES", "NOTES") { buildNotes(it) },
+            Win("05", "SCAN", "FILES") { buildFiles(it) },
+            Win("06", "SYSTEM", "SYSTEM") { buildSystem(it, s) })
+
+        // ---- Window tabs (HUD labels)
         tabs = ArrayList()
-        val strip = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, dp(10)) }
+        val strip = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, dp(8)) }
         wins.forEachIndexed { i, w ->
             val t = TextView(a).apply {
-                text = w.tab; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-                setPadding(dp(13), dp(7), dp(13), dp(7))
+                text = "${w.num} ${w.tab}"; textSize = 11.5f; typeface = monoBold; letterSpacing = 0.06f; gravity = Gravity.CENTER
+                setPadding(dp(11), dp(7), dp(11), dp(7))
                 setOnClickListener { SoundFX.play(a, "tick"); select(i) }
             }
             tabs += t
             strip.addView(t, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginEnd = dp(6) })
         }
-        card.addView(HorizontalScrollView(a).apply { isHorizontalScrollBarEnabled = false; addView(strip) })
+        col.addView(HorizontalScrollView(a).apply { isHorizontalScrollBarEnabled = false; addView(strip) })
 
-        // ---- The window
-        val frame = LinearLayout(a).apply {
-            orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0x55000000); setStroke(maxOf(1, dp(1)), 0x22FFFFFF) }
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-        }
+        // ---- The window (HUD panel)
+        val fr = HudFrame(a).apply { setPadding(dp(12), dp(10), dp(12), dp(10)) }; frame = fr
         val bar = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        winTitle = TextView(a).apply { textSize = 11f; typeface = monoBold; letterSpacing = 0.08f; setTextColor(IconFactory.blend(tint, Color.WHITE, 0.45f)) }
-        winInfo = TextView(a).apply { textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()); gravity = Gravity.END }
+        winTitle = TextView(a).apply { textSize = 11f; typeface = monoBold; letterSpacing = 0.1f; setTextColor(Hud.CYAN) }
+        winInfo = TextView(a).apply { textSize = 10f; typeface = mono; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.END }
         bar.addView(winTitle, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         bar.addView(winInfo)
-        frame.addView(bar)
-        frame.addView(View(a).apply { setBackgroundColor(0x22FFFFFF) }, LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(1))).apply { topMargin = dp(8); bottomMargin = dp(6) })
+        fr.addView(bar)
+        fr.addView(View(a).apply { setBackgroundColor(Hud.a(Hud.SOFT, 50)) }, LinearLayout.LayoutParams(MATCH_PARENT, maxOf(1, dp(1))).apply { topMargin = dp(8); bottomMargin = dp(6) })
         val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         content = body
-        val h = (a.resources.displayMetrics.heightPixels * 0.58f).toInt()
-        frame.addView(ScrollView(a).apply { isVerticalScrollBarEnabled = false; addView(body) }, LinearLayout.LayoutParams(MATCH_PARENT, h))
-        card.addView(frame)
+        fr.addView(ScrollView(a).apply { isVerticalScrollBarEnabled = false; addView(body) }, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        col.addView(fr, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
-        layer.addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP).apply {
-            leftMargin = dp(12); rightMargin = dp(12); topMargin = dp(52) })
+        layer.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(layer, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         close = {
-            PocherFiles.onChanged = null
-            layer.animate().alpha(0f).setDuration(160).withEndAction { root.removeView(layer); onClosed?.invoke() }.start()
+            PocherFiles.onChanged = null; GilbertArchive.onSaved = null
+            rings = null; face = null; ticker = null; frame = null
+            layer.animate().alpha(0f).scaleX(1.04f).scaleY(1.04f).setDuration(180).withEndAction { root.removeView(layer); onClosed?.invoke() }.start()
         }
-        layer.setOnClickListener { close() }
-        card.alpha = 0f; card.translationY = -dp(20).toFloat()
-        card.animate().alpha(1f).translationY(0f).setDuration(220).start()
-        PocherFiles.onChanged = { if (current == 4) select(4, animate = false) }
-        select(0, animate = false)
+
+        // ---- Boot sequence: rings draw in, the globe forms, the ticker types, then the window opens.
+        layer.alpha = 0f; layer.animate().alpha(1f).setDuration(160).start()
+        rg.startBoot(1100)
+        fc.alpha = 0f; fc.scaleX = 0.3f; fc.scaleY = 0.3f
+        fc.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(250).setDuration(700).setInterpolator(android.view.animation.OvershootInterpolator(1.2f)).start()
+        strip.alpha = 0f; fr.alpha = 0f
+        type("INITIALIZING · READING ARCHIVE · ${GilbertArchive.count(a)} RECORDS") {
+            type("GILBERT ONLINE · ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}")
+        }
+        layer.postDelayed({
+            strip.animate().alpha(1f).setDuration(220).start()
+            fr.animate().alpha(1f).setDuration(200).start()
+            select(0)
+            SoundFX.play(a, "success")
+        }, 900)
+
+        // ---- Live updates: new data → ping, ticker, refresh the open window.
+        PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 4) }
+        GilbertArchive.onSaved = { app, who -> update("NEW · ${who.uppercase()} · ${app.uppercase()}", who, -1) }
     }
 
-    private fun select(i: Int, animate: Boolean = true) {
-        val a = act ?: return
+    /** New data arrived while the console is open. */
+    private fun update(msg: String, who: String?, onlyWin: Int) {
+        rings?.ping(); face?.ping()
+        type("▲ $msg")
+        flashWho = who
+        if (onlyWin < 0 || current == onlyWin) {
+            if (current != 3) select(current, animate = false, scanOnly = true)   // don't wipe a note you're typing
+        }
+    }
+
+    private var typeJob: Runnable? = null
+    /** Type a line into the ticker, letter by letter. */
+    private fun type(text: String, then: (() -> Unit)? = null) {
+        val tv = ticker ?: return
+        typeJob?.let { tv.removeCallbacks(it) }
+        var n = 0
+        val r = object : Runnable { override fun run() {
+            n = minOf(text.length, n + 2)
+            tv.text = text.substring(0, n) + if (n < text.length) "▌" else ""
+            if (n < text.length) tv.postDelayed(this, 18) else then?.let { tv.postDelayed({ it() }, 500) }
+        } }
+        typeJob = r; tv.post(r)
+    }
+
+    private fun select(i: Int, animate: Boolean = true, scanOnly: Boolean = false) {
+        act ?: return
         current = i
         tabs.forEachIndexed { k, t ->
-            t.background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(if (k == i) ThemeEngine.alpha(tint, 150) else 0x1FFFFFFF) }
-            t.typeface = if (k == i) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            t.background = GradientDrawable().apply {
+                setColor(if (k == i) Hud.a(Hud.CYAN, 40) else 0x0DFFFFFF)
+                setStroke(maxOf(1, dp(1)), if (k == i) Hud.CYAN else Hud.a(Color.WHITE, 40))
+            }
+            t.setTextColor(if (k == i) Hud.CYAN else 0xB3FFFFFF.toInt())
         }
         val w = wins[i]
-        winTitle?.text = "WIN ${w.num} · ${w.prog}"
-        winInfo?.text = "updated " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        winTitle?.text = "▣ WIN ${w.num} · ${w.prog}"
+        winInfo?.text = "SYNC " + java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         val body = content ?: return
         body.removeAllViews()
         runCatching { w.build(body) }.onFailure { line(body, "⚠️ This window couldn't load: ${it.message?.take(80)}", 13f, 0xFFFF9F0A.toInt()) }
-        if (animate) { body.alpha = 0f; body.translationX = dp(14).toFloat(); body.animate().alpha(1f).translationX(0f).setDuration(180).start() }
+        frame?.play()
+        if (animate && !scanOnly) {
+            // Rows come in one after another.
+            for (k in 0 until body.childCount) {
+                val v = body.getChildAt(k)
+                v.alpha = 0f; v.translationX = dp(18).toFloat()
+                v.animate().alpha(1f).translationX(0f).setStartDelay(minOf(k, 12) * 35L).setDuration(220).start()
+            }
+            if (!scanOnly) type("OPEN · WIN ${w.num} · ${w.prog}")
+        }
         tabs.getOrNull(i)?.let { t -> (t.parent?.parent as? HorizontalScrollView)?.smoothScrollTo(maxOf(0, t.left - dp(40)), 0) }
+    }
+
+    /** Flash a freshly updated row (cyan glow that fades). */
+    private fun flash(v: View) {
+        val bg = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(Hud.a(Hud.CYAN, 90)) }
+        val old = v.background
+        v.background = bg
+        android.animation.ValueAnimator.ofInt(90, 0).apply {
+            duration = 1400; startDelay = 200
+            addUpdateListener { bg.setColor(Hud.a(Hud.CYAN, it.animatedValue as Int)) }
+            addListener(object : android.animation.AnimatorListenerAdapter() { override fun onAnimationEnd(an: android.animation.Animator) { v.background = old } })
+        }.start()
     }
 
     // ------------------------------------------------------------------ small building blocks
@@ -165,13 +238,13 @@ object PocherConsole {
         }.also { p.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(top) }) }
 
     private fun section(p: LinearLayout, t: String) {
-        TextView(act).apply { text = t; textSize = 10.5f; typeface = monoBold; letterSpacing = 0.1f; setTextColor(0x99FFFFFF.toInt()) }
+        TextView(act).apply { text = "// $t"; textSize = 10.5f; typeface = monoBold; letterSpacing = 0.1f; setTextColor(Hud.a(Hud.SOFT, 200)) }
             .also { p.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14); bottomMargin = dp(6) }) }
     }
 
     private fun box(p: LinearLayout, top: Int = 6): LinearLayout = LinearLayout(act).apply {
         orientation = LinearLayout.VERTICAL
-        background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(0x14FFFFFF) }
+        background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(0x0FFFFFFF); setStroke(maxOf(1, dp(1)), Hud.a(Hud.SOFT, 38)) }
         setPadding(dp(12), dp(10), dp(12), dp(10))
     }.also { p.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(top) }) }
 
@@ -179,16 +252,14 @@ object PocherConsole {
 
     private fun avatar(name: String): TextView = TextView(act).apply {
         text = name.trim().firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "•"
-        textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
-        val hue = (name.hashCode() and 0x7fffffff) % 360
-        background = GradientDrawable().apply { shape = GradientDrawable.OVAL
-            setColor(IconFactory.blend(Color.HSVToColor(floatArrayOf(hue.toFloat(), 0.45f, 0.6f)), tint, 0.25f)) }
+        textSize = 14f; setTextColor(Hud.CYAN); typeface = monoBold; gravity = Gravity.CENTER
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Hud.a(Hud.CYAN, 22)); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 160)) }
     }
 
-    private fun pill(p: LinearLayout, t: String, color: Int = 0xFF0A84FF.toInt(), fn: () -> Unit): TextView = TextView(act).apply {
-        text = t; textSize = 13.5f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+    private fun pill(p: LinearLayout, t: String, @Suppress("UNUSED_PARAMETER") color: Int = 0, fn: () -> Unit): TextView = TextView(act).apply {
+        text = t.uppercase(); textSize = 12f; setTextColor(Hud.CYAN); typeface = monoBold; letterSpacing = 0.06f; gravity = Gravity.CENTER
         setPadding(dp(16), dp(9), dp(16), dp(9))
-        background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(color) }
+        background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(Hud.a(Hud.CYAN, 28)); setStroke(maxOf(1, dp(1)), Hud.CYAN) }
         setOnClickListener { SoundFX.play(act!!, "tick"); fn() }
     }.also { p.addView(it, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(8) }) }
 
@@ -221,19 +292,15 @@ object PocherConsole {
         val today = messages(1).filter { it.today }
         val files = PocherFiles.list(a).filter { PocherFiles.timeLabel(it.time).length <= 5 }
         val mentions = Gilbert.notes(a).count { it.mention && android.text.format.DateUtils.isToday(it.time) }
-        // Tiles
+        // Gauges: each ring fills up while its number counts.
         val tiles = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
-        fun tile(n: String, cap: String) = LinearLayout(a).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(0x14FFFFFF) }
-            setPadding(0, dp(10), 0, dp(10))
-            addView(TextView(a).apply { text = n; textSize = 22f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER })
-            addView(TextView(a).apply { text = cap; textSize = 9.5f; typeface = mono; letterSpacing = 0.05f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER })
-        }.also { tiles.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(6) }) }
-        tile("${today.size}", "MESSAGES")
-        tile("${today.map { it.who }.distinct().size}", "PEOPLE")
-        tile("$mentions", "MENTIONS")
-        tile("${files.size}", "FILES")
+        fun gauge(n: Int, max: Int, cap: String) =
+            tiles.addView(HudGauge(a, cap, n, max), LinearLayout.LayoutParams(0, dp(92), 1f))
+        val people = today.map { it.who }.distinct().size
+        gauge(today.size, maxOf(50, today.size), "MESSAGES")
+        gauge(people, maxOf(10, people), "PEOPLE")
+        gauge(mentions, maxOf(5, mentions), "MENTIONS")
+        gauge(files.size, maxOf(10, files.size), "FILES")
         p.addView(tiles)
 
         section(p, "TOP CHATS · TODAY")
@@ -248,6 +315,7 @@ object PocherConsole {
                 textSize = 12f; setTextColor(0x99FFFFFF.toInt()) })
             b.addView(TextView(a).apply { text = "“${list.first().text.take(90)}”"; textSize = 13f; setTextColor(0xCCFFFFFF.toInt()); maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
             b.setOnClickListener { openChat = who; select(1) }
+            if (who == flashWho) flash(b)
         }
 
         section(p, "BY APP")
@@ -262,9 +330,9 @@ object PocherConsole {
         d.addView(dt)
         when {
             digestText != null -> dt.text = digestText
-            !GilbertBrain.installed(a) -> dt.text = "Add a brain in 🧠 System and Pocher writes a short digest of your messages here."
+            !GilbertBrain.installed(a) -> dt.text = "Add a brain in 🧠 System and Gilbert writes a short digest of your messages here."
             else -> {
-                dt.text = "Pocher can read today's messages and write the key points."
+                dt.text = "Gilbert can read today's messages and write the key points."
                 pill(d, "⚡ Make digest") {
                     if (today.isEmpty()) { dt.text = "Nothing to digest yet."; return@pill }
                     dt.text = "PROCESSING ${today.size} MESSAGES…"; dt.typeface = mono
@@ -336,6 +404,7 @@ object PocherConsole {
             }
             log.visibility = View.GONE
             b.addView(log)
+            if (who == flashWho) flash(b)
             if (who == openChat) { fill(); log.visibility = View.VISIBLE; b.post { (p.parent as? ScrollView)?.smoothScrollTo(0, b.top) } }
             b.setOnClickListener {
                 if (log.visibility == View.VISIBLE) log.visibility = View.GONE else { fill(); log.visibility = View.VISIBLE }
@@ -351,6 +420,8 @@ object PocherConsole {
         val people = week.groupBy { it.who }.entries.sortedByDescending { it.value.size }
         winInfo?.text = "${people.size} names · 7 days"
         if (people.isEmpty()) { empty(p, "No names yet."); return }
+        p.addView(HudOrbit(a, people.take(8).map { it.key to it.value.size }), LinearLayout.LayoutParams(MATCH_PARENT, dp(210)))
+        section(p, "RANKED · 7 DAYS")
         val max = people.first().value.size
         for ((who, list) in people.take(30)) {
             val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
@@ -403,7 +474,7 @@ object PocherConsole {
             b.addView(r)
         }
 
-        section(p, "FLAGGED BY POCHER")
+        section(p, "FLAGGED BY GILBERT")
         val mentions = Gilbert.notes(a).filter { it.mention }.take(5)
         val flagged = messages(3).filter { FLAG.containsMatchIn(it.text) }.take(12)
         if (mentions.isEmpty() && flagged.isEmpty()) empty(p, "Nothing flagged — no mentions, dates or tasks found.")
@@ -454,7 +525,7 @@ object PocherConsole {
             val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
             col.addView(TextView(a).apply { text = it.who; textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
             val kind = when { it.kind.startsWith("video") -> "VIDEO"; it.kind.startsWith("audio") -> "VOICE"; it.kind.startsWith("image") -> "IMAGE"; it.kind.contains("sticker") -> "STICKER"; else -> "FILE" }
-            col.addView(TextView(a).apply { text = "$kind · ${it.app} · ${PocherFiles.timeLabel(it.time)}"; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
+            col.addView(TextView(a).apply { text = "$kind · ${it.app} · ${GilbertFiles.timeLabel(it.time)}"; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
             val scanned = it.img != null
             val status = when {
                 !scanned -> it.msg.ifBlank { "Attachment (the app keeps the file)" }

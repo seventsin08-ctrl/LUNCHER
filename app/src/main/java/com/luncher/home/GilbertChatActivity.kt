@@ -22,12 +22,12 @@ class GilbertChatActivity : Activity() {
         setContentView(root)
         val s = Settings(this)
         runCatching { ThemeEngine.resolve(this, s) }
-        root.post { PocherConsole.show(this, root, s) { finish(); overridePendingTransition(0, android.R.anim.fade_out) } }
+        root.post { GilbertConsole.show(this, root, s) { finish(); overridePendingTransition(0, android.R.anim.fade_out) } }
     }
 
     private var picking = false
     override fun startActivityForResult(intent: android.content.Intent, requestCode: Int, options: Bundle?) {
-        picking = requestCode == GilbertChat.REQ_BRAIN || requestCode == PocherConsole.REQ_SCAN
+        picking = requestCode == GilbertChat.REQ_BRAIN || requestCode == GilbertConsole.REQ_SCAN
         super.startActivityForResult(intent, requestCode, options)
     }
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
@@ -35,7 +35,7 @@ class GilbertChatActivity : Activity() {
         picking = false
         val uri = data?.data
         if (requestCode == GilbertChat.REQ_BRAIN && resultCode == RESULT_OK && uri != null) GilbertChat.onBrainPicked(this, uri)
-        if (requestCode == PocherConsole.REQ_SCAN && resultCode == RESULT_OK && uri != null) PocherConsole.onScanPicked(this, uri)
+        if (requestCode == GilbertConsole.REQ_SCAN && resultCode == RESULT_OK && uri != null) GilbertConsole.onScanPicked(this, uri)
     }
 
     override fun onPause() {
@@ -45,10 +45,10 @@ class GilbertChatActivity : Activity() {
     }
 }
 
-/** Quick Settings tile: pull down the shade and tap "Pocher" to chat from anywhere. */
+/** Quick Settings tile: pull down the shade and tap "Gilbert" to chat from anywhere. */
 class GilbertTileService : android.service.quicksettings.TileService() {
     override fun onStartListening() {
-        qsTile?.apply { label = "Pocher"; state = android.service.quicksettings.Tile.STATE_INACTIVE; updateTile() }
+        qsTile?.apply { label = "Gilbert"; state = android.service.quicksettings.Tile.STATE_INACTIVE; updateTile() }
     }
     override fun onClick() {
         val i = android.content.Intent(this, GilbertChatActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)

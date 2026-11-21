@@ -23,6 +23,9 @@ object GilbertArchive {
         runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
     }
 
+    /** Told (on the main thread) whenever something new is saved: (app, who). */
+    var onSaved: ((String, String) -> Unit)? = null
+
     /** Save one notification / message. */
     fun save(ctx: Context, pkg: String, title: String, text: String) {
         if (!Settings(ctx).gilbertArchive) return
@@ -31,6 +34,7 @@ object GilbertArchive {
         // "HH:mm | App | Name<TAB>message" (the tab keeps names with ":" in them intact).
         val line = "${time.format(now)} | ${label(ctx, pkg)} | ${title.replace('\n', ' ').replace('\t', ' ').take(80)}\t${text.replace('\n', ' ').replace('\t', ' ').take(400)}\n"
         runCatching { File(dir(ctx), "${day.format(now)}.txt").appendText(line) }
+        runCatching { onSaved?.invoke(label(ctx, pkg), title) }
         if (Math.random() < 0.02) prune(ctx)
     }
 

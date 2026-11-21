@@ -284,7 +284,7 @@ object Gilbert {
         fun addTile(v: View) { tiles += v; body.addView(v, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }) }
         fun caption(t: String) = body.addView(text(t, 14f, DIM, true).apply { setPadding(dp(6), dp(14), 0, 0) })
 
-        // ---- Header: orb · "Pocher" · menu + close
+        // ---- Header: orb · "Gilbert" · menu + close
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), 0, 0, dp(2)) }
         head.addView(FrameLayout(act).apply {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(maxOf(1, dp(2)), ThemeEngine.alpha(tint, 170)) }
@@ -292,7 +292,7 @@ object Gilbert {
         }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(12) })
         head.addView(LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            addView(text("Pocher", 24f, Color.WHITE, true))
+            addView(text("Gilbert", 24f, Color.WHITE, true))
             addView(text("Your ally · ${java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())}", 12.5f, DIM))
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         if (openChat != null) head.addView(roundBtn("▤") { close(); openChat() }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
@@ -355,7 +355,7 @@ object Gilbert {
         if (mentions.isNotEmpty() || allNotes.isNotEmpty()) {
             caption("Notes")
             addTile(tile().apply {
-                addView(tileHead(iconBox(null, "✎"), "Pocher's notes",
+                addView(tileHead(iconBox(null, "✎"), "Gilbert's notes",
                     if (mentions.isNotEmpty()) chip("${mentions.size} mention${if (mentions.size > 1) "s" else ""}", RED) else chip("Live", GREEN),
                     "Every message, one line each"))
                 for (n in mentions) {

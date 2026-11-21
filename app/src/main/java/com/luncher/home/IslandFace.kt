@@ -79,7 +79,7 @@ class IslandFace(ctx: Context) : View(ctx) {
     private var topCol = 0xFFFFA24C.toInt()
     private var botCol = Color.WHITE
     private var speedK = 1f
-    private var style = "classic"
+    private var style = "orb"
     /** Held notifications: a little count bubble on Gilbert. */
     var badge = 0
         set(v) { field = v; invalidate() }
@@ -231,8 +231,121 @@ class IslandFace(ctx: Context) : View(ctx) {
 
     private fun ease(x: Float) = (x * x * (3 - 2 * x)).coerceIn(0f, 1f)
 
+    // ------------------------------------------------------------ the globe face ("orb")
+    // A cyan wireframe globe: a shell of points stitched together with faint lines, a dense
+    // glowing core, and little spikes around it. Moods change its spin, core and colour.
+    private var links = IntArray(0)
+    private val core = ArrayList<FloatArray>()
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var glowR = 0f
+    private var orbPulse = 0f
+    /** A little ping (new data arrived): the core flashes and the globe spins up. */
+    fun ping() { orbPulse = 1f; spinBoost = maxOf(spinBoost, 0.8f); invalidate() }
+
+    private fun buildOrb() {
+        // Each point links to its 2 nearest neighbours → the mesh lines.
+        val n = ps.size
+        links = IntArray(n * 2)
+        for (i in 0 until n) {
+            var b1 = -1; var b2 = -1; var d1 = 9f; var d2 = 9f
+            val a = ps[i]
+            for (j in 0 until n) if (j != i) {
+                val q = ps[j]
+                val dd = (a.sx - q.sx) * (a.sx - q.sx) + (a.sy - q.sy) * (a.sy - q.sy) + (a.sz - q.sz) * (a.sz - q.sz)
+                if (dd < d1) { d2 = d1; b2 = b1; d1 = dd; b1 = j } else if (dd < d2) { d2 = dd; b2 = j }
+            }
+            links[i * 2] = b1; links[i * 2 + 1] = b2
+        }
+        core.clear()
+        val rnd = java.util.Random(7)
+        repeat(140) {
+            // Gaussian cloud, densest in the middle.
+            core += floatArrayOf((rnd.nextGaussian() * 0.16).toFloat(), (rnd.nextGaussian() * 0.2).toFloat(),
+                (rnd.nextGaussian() * 0.16).toFloat(), rnd.nextFloat() * 6.28f)
+        }
+    }
+
+    private fun drawOrb(c: Canvas, w: Float, h: Float) {
+        if (links.size != ps.size * 2) buildOrb()
+        val cx = w / 2f; val cy = h / 2f
+        val md = mood
+        orbPulse *= 0.94f
+        val spin = when (md) { "thinking", "curious" -> 2.6f; "excited" -> 2f; "sleepy" -> 0.35f; else -> 1f }
+        val coreK = when (md) { "excited", "surprised" -> 1.35f; "sleepy" -> 0.65f; "listening" -> 1f + 0.2f * sin(t * 8f); "thinking" -> 0.9f + 0.15f * sin(t * 5f); else -> 1f } + orbPulse * 0.6f
+        val base = when (md) { "love" -> 0xFFFF7EB6.toInt(); "sad" -> 0xFF5C8DFF.toInt(); "excited" -> 0xFF9FFFFF.toInt(); "sleepy" -> 0xFF4A7C8C.toInt(); else -> 0xFF00E5FF.toInt() }
+        val R = minOf(w, h) * 0.40f * (1f + 0.025f * sin(t * 1.6f))
+        val rot = t * (0.45f + spinBoost * 3f) * speedK * spin
+        val cr = cos(rot); val sr = sin(rot)
+        val tilt = 0.4f + 0.1f * sin(t * 0.3f); val ct = cos(tilt); val st = sin(tilt)
+        val n = ps.size
+        val xs = FloatArray(n); val ys = FloatArray(n); val zs = FloatArray(n)
+        for (i in 0 until n) {
+            val p = ps[i]
+            val x = p.sx * cr + p.sz * sr
+            var z = -p.sx * sr + p.sz * cr
+            val y = p.sy * ct - z * st; z = p.sy * st + z * ct
+            xs[i] = cx + x * R; ys[i] = cy + y * R; zs[i] = z
+        }
+        // Glow behind the core.
+        val gr = R * 0.75f * coreK
+        if (kotlin.math.abs(gr - glowR) > 1f || glow.shader == null) {
+            glowR = gr
+            glow.shader = android.graphics.RadialGradient(0f, 0f, gr.coerceAtLeast(1f),
+                intArrayOf(android.graphics.Color.argb(150, Color.red(base), Color.green(base), Color.blue(base)), Color.TRANSPARENT), null,
+                android.graphics.Shader.TileMode.CLAMP)
+        }
+        c.save(); c.translate(cx, cy); c.drawCircle(0f, 0f, gr, glow); c.restore()
+        // Mesh lines (front brighter).
+        line.strokeWidth = maxOf(0.6f, d * 0.5f)
+        for (i in 0 until n) for (k in 0..1) {
+            val j = links[i * 2 + k]; if (j < 0 || j < i && links[j * 2] == i) continue
+            val depth = ((zs[i] + zs[j]) / 2f + 1f) / 2f
+            line.color = base; line.alpha = (25 + 110 * depth).toInt()
+            c.drawLine(xs[i], ys[i], xs[j], ys[j], line)
+        }
+        // Shell points + spikes.
+        for (i in 0 until n) {
+            val depth = (zs[i] + 1f) / 2f
+            paint.color = base; paint.alpha = (60 + 195 * depth).toInt().coerceIn(0, 255)
+            c.drawCircle(xs[i], ys[i], d * (0.5f + 0.7f * depth) * ps[i].size / 1.6f, paint)
+            if (i % 9 == 0 && depth > 0.35f) {
+                val dx = xs[i] - cx; val dy = ys[i] - cy
+                line.alpha = (140 * depth).toInt()
+                c.drawLine(cx + dx * 1.1f, cy + dy * 1.1f, cx + dx * 1.2f, cy + dy * 1.2f, line)
+            }
+        }
+        // The dense core.
+        val coreCol = blend(base, Color.WHITE, 0.55f)
+        for (q in core) {
+            val x = q[0] * cr + q[2] * sr; val z = -q[0] * sr + q[2] * cr
+            val j = 0.04f * sin(t * 3f + q[3])
+            paint.color = coreCol; paint.alpha = (150 + 100 * ((z + 0.5f).coerceIn(0f, 1f))).toInt().coerceIn(0, 255)
+            c.drawCircle(cx + (x + j) * R * coreK, cy + (q[1] + j) * R * coreK, d * 0.75f, paint)
+        }
+    }
+
     override fun onDraw(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
+        if (style == "orb") {
+            drawOrb(c, w, h)
+            if (badge > 0) {
+                val br = minOf(w, h) * 0.17f
+                c.drawCircle(w - br, br, br, badgeP)
+                badgeT.textSize = br * 1.15f
+                c.drawText(if (badge > 9) "9+" else "$badge", w - br, br - (badgeT.descent() + badgeT.ascent()) / 2, badgeT)
+            }
+            val lg = logo
+            if (lg != null && logoK > 0.02f) {
+                val ls = minOf(w, h) * 0.45f * logoK
+                r.set(w / 2 - ls / 2, h / 2 - ls / 2, w / 2 + ls / 2, h / 2 + ls / 2)
+                clip.reset(); clip.addOval(r, Path.Direction.CW)
+                c.save(); c.clipPath(clip)
+                c.drawBitmap(lg, null, r, Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (255 * logoK).toInt().coerceIn(0, 255) })
+                c.restore()
+            }
+            return
+        }
         val cx = w / 2f; val cy = h / 2f
         val R = minOf(w, h) * 0.42f
         val k = ease(morph)

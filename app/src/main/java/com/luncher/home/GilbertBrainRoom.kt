@@ -25,7 +25,7 @@ import kotlin.math.sin
  */
 class GilbertBrainRoom(private val act: Activity, private val s: Settings, private val onPick: () -> Unit) {
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
-    private val tint = if (ThemeEngine.colorful) ThemeEngine.accent else 0xFF8E8E93.toInt()
+    private val tint = Hud.CYAN
     val view = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, dp(6), 0, dp(4)) }
     private val ring = Ring()
     private val face = IslandFace(act).apply { configure(s) }
@@ -78,7 +78,7 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
             if (has && !GilbertBrain.loaded) GilbertBrain.lastError?.let { append("\n\n⚠️ $it") }
         }
         val off = has && GilbertBrain.crashed(act)
-        pickBtn.text = if (off) "Try Again" else if (has) "Change Brain" else "Give Pocher a Brain"
+        pickBtn.text = if (off) "Try Again" else if (has) "Change Brain" else "Give Gilbert a Brain"
         ring.level = if (has && GilbertBrain.loaded) 1f else if (has) 0.6f else 0.25f
     }
 

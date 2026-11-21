@@ -49,7 +49,7 @@ class SettingsActivity : Activity() {
         Category("sound", "Sounds & Haptics", 0xFFFF453A.toInt(), R.drawable.ic_cc_bell, listOf("SOUNDS")),
         Category("phone", "Phone & Connections", 0xFF30D158.toInt(), R.drawable.ic_cc_wifi, listOf("PHONE & CONNECTIVITY", "CONNECTIONS")),
         Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
-        Category("gilbert", "Pocher", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("POCHER", "POCHER · BRAIN & MEMORY", "POCHER · NOTIFICATIONS")),
+        Category("gilbert", "Gilbert", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("GILBERT", "GILBERT · BRAIN & MEMORY", "GILBERT · NOTIFICATIONS")),
         Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "RESET"))
     )
     private val groups = listOf(listOf("setup"), listOf("look", "home", "island", "gilbert", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
@@ -147,9 +147,9 @@ class SettingsActivity : Activity() {
         // One switch for everything extra; the look of the Home Screen stays.
         val simple = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = cardBg() }
         toggle(simple, "Simple Mode", if (s.simpleMode)
-            "On — Pocher, Dynamic Island, Sidebar, Side Island and pop-ups are off. Your look, icons, widgets and theme stay. " +
+            "On — Gilbert, Dynamic Island, Sidebar, Side Island and pop-ups are off. Your look, icons, widgets and theme stay. " +
                 "Turn off to bring everything back as it was"
-            else "Turn off Pocher, the Dynamic Island, Sidebar, Side Island and pop-ups in one go. Your look, icons, widgets and theme stay",
+            else "Turn off Gilbert, the Dynamic Island, Sidebar, Side Island and pop-ups in one go. Your look, icons, widgets and theme stay",
             s.simpleMode) { s.simpleMode = it; SoundFX.play(this, if (it) "close" else "open"); rebuild() }
         list.addView(simple, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
         val adj = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = cardBg() }
@@ -791,33 +791,33 @@ class SettingsActivity : Activity() {
         }
 
         // ---------------- Gilbert: the living orb in the island
-        val gil = section("POCHER")
-        toggle(gil, "Pocher", "The living orb in the Dynamic Island: a sphere of particles that becomes a little face, " +
+        val gil = section("GILBERT")
+        toggle(gil, "Gilbert", "The living orb in the Dynamic Island: a sphere of particles that becomes a little face, " +
             "blinks, looks around and pops app logos when something arrives. Tap him for his card", s.islandFace) { s.islandFace = it; rebuild() }
         if (s.islandFace) {
             segment(gil, "Colours", listOf("ember" to "Ember", "ocean" to "Ocean", "aurora" to "Aurora", "rose" to "Rose", "mono" to "Mono", "theme" to "Wallpaper"),
                 s.gilbertColors) { s.gilbertColors = it }
-            segment(gil, "Face", listOf("classic" to "°~°", "happy" to "^‿^", "dots" to "•‿•", "sleepy" to "-o-"), s.gilbertFace) { s.gilbertFace = it }
+            segment(gil, "Face", listOf("orb" to "◉", "classic" to "°~°", "happy" to "^‿^", "dots" to "•‿•", "sleepy" to "-o-"), s.gilbertFace) { s.gilbertFace = it }
             slider(gil, "Size", 36, 64, s.gilbertSize, { "${it}dp" }) { s.gilbertSize = it }
             slider(gil, "Particles", 120, 360, s.gilbertDensity, { "$it" }) { s.gilbertDensity = it }
             slider(gil, "Speed", 40, 200, s.gilbertSpeed, { "$it%" }) { s.gilbertSpeed = it }
-            toggle(gil, "Pocher Talks", "Little check-ins in a bubble under the island: “Have you eaten?”, drink water, " +
+            toggle(gil, "Gilbert Talks", "Little check-ins in a bubble under the island: “Have you eaten?”, drink water, " +
                 "battery and heat warnings, steps, weather, held notifications and more", s.gilbertTalk) { s.gilbertTalk = it }
             slider(gil, "Talks Every", 3, 60, s.gilbertTalkMin, { "$it min" }) { s.gilbertTalkMin = it }
-            toggle(gil, "Emotions & Reactions", "Pocher feels things: he watches with you during videos, bops to music, reads " +
+            toggle(gil, "Emotions & Reactions", "Gilbert feels things: he watches with you during videos, bops to music, reads " +
                 "along when you search, smiles at chats, gets sleepy at night, sad when the battery is low, excited when " +
                 "charging, surprised at new messages — and his eyes follow your finger", s.gilbertEmotions) { s.gilbertEmotions = it }
         }
-        val gilB = section("POCHER · BRAIN & MEMORY")
+        val gilB = section("GILBERT · BRAIN & MEMORY")
         if (gilB.parent != null) {
             if (GilbertBrain.installed(this) && GilbertBrain.crashed(this))
                 info(gilB, "⚠️ The current brain crashed the launcher, so it's switched off. Remove it and pick a smaller “q8” .task file (not “f32”).")
-            info(gilB, if (GilbertBrain.installed(this)) "🧠 Brain on (${GilbertBrain.sizeMb(this)} MB). Pocher chats freely — privately, on this phone, no internet needed."
-                else "Memory mode: Pocher already learns your songs, apps and who messages you, and answers from that. " +
+            info(gilB, if (GilbertBrain.installed(this)) "🧠 Brain on (${GilbertBrain.sizeMb(this)} MB). Gilbert chats freely — privately, on this phone, no internet needed."
+                else "Memory mode: Gilbert already learns your songs, apps and who messages you, and answers from that. " +
                     "Add his brain (a small offline AI model, .task file ~500 MB) to chat about anything.")
-            button(gilB, "Open Pocher's Console", 0xFF0A84FF.toInt()) { GilbertLauncher.open(this) }
-            toggle(gilB, "Pocher's Archive", "Saves every notification and chat (one file per day, 60 days) in Android/data/…/files/Pocher Archive, " +
-                "so Pocher can search and answer about them. Stays on your phone", s.gilbertArchive) { s.gilbertArchive = it }
+            button(gilB, "Open Gilbert's Console", 0xFF0A84FF.toInt()) { GilbertLauncher.open(this) }
+            toggle(gilB, "Gilbert's Archive", "Saves every notification and chat (one file per day, 60 days) in Android/data/…/files/Gilbert Archive, " +
+                "so Gilbert can search and answer about them. Stays on your phone", s.gilbertArchive) { s.gilbertArchive = it }
             info(gilB, "Archive: ${GilbertArchive.count(this)} messages over ${GilbertArchive.days(this).size} days")
             button(gilB, "Clear Archive", 0xFFFF453A.toInt()) { GilbertArchive.clear(this); rebuild() }
             if (!GilbertBrain.installed(this)) {
@@ -830,7 +830,7 @@ class SettingsActivity : Activity() {
                     runCatching { startActivityForResult(i, REQ_BRAIN) }
                 }
             } else button(gilB, "Remove Brain", 0xFFFF453A.toInt()) { GilbertBrain.remove(this); rebuild() }
-            info(gilB, "What Pocher knows about you:\n" + GilbertMemory.profile(this))
+            info(gilB, "What Gilbert knows about you:\n" + GilbertMemory.profile(this))
             val facts = GilbertMemory.facts(this)
             if (facts.isNotEmpty()) {
                 info(gilB, "Things you told him (tap to forget):")
@@ -838,7 +838,7 @@ class SettingsActivity : Activity() {
             } else info(gilB, "Teach him: in the chat say “remember that my exam is Friday”, or just talk — “I'm a BSIT student”, “I love NF”.")
             button(gilB, "Forget Everything", 0xFFFF453A.toInt()) { GilbertMemory.forget(this); rebuild() }
         }
-        val gilN = section("POCHER · NOTIFICATIONS")
+        val gilN = section("GILBERT · NOTIFICATIONS")
         segment(gilN, "Notification Style", listOf("launcher" to "Launcher", "original" to "Original", "both" to "Both"), s.notifStyle) {
             s.notifStyle = it
         }
@@ -848,7 +848,7 @@ class SettingsActivity : Activity() {
             "(they just don't make a sound)", s.alwaysShowMessages) { s.alwaysShowMessages = it }
         toggle(gilN, "Quiet in the App You're Using", "No pop-ups or messages from an app while you have it open — " +
             "other apps still pop up as usual", s.gilbertQuietInApp) { s.gilbertQuietInApp = it }
-        toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; Pocher quietly holds the rest (red bubble) " +
+        toggle(gilN, "Calm Mode", "Only your Priority apps pop up on screen; Gilbert quietly holds the rest (red bubble) " +
             "until you tap him", s.gilbertCalm) { s.gilbertCalm = it }
         slider(gilN, "Pop-ups per Minute (others)", 1, 10, s.gilbertMaxPerMin, { "$it" }) { s.gilbertMaxPerMin = it }
         button(gilN, "Priority Apps… (${s.gilbertPriority.size})", 0xFF0A84FF.toInt()) {
@@ -857,16 +857,16 @@ class SettingsActivity : Activity() {
         button(gilN, "Quiet Apps… (${s.gilbertQuiet.size})", 0xFF0A84FF.toInt()) {
             chooseApps("Quiet Apps (always held)", launchableApps(), s.gilbertQuiet) { s.gilbertQuiet = it; rebuild() }
         }
-        info(gilN, "Priority apps always pop up. Quiet apps never do — Pocher keeps them for you. Everything else pops up " +
-            "only within the per-minute limit (or never, in Calm Mode with Priority apps chosen). Tap Pocher to see what he's holding, " +
+        info(gilN, "Priority apps always pop up. Quiet apps never do — Gilbert keeps them for you. Everything else pops up " +
+            "only within the per-minute limit (or never, in Calm Mode with Priority apps chosen). Tap Gilbert to see what he's holding, " +
             "today's noisiest apps and a quick phone check.")
 
         // ---------------- Sounds
         val snd = section("SOUNDS")
-        toggle(snd, "Sound Effects", "Soft pops, ticks, Pocher's chirps and the sparkly “hello” chime (silent when the phone is on silent)",
+        toggle(snd, "Sound Effects", "Soft pops, ticks, Gilbert's chirps and the sparkly “hello” chime (silent when the phone is on silent)",
             s.soundFx) { s.soundFx = it; if (it) SoundFX.play(this, "success") }
         slider(snd, "Effects Volume", 10, 100, s.soundFxVolume, { "$it%" }) { s.soundFxVolume = it; SoundFX.play(this, "pop") }
-        toggle(snd, "Sounds in Do Not Disturb", "Keep the effects (and Pocher's chirps) playing while Do Not Disturb is on", s.soundsInDnd) { s.soundsInDnd = it }
+        toggle(snd, "Sounds in Do Not Disturb", "Keep the effects (and Gilbert's chirps) playing while Do Not Disturb is on", s.soundsInDnd) { s.soundsInDnd = it }
         button(snd, "Use a Song as Ringtone…", 0xFF0A84FF.toInt()) { pickRingtone() }
         button(snd, "Sound & Vibration Settings…", 0xFF0A84FF.toInt()) {
             runCatching { startActivity(Intent(SysSettings.ACTION_SOUND_SETTINGS)) }
@@ -1030,7 +1030,7 @@ class SettingsActivity : Activity() {
             }
             REQ_BRAIN -> {
                 val go = { force: Boolean ->
-                    android.widget.Toast.makeText(this, "Adding Pocher's brain… (this can take a minute or two)", android.widget.Toast.LENGTH_LONG).show()
+                    android.widget.Toast.makeText(this, "Adding Gilbert's brain… (this can take a minute or two)", android.widget.Toast.LENGTH_LONG).show()
                     GilbertBrain.install(this, uri, force) { ok, msg ->
                         android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
                         if (ok) rebuild()
@@ -1041,7 +1041,7 @@ class SettingsActivity : Activity() {
                     android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog)
                         .setTitle("Heavy brain (${if (size > 0) "${size / 1_000_000} MB" else "f32"})")
                         .setMessage("This brain is very big for this phone. It may be slow or close the launcher while loading. " +
-                            "If it does, Pocher switches it off automatically and you can pick the smaller q8 file. Use it anyway?")
+                            "If it does, Gilbert switches it off automatically and you can pick the smaller q8 file. Use it anyway?")
                         .setPositiveButton("Use Anyway") { _, _ -> go(true) }
                         .setNegativeButton("Cancel", null)
                         .show()

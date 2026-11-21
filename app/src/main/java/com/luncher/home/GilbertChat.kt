@@ -29,7 +29,7 @@ object GilbertChat {
     fun onBrainPicked(act: Activity, uri: android.net.Uri) {
         val go = { force: Boolean ->
             brainRoom?.let { r -> r.refresh() }
-            android.widget.Toast.makeText(act, "Copying Pocher's new brain… (a minute or two)", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(act, "Copying Gilbert's new brain… (a minute or two)", android.widget.Toast.LENGTH_LONG).show()
             GilbertBrain.install(act, uri, force) { ok, msg ->
                 android.widget.Toast.makeText(act, msg, android.widget.Toast.LENGTH_LONG).show()
                 if (ok) brainRoom?.calibrate() else brainRoom?.refresh()
@@ -38,7 +38,7 @@ object GilbertChat {
         val (name, size) = GilbertBrain.describe(act, uri)
         if (GilbertBrain.isHeavy(name, size)) android.app.AlertDialog.Builder(act, R.style.Theme_Luncher_Dialog)
             .setTitle("Heavy brain (${if (size > 0) "${size / 1_000_000} MB" else "f32"})")
-            .setMessage("This brain is very big for this phone and may crash while loading (Pocher will switch it off if it does). Use it anyway?")
+            .setMessage("This brain is very big for this phone and may crash while loading (Gilbert will switch it off if it does). Use it anyway?")
             .setPositiveButton("Use Anyway") { _, _ -> go(true) }.setNegativeButton("Cancel", null).show()
         else go(false)
     }
@@ -95,7 +95,7 @@ object GilbertChat {
             has("sad", "tired", "stress", "bad day") -> "I'm here with you 🤍 Take a breath, drink some water, and maybe put on your favourite song."
             has("eat", "hungry", "food") -> "Have you eaten yet? Go get something yummy 🍜"
             else -> GilbertTalk.line(act, s, "curious") +
-                if (!GilbertBrain.installed(act)) "\n\n(Give me my brain in Settings › Pocher › Brain and I can chat about anything.)" else ""
+                if (!GilbertBrain.installed(act)) "\n\n(Give me my brain in Settings › Gilbert › Brain and I can chat about anything.)" else ""
         }
     }
 
@@ -122,7 +122,7 @@ object GilbertChat {
             }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(10) })
             addView(LinearLayout(act).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(TextView(act).apply { text = "Pocher"; textSize = 18f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD })
+                addView(TextView(act).apply { text = "Gilbert"; textSize = 18f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD })
                 addView(TextView(act).apply {
                     text = if (GilbertBrain.installed(act)) "Brain on · private, on this phone" else "Memory mode · add his brain in Settings"
                     textSize = 11.5f; setTextColor(0x99FFFFFF.toInt())
@@ -180,7 +180,7 @@ object GilbertChat {
 
         // Input
         val input = EditText(act).apply {
-            hint = "Message Pocher"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 15f
+            hint = "Message Gilbert"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 15f
             setPadding(dp(14), dp(10), dp(14), dp(10)); maxLines = 4
             background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(0x26FFFFFF) }
             imeOptions = EditorInfo.IME_ACTION_SEND; setSingleLine(false)
@@ -232,7 +232,7 @@ object GilbertChat {
         }
         var listening = false
         fun micIdle() { listening = false; mic.animate().cancel(); mic.scaleX = 1f; mic.scaleY = 1f
-            (mic.background as GradientDrawable).setColor(0x33FFFFFF); input.hint = "Message Pocher" }
+            (mic.background as GradientDrawable).setColor(0x33FFFFFF); input.hint = "Message Gilbert" }
         mic.setOnClickListener {
             if (listening) { GilbertVoice.stopListening(); micIdle(); return@setOnClickListener }
             if (act.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
