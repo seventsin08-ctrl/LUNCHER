@@ -40,10 +40,14 @@ object GilbertPlanner {
         w.inMin?.let { return now.timeInMillis + it * 60_000L }
         val c = now.clone() as Calendar
         c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+        if (w.date != null && w.month != null) {   // "Nov 28"
+            c.set(Calendar.MONTH, w.month - 1); c.set(Calendar.DAY_OF_MONTH, w.date)
+            if (c.timeInMillis < now.timeInMillis - 86_400_000L) c.add(Calendar.YEAR, 1)
+        }
         if (w.day > 0) c.add(Calendar.DAY_OF_YEAR, w.day)
         w.weekday?.let { wd -> var add = (wd - c.get(Calendar.DAY_OF_WEEK) + 7) % 7; if (add == 0 && w.hour != null && w.hour <= now.get(Calendar.HOUR_OF_DAY)) add = 7; c.add(Calendar.DAY_OF_YEAR, add) }
         c.set(Calendar.HOUR_OF_DAY, w.hour ?: defaultHour); c.set(Calendar.MINUTE, if (w.hour != null) w.min else 0)
-        if (c.timeInMillis <= now.timeInMillis) c.add(Calendar.DAY_OF_YEAR, 1)
+        if (c.timeInMillis <= now.timeInMillis && w.date == null) c.add(Calendar.DAY_OF_YEAR, 1)
         return c.timeInMillis
     }
 

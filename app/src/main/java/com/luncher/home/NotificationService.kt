@@ -146,6 +146,13 @@ class NotificationService : NotificationListenerService() {
                 runCatching { PocherFiles.capture(this, sbn.packageName, chat, avatar) }
             }
             onPosted?.invoke(sbn.packageName, title, text)
+            // All Father keeps every notification as information (and acts on what needs it).
+            runCatching {
+                val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
+                val who = chat?.title?.takeIf { it.isNotBlank() } ?: title
+                val body = chat?.messages?.lastOrNull()?.let { (w, t) -> if (w.isNotBlank() && w != "You" && w != who) "$w: $t" else t } ?: text
+                AllFather.collect(this, sbn.packageName, label, who, body)
+            }
         }
     }
     /** Pull the conversation out of a chat notification (MessagingStyle / InboxStyle / plain). */

@@ -174,9 +174,9 @@ class Sidebar(
             }
             r.addView(v, LinearLayout.LayoutParams(sp(78), WRAP_CONTENT))
         }
-        // Gilbert first: tap to chat with him from anywhere.
-        val gil = assistantItem { close(); GilbertLauncher.open(act) }
-        ((gil as? LinearLayout)?.getChildAt(1) as? TextView)?.text = "Gilbert"
+        // All Father first (the system lives on this side; Gilbert lives in the island).
+        val gil = assistantItem { close(); AllFatherActivity.open(act) }
+        ((gil as? LinearLayout)?.getChildAt(1) as? TextView)?.text = "All Father"
         put(gil); items += gil
         for ((i, a) in chosen.withIndex()) {
             if (!twoCols && i == 2 && chosen.size > 3) col.addView(View(act).apply {

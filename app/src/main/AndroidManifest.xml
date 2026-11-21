@@ -130,6 +130,14 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- All Father's Data Center (landscape). -->
+        <activity
+            android:name=".AllFatherActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:taskAffinity="com.applelauncher.allfather"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
         <!-- Share → Gilbert: share any photo and he keeps & scans it. -->
         <activity
             android:name=".GilbertShareActivity"

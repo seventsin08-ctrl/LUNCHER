@@ -191,7 +191,9 @@ object GilbertControl {
                     Action("Open $label", "") { a -> a.packageManager.getLaunchIntentForPackage(pkg)?.let { a.startActivity(it) }; "Opening $label." } }
                 ?: Action("I don't have a switch called “$what”", "", needsOk = false) { "" }
             }
-            K.OPEN_APP -> appFor(ctx, i.text)?.let { (pkg, label) ->
+            K.OPEN_APP -> if (Regex("all ?father|allfather|data ?cent(?:er|re)").containsMatchIn(i.text))
+                Action("Open All Father", "") { a -> AllFatherActivity.open(a); "All Father." }
+            else appFor(ctx, i.text)?.let { (pkg, label) ->
                 Action("Open $label", "") { a -> a.packageManager.getLaunchIntentForPackage(pkg)?.let { a.startActivity(it) }; "Opening $label." } }
                 ?: Action("I couldn't find “${i.text}” on your phone", "", needsOk = false) { "" }
             K.REMIND -> { val at = GilbertPlanner.resolve(i.at)

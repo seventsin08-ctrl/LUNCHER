@@ -9,8 +9,9 @@ object GilbertIntent {
     data class Intent(val kind: Kind, val text: String = "", val on: Boolean? = null, val num: Int? = null, val num2: Int? = null, val at: When? = null)
 
     /** A time someone said: "in 10 minutes", "at 5 pm", "tomorrow at 8", "on friday". */
-    data class When(val inMin: Int? = null, val hour: Int? = null, val min: Int = 0, val day: Int = 0, val weekday: Int? = null) {
-        val isEmpty get() = inMin == null && hour == null && day == 0 && weekday == null
+    data class When(val inMin: Int? = null, val hour: Int? = null, val min: Int = 0, val day: Int = 0, val weekday: Int? = null,
+                    val month: Int? = null, val date: Int? = null) {
+        val isEmpty get() = inMin == null && hour == null && day == 0 && weekday == null && date == null
     }
 
     enum class Kind {
