@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        156 to listOf("🔧 Tapping Gilbert inside other apps now opens his HUD console too (it used to open the Notifications list)"),
         155 to listOf("🔧 Gilbert's red notification count is no longer cut off — it now sits fully inside his round face"),
         154 to listOf("⬆ One place for Gilbert: tapping him opens his HUD console straight away (the separate card is gone)", "⬆ New window 00 NOW: status, battery & calm meters, notifications he's holding (open / inbox / clear), noisiest apps with Normal › Priority › Quiet tags, phone check, and quick actions (Tools, Inbox, Scan image)"),
         153 to listOf("⬆ Gilbert's card now matches his HUD console: dark panel, glowing corner brackets, scan line and HUD labels", "⬆ The HUD (console, card, brain room and his globe face) follows your wallpaper / theme colour (cyan on Mono)", "🔧 New chats come in as a small notification only — tap it to open the chat window (it no longer pops open and covers the screen)", "🔧 The console title no longer hides behind the island"),

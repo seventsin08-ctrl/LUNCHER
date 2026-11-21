@@ -981,8 +981,8 @@ class MainActivity : Activity() {
         ov.configureFace(settings)
         ov.beatsOn = settings.islandBeats
         ov.onBeatsToggle = { on -> settings.islandBeats = on; island.beatsOn = on }
-        // Over other apps, tapping Gilbert opens his inbox (Notifications history).
-        ov.onFaceTap = { if (::sideHud.isInitialized) sideHud.openHistory() }
+        // Over other apps too, tapping Gilbert opens his HUD console (00 NOW has the inbox button).
+        ov.onFaceTap = { openGilbert() }
         ov.camera = island.camera
         applyToolsStyle(ov)
         ov.allow = island.allow
