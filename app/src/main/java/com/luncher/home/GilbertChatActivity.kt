@@ -16,13 +16,15 @@ class GilbertChatActivity : Activity() {
         CrashLog.install(this)
         HighRefresh.apply(this)
         window.setBackgroundDrawableResource(android.R.color.transparent)
+        // Never leave a picture of the console in the recent-apps screen.
+        if (android.os.Build.VERSION.SDK_INT >= 33) runCatching { setRecentsScreenshotEnabled(false) }
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
         val root = FrameLayout(this)
         setContentView(root)
         val s = Settings(this)
         runCatching { ThemeEngine.resolve(this, s) }
-        root.post { GilbertConsole.show(this, root, s) { finish(); overridePendingTransition(0, android.R.anim.fade_out) } }
+        root.post { GilbertConsole.show(this, root, s) { finishAndRemoveTask(); overridePendingTransition(0, android.R.anim.fade_out) } }
     }
 
     private var picking = false
@@ -41,7 +43,7 @@ class GilbertChatActivity : Activity() {
     override fun onPause() {
         super.onPause()
         // Leaving (home / another app): close quietly.
-        if (!isChangingConfigurations && !picking) finish()
+        if (!isChangingConfigurations && !picking) finishAndRemoveTask()
     }
 }
 

@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        157 to listOf("🔧 Gilbert's console no longer stays behind in the recent-apps screen after you leave it"),
         156 to listOf("🔧 Tapping Gilbert inside other apps now opens his HUD console too (it used to open the Notifications list)"),
         155 to listOf("🔧 Gilbert's red notification count is no longer cut off — it now sits fully inside his round face"),
         154 to listOf("⬆ One place for Gilbert: tapping him opens his HUD console straight away (the separate card is gone)", "⬆ New window 00 NOW: status, battery & calm meters, notifications he's holding (open / inbox / clear), noisiest apps with Normal › Priority › Quiet tags, phone check, and quick actions (Tools, Inbox, Scan image)"),
