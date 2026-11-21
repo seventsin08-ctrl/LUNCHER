@@ -6141,10 +6141,13 @@ class MainActivity : Activity() {
             val chat = NotificationService.lastChat[pkg]
             sideHud.countNew()
             if (settings.sideChatCard && chat != null) {
-                // Small chat window: platform logo, chat name and the latest messages; tap opens that chat.
-                sideHud.chat(app?.icon, app?.label ?: "Messages", chat) {
-                    val pi = chat.open
-                    if (pi != null) IslandServices.send(this, pi) else openApp()
+                // Comes in as a small notification only; tap it to open the chat window
+                // (it no longer jumps open by itself and covers what you're doing).
+                sideHud.message(app?.icon, chat.title.ifBlank { title.ifBlank { app?.label ?: "Message" } }, text) {
+                    sideHud.chat(app?.icon, app?.label ?: "Messages", chat) {
+                        val pi = chat.open
+                        if (pi != null) IslandServices.send(this, pi) else openApp()
+                    }
                 }
             } else sideHud.message(app?.icon, title.ifBlank { app?.label ?: "Message" }, text) { openApp() }
             return

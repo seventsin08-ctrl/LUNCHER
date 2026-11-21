@@ -19,8 +19,16 @@ import kotlin.math.sin
 
 /** Gilbert's HUD look: cyan + white lines on black, like a sci-fi heads-up display. */
 object Hud {
-    const val CYAN = 0xFF00E5FF.toInt()
-    const val SOFT = 0xFF7FF4FF.toInt()
+    /** The HUD colour follows your wallpaper / theme (bright enough to glow); cyan on Mono. */
+    val CYAN: Int get() {
+        if (!ThemeEngine.colorful) return 0xFF00E5FF.toInt()
+        val hsv = FloatArray(3); Color.colorToHSV(ThemeEngine.accent, hsv)
+        hsv[1] = hsv[1].coerceIn(0.45f, 0.9f); hsv[2] = hsv[2].coerceAtLeast(0.92f)
+        return Color.HSVToColor(hsv)
+    }
+    val SOFT: Int get() = IconFactory.blend(CYAN, Color.WHITE, 0.5f)
+    /** Deep background tinted with the theme. */
+    fun bg(alpha: Int) = a(IconFactory.blend(0xFF02060A.toInt(), CYAN, 0.10f), alpha)
     val mono: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
     val monoBold: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
     fun a(c: Int, alpha: Int) = Color.argb(alpha.coerceIn(0, 255), Color.red(c), Color.green(c), Color.blue(c))

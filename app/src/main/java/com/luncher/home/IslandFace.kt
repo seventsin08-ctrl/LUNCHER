@@ -273,7 +273,7 @@ class IslandFace(ctx: Context) : View(ctx) {
         orbPulse *= 0.94f
         val spin = when (md) { "thinking", "curious" -> 2.6f; "excited" -> 2f; "sleepy" -> 0.35f; else -> 1f }
         val coreK = when (md) { "excited", "surprised" -> 1.35f; "sleepy" -> 0.65f; "listening" -> 1f + 0.2f * sin(t * 8f); "thinking" -> 0.9f + 0.15f * sin(t * 5f); else -> 1f } + orbPulse * 0.6f
-        val base = when (md) { "love" -> 0xFFFF7EB6.toInt(); "sad" -> 0xFF5C8DFF.toInt(); "excited" -> 0xFF9FFFFF.toInt(); "sleepy" -> 0xFF4A7C8C.toInt(); else -> 0xFF00E5FF.toInt() }
+        val base = when (md) { "love" -> 0xFFFF7EB6.toInt(); "sad" -> 0xFF5C8DFF.toInt(); "excited" -> 0xFF9FFFFF.toInt(); "sleepy" -> 0xFF4A7C8C.toInt(); else -> Hud.CYAN }
         val R = minOf(w, h) * 0.40f * (1f + 0.025f * sin(t * 1.6f))
         val rot = t * (0.45f + spinBoost * 3f) * speedK * spin
         val cr = cos(rot); val sr = sin(rot)

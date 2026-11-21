@@ -62,8 +62,8 @@ object GilbertConsole {
         val sw = a.resources.displayMetrics.widthPixels
         val sh = a.resources.displayMetrics.heightPixels
         // Full-screen HUD on black.
-        val layer = FrameLayout(a).apply { setBackgroundColor(Color.argb(238, 0, 4, 8)); isClickable = true }
-        val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(40), dp(14), dp(18)) }
+        val layer = FrameLayout(a).apply { setBackgroundColor(Hud.bg(240)); isClickable = true }
+        val col = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(62), dp(14), dp(18)) }
         lateinit var close: () -> Unit
 
         // ---- Top bar: name · status · close

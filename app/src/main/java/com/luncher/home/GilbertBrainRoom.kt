@@ -32,7 +32,7 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
     private val status = TextView(act).apply { textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER }
     private val detail = TextView(act).apply { textSize = 12.5f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER }
     private val steps = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(4)) }
-    private val pickBtn = pill("", 0xFF0A84FF.toInt()) {
+    private val pickBtn = pill("", 0) {
         if (GilbertBrain.installed(act) && GilbertBrain.crashed(act)) {
             GilbertBrain.retry(act); GilbertBrain.warmUp(act); calibrate()
         } else onPick()
@@ -56,9 +56,9 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
     }
 
     private fun pill(t: String, c: Int, fn: () -> Unit) = TextView(act).apply {
-        text = t; textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+        text = t; textSize = 13f; setTextColor(Hud.CYAN); typeface = Hud.monoBold; letterSpacing = 0.05f; gravity = Gravity.CENTER
         setPadding(dp(18), dp(10), dp(18), dp(10))
-        background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(c) }
+        background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(Hud.a(Hud.CYAN, 28)); setStroke(maxOf(1, dp(1)), Hud.CYAN) }
         setOnClickListener { SoundFX.play(act, "tick"); fn() }
     }
 

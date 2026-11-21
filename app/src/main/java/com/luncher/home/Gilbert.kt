@@ -168,20 +168,18 @@ object Gilbert {
         panelClose?.let { it(); return }
         fun dp(v: Int) = (v * act.resources.displayMetrics.density).roundToInt()
         fun dpf(v: Float) = v * act.resources.displayMetrics.density
-        val GREEN = 0xFF30D158.toInt(); val AMBER = 0xFFFFC53D.toInt(); val RED = 0xFFFF453A.toInt()
-        val BLUE = 0xFF0A84FF.toInt(); val DIM = 0x8CFFFFFF.toInt(); val FAINT = 0x59FFFFFF
-        val layer = FrameLayout(act).apply { setBackgroundColor(Color.argb(150, 0, 0, 0)); isClickable = true }
+        // HUD style (same as his console), coloured by your wallpaper / theme.
+        val HUD = Hud.CYAN; val SOFT = Hud.SOFT
+        val GREEN = HUD; val AMBER = 0xFFFFC53D.toInt(); val RED = 0xFFFF453A.toInt()
+        val BLUE = HUD; val DIM = 0x99FFFFFF.toInt(); val FAINT = Hud.a(SOFT, 90)
+        val layer = FrameLayout(act).apply { setBackgroundColor(Color.argb(170, 0, 0, 0)); isClickable = true }
         // Theme: the card is tinted with your wallpaper / theme colour (graphite when Mono).
         val tint = if (ThemeEngine.colorful) ThemeEngine.accent else 0xFF8E8E93.toInt()
         fun tinted(c: Int, k: Float) = IconFactory.blend(c, tint, k)
         // The card: a brushed-graphite gradient with a fine light edge.
-        val card = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
+        val card = HudFrame(act).apply {
             setPadding(dp(16), dp(16), dp(16), dp(14))
-            background = android.graphics.drawable.LayerDrawable(arrayOf(
-                GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(tinted(0xFF3A3A3E.toInt(), 0.22f), tinted(0xFF232326.toInt(), 0.14f), tinted(0xFF161618.toInt(), 0.08f))).apply {
-                    cornerRadius = dpf(34f) },
-                GradientDrawable().apply { cornerRadius = dpf(34f); setColor(Color.TRANSPARENT); setStroke(maxOf(1, dp(1)), ThemeEngine.alpha(tinted(Color.WHITE, 0.5f), 70)) }))
+            background = GradientDrawable().apply { setColor(Hud.bg(244)) }
             elevation = dpf(20f)
         }
         lateinit var close: () -> Unit
@@ -195,26 +193,25 @@ object Gilbert {
             typeface = Typeface.create(if (bold) "sans-serif-medium" else "sans-serif", if (bold) Typeface.BOLD else Typeface.NORMAL)
         }
         fun chip(t: String, color: Int) = TextView(act).apply {
-            text = t; textSize = 11f; setTextColor(color); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(8), dp(2), dp(8), dp(3))
-            background = GradientDrawable().apply { cornerRadius = dpf(9f); setColor((color and 0x00FFFFFF) or 0x2E000000) }
+            text = t.uppercase(); textSize = 9.5f; setTextColor(color); typeface = Hud.monoBold; letterSpacing = 0.06f
+            setPadding(dp(7), dp(2), dp(7), dp(3))
+            background = GradientDrawable().apply { cornerRadius = dpf(3f); setColor((color and 0x00FFFFFF) or 0x1F000000); setStroke(maxOf(1, dp(1)), (color and 0x00FFFFFF) or 0x80000000.toInt()) }
         }
         fun bigPill(t: String, color: Int, fn: () -> Unit) = TextView(act).apply {
-            text = t; textSize = 12.5f; setTextColor(color); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            setPadding(dp(13), dp(7), dp(13), dp(7))
-            background = GradientDrawable().apply { cornerRadius = dpf(16f); setColor((color and 0x00FFFFFF) or 0x26000000)
+            text = t.uppercase(); textSize = 11f; setTextColor(color); typeface = Hud.monoBold; letterSpacing = 0.05f
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            background = GradientDrawable().apply { cornerRadius = dpf(4f); setColor((color and 0x00FFFFFF) or 0x26000000)
                 setStroke(maxOf(1, dp(1)), (color and 0x00FFFFFF) or 0x40000000) }
             setOnClickListener { SoundFX.play(act, "tick"); fn() }
         }
         fun roundBtn(glyph: String, fn: () -> Unit) = TextView(act).apply {
-            text = glyph; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x33FFFFFF, 0x14FFFFFF)).apply {
-                shape = GradientDrawable.OVAL; setStroke(maxOf(1, dp(1)), 0x40FFFFFF) }
+            text = glyph; textSize = 15f; setTextColor(SOFT); gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Hud.a(HUD, 18)); setStroke(maxOf(1, dp(1)), Hud.a(HUD, 140)) }
             setOnClickListener { SoundFX.play(act, "tick"); fn() }
         }
         fun iconBox(bmp: android.graphics.Bitmap?, glyph: String?, size: Int = 38): View {
             val box = FrameLayout(act).apply {
-                background = GradientDrawable().apply { cornerRadius = dpf(size * 0.3f); setColor(0x1FFFFFFF); setStroke(maxOf(1, dp(1)), 0x1AFFFFFF) }
+                background = GradientDrawable().apply { cornerRadius = dpf(5f); setColor(Hud.a(HUD, 16)); setStroke(maxOf(1, dp(1)), Hud.a(HUD, 90)) }
             }
             if (bmp != null) box.addView(android.widget.ImageView(act).apply {
                 setImageBitmap(bmp)
@@ -230,9 +227,7 @@ object Gilbert {
         /** A tile: rounded glassy plate inside the card. */
         fun tile(): LinearLayout = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(ThemeEngine.alpha(tinted(Color.WHITE, 0.35f), 0x24), ThemeEngine.alpha(tinted(Color.WHITE, 0.35f), 0x10))).apply {
-                cornerRadius = dpf(24f); setStroke(maxOf(1, dp(1)), ThemeEngine.alpha(tinted(Color.WHITE, 0.4f), 0x26)) }
+            background = GradientDrawable().apply { cornerRadius = dpf(6f); setColor(0x0FFFFFFF); setStroke(maxOf(1, dp(1)), Hud.a(SOFT, 45)) }
         }
         /** Tile header: icon · title + chip · subtitle · optional trailing view. */
         fun tileHead(icon: View, title: String, chipV: View?, sub: String?, trail: View? = null): LinearLayout {
@@ -264,7 +259,7 @@ object Gilbert {
             }
             r.addView(TextView(act).apply {
                 gravity = Gravity.CENTER; textSize = 11f; typeface = Typeface.DEFAULT_BOLD
-                if (done) { text = "✓"; setTextColor(Color.BLACK); background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) } }
+                if (done) { text = "✓"; setTextColor(Color.BLACK); background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(HUD) } }
                 else background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT)
                     setStroke(maxOf(1, dp(1)), FAINT, dpf(2.5f), dpf(2.5f)) }
             }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(10) })
@@ -278,22 +273,24 @@ object Gilbert {
             r.addView(text(trail, 12.5f, DIM).apply { setPadding(dp(8), 0, 0, 0) })
             return r
         }
-        fun divider() = View(act).apply { setBackgroundColor(0x14FFFFFF) }
+        fun divider() = View(act).apply { setBackgroundColor(Hud.a(SOFT, 40)) }
         val tiles = ArrayList<View>()
         val body = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         fun addTile(v: View) { tiles += v; body.addView(v, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }) }
-        fun caption(t: String) = body.addView(text(t, 14f, DIM, true).apply { setPadding(dp(6), dp(14), 0, 0) })
+        fun caption(t: String) = body.addView(text("// " + t.uppercase(), 10.5f, SOFT).apply {
+            typeface = Hud.monoBold; letterSpacing = 0.1f; setPadding(dp(4), dp(16), 0, 0) })
 
         // ---- Header: orb · "Gilbert" · menu + close
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), 0, 0, dp(2)) }
         head.addView(FrameLayout(act).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(maxOf(1, dp(2)), ThemeEngine.alpha(tint, 170)) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(maxOf(1, dp(1)), Hud.a(HUD, 170)) }
             addView(IslandFace(act).apply { configure(s) }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(12) })
+        }, LinearLayout.LayoutParams(dp(46), dp(46)).apply { marginEnd = dp(12) })
         head.addView(LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            addView(text("Gilbert", 24f, Color.WHITE, true))
-            addView(text("Your ally · ${java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date())}", 12.5f, DIM))
+            addView(text("GILBERT", 18f, Color.WHITE, true).apply { typeface = Hud.monoBold; letterSpacing = 0.22f })
+            addView(text("ALLY · ${java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault()).format(java.util.Date()).uppercase()}", 9.5f, SOFT).apply {
+                typeface = Hud.mono; letterSpacing = 0.08f })
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         if (openChat != null) head.addView(roundBtn("▤") { close(); openChat() }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
         head.addView(roundBtn("☰") { close(); openTools() }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
@@ -447,6 +444,7 @@ object Gilbert {
         card.pivotX = act.resources.displayMetrics.widthPixels / 2f; card.pivotY = 0f
         card.scaleX = 0.3f; card.scaleY = 0.15f; card.alpha = 0f
         card.animate().alpha(1f).setDuration(200).start()
+        card.play()   // HUD frame draws in + scan line
         Motion.scaleTo(card, 1f, Motion.FLUID)
         tiles.forEachIndexed { i, v ->
             v.alpha = 0f; v.translationY = dpf(26f)
