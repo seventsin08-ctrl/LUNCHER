@@ -319,7 +319,7 @@ object GilbertConsole {
     }
 
     /** A reply card at the top of the window (long answers, lists, code). */
-    private fun reply(title: String, text: String) {
+    private fun reply(title: String, msg: String) {
         val a = act ?: return
         val body = content ?: return
         val card = LinearLayout(a).apply {
@@ -332,8 +332,8 @@ object GilbertConsole {
         head.addView(TextView(a).apply { text = "✕"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); setPadding(dp(10), 0, 0, 0); setOnClickListener { body.removeView(card) } })
         card.addView(head)
         card.addView(TextView(a).apply {
-            this.text = text; textSize = 14f; setTextColor(Color.WHITE); setLineSpacing(0f, 1.15f); setTextIsSelectable(true)
-            if (text.contains("```") || text.contains("    ")) typeface = mono
+            this.text = msg; textSize = 14f; setTextColor(Color.WHITE); setLineSpacing(0f, 1.15f); setTextIsSelectable(true)
+            if (msg.contains("```") || msg.contains("    ")) typeface = mono
             setPadding(0, dp(6), 0, 0) })
         body.addView(card, 0, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
         (body.parent as? ScrollView)?.smoothScrollTo(0, 0)
