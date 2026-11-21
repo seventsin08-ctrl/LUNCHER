@@ -368,6 +368,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(this)
         HighRefresh.apply(this)   // fastest refresh rate the screen has (90/120 Hz…)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         prefs = getSharedPreferences("luncher", MODE_PRIVATE)

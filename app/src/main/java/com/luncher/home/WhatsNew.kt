@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        150 to listOf("🔧 Gilbert's brain now runs in its own space: if it needs more memory than the phone has free, only the brain closes — the launcher stays open and Gilbert tells you what happened", "⬆ If the launcher ever closes because of a bug, Gilbert tells you why the next time you open his chat"),
         149 to listOf("🔧 Gilbert's brain no longer switches off by mistake after an update — it only turns off if it really crashes twice, and the brain room has a “Try Again” button", "🔧 Gilbert understands “how do you feel?” (he used to mistake “you” for “yo” and just say hey)", "🔧 Cleaner names in his briefing: no more “jxhn.mrqs:” in front, and your own replies aren't counted as messages"),
         148 to listOf("⬇ Much smaller download: the app now only carries the parts for your phone's chip (about 4× smaller), so updates download fast"),
         147 to listOf("🧠 Brain room: tap 🧠 in Gilbert's chat — the card flips into his brain: his face in a glowing ring, what brain he's running, his memory and archive",

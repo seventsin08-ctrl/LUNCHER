@@ -172,6 +172,10 @@ object GilbertChat {
         if (history.isEmpty()) history += false to ("Hi${GilbertTalk.ownerName(act)?.let { " $it" } ?: ""}, I'm here. " + GilbertMemory.recap(act) +
             "\nSay “report” for your full briefing, or just talk to me 🙂")
         for ((u, t) in history) bubble(u, t)
+        CrashLog.take(act)?.let { c ->
+            val m = "⚠️ The launcher closed last time because of a bug. Screenshot this and send it so it can be fixed:\n$c"
+            history += false to m; bubble(false, m)
+        }
         GilbertBrain.warmUp(act)   // start loading his brain now so he answers sooner
 
         // Input

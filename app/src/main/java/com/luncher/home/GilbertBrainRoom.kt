@@ -75,6 +75,7 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
         detail.text = buildString {
             if (has) append("${name ?: "Brain"} · ${GilbertBrain.sizeMb(act)} MB\n")
             append("Memory: ${GilbertMemory.facts(act).size} facts · Archive: ${GilbertArchive.count(act)} messages (${GilbertArchive.days(act).size} days)")
+            if (has && !GilbertBrain.loaded) GilbertBrain.lastError?.let { append("\n\n⚠️ $it") }
         }
         val off = has && GilbertBrain.crashed(act)
         pickBtn.text = if (off) "Try Again" else if (has) "Change Brain" else "Give Gilbert a Brain"
@@ -103,8 +104,8 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
         fun next() {
             if (i >= rows.size) {
                 ring.spin = false; ring.level = 1f
-                face.react("excited", 2500)
-                status.text = if (GilbertBrain.loaded) "Brain online ✨" else "Ready (memory mode)"
+                face.react(if (GilbertBrain.loaded) "excited" else "sleepy", 2500)
+                status.text = if (GilbertBrain.loaded) "Brain online ✨" else "Memory mode for now"
                 SoundFX.play(act, "success")
                 view.postDelayed({ refresh() }, 1500)
                 return

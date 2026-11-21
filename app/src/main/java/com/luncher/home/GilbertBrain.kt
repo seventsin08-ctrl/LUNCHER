@@ -4,7 +4,13 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import android.content.ComponentName
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Bundle
+import android.os.IBinder
+import android.os.Message
+import android.os.Messenger
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -16,7 +22,6 @@ import java.util.concurrent.Executors
 object GilbertBrain {
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private var llm: LlmInference? = null
     @Volatile var busy = false; private set
 
     /** Where to get a brain file (a .task model for MediaPipe). */
@@ -25,8 +30,6 @@ object GilbertBrain {
     fun file(ctx: Context) = File(ctx.filesDir, "gilbert_brain.task")
     fun installed(ctx: Context) = file(ctx).let { it.exists() && it.length() > 10_000_000 }
     fun sizeMb(ctx: Context) = (file(ctx).length() / 1_000_000)
-    /** Is the brain loaded and ready right now? */
-    val loaded get() = llm != null
     /** The name of the brain file you picked (e.g. "Qwen2.5-1.5B-Instruct"). */
     fun modelName(ctx: Context): String? = prefs(ctx).getString("name", null)
         ?.substringBefore("_multi")?.substringBefore("_seq")?.substringBefore(".task")
@@ -85,7 +88,7 @@ object GilbertBrain {
                 // Only now swap the old brain for the new one.
                 release()
                 file(app).delete(); tmp.renameTo(file(app))
-                prefs(app).edit().putBoolean("loading", false).putBoolean("crashed", false).putBoolean("heavy", force)
+                prefs(app).edit().putBoolean("crashed", false).putInt("crashes", 0).putBoolean("heavy", force)
                     .putString("name", name.ifBlank { null }).apply()
                 lastError = null
             }
@@ -94,68 +97,114 @@ object GilbertBrain {
         }
     }
 
-    /** Did the last brain crash the launcher while loading? (Then it stays off until you pick another.) */
+    /** Is the brain switched off because it kept closing? (A new launcher version starts fresh.) */
     fun crashed(ctx: Context): Boolean {
         val p = prefs(ctx)
-        // An app update (or Android closing the launcher) also stops a brain mid-load — that's not
-        // the brain's fault, so a new version always starts with a clean slate.
         val updated = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime }.getOrDefault(0L)
         if (p.getLong("seenUpdate", 0L) != updated)
-            p.edit().putLong("seenUpdate", updated).putBoolean("loading", false).putBoolean("crashed", false).putInt("crashes", 0).apply()
-        // "loading" still set = the app died while loading the brain last time.
-        // Only switch it off after it happens twice in a row (once can be bad luck).
-        if (p.getBoolean("loading", false)) {
-            val n = p.getInt("crashes", 0) + 1
-            p.edit().putBoolean("loading", false).putInt("crashes", n).putBoolean("crashed", n >= 2).apply()
-        }
+            p.edit().putLong("seenUpdate", updated).putBoolean("crashed", false).putInt("crashes", 0).apply()
         return p.getBoolean("crashed", false)
     }
 
     /** Give a switched-off brain another go. */
     fun retry(ctx: Context) {
-        prefs(ctx).edit().putBoolean("loading", false).putBoolean("crashed", false).putInt("crashes", 0).apply()
+        prefs(ctx).edit().putBoolean("crashed", false).putInt("crashes", 0).apply()
         lastError = null
     }
 
     fun remove(ctx: Context) {
-        prefs(ctx).edit().putBoolean("loading", false).putBoolean("crashed", false).apply()
+        prefs(ctx).edit().putBoolean("crashed", false).putInt("crashes", 0).apply()
         lastError = null
-        exec.execute { release(); file(ctx).delete() }
+        release()
+        exec.execute { file(ctx).delete() }
     }
 
-    private fun release() { runCatching { llm?.close() }; llm = null }
+    // ---------------------------------------------------------------- the brain's own process
+    // The brain runs in BrainService (":brain"). If the phone runs out of memory, only that
+    // process closes — never the launcher.
+    private var conn: ServiceConnection? = null
+    private var svc: Messenger? = null
+    private val waiting = ArrayList<Message>()
+    private val callbacks = HashMap<Int, (String?, String?) -> Unit>()
+    private var nextId = 1
+    @Volatile private var ready = false
+    private var warming = false
+    private var appCtx: Context? = null
 
-    private fun load(ctx: Context): LlmInference? {
-        llm?.let { return it }
-        if (!installed(ctx)) return null
-        if (crashed(ctx)) { lastError = "This brain crashed the launcher twice, so I switched it off. Open my brain room (🧠) and tap “Try Again”, or pick a smaller “q8” .task file."; return null }
-        // Enough memory? (A brain needs roughly its own size in free RAM.)
-        val am = ctx.getSystemService(android.app.ActivityManager::class.java)
-        val mi = android.app.ActivityManager.MemoryInfo(); runCatching { am.getMemoryInfo(mi) }
-        // Heavy brains you chose anyway get a looser check (they may still be too much for the phone).
-        val need = if (prefs(ctx).getBoolean("heavy", false)) 0.55 else 0.9
-        if (mi.availMem > 0 && mi.availMem < file(ctx).length() * need) {
-            lastError = "Not enough free memory right now (${mi.availMem / 1_000_000} MB). Close some apps and try again."
-            return null
+    private val replies by lazy { Messenger(Handler(Looper.getMainLooper()) { m ->
+        val d = m.data
+        val err = d?.getString("err")
+        if (err == null) { ready = true; lastError = null; appCtx?.let { prefs(it).edit().putInt("crashes", 0).apply() } }
+        else lastError = err
+        callbacks.remove(m.arg1)?.invoke(d?.getString("text"), err)
+        true
+    }) }
+
+    /** Send a job to the brain process (main thread only). */
+    private fun send(ctx: Context, what: Int, extra: Bundle, cb: (String?, String?) -> Unit) {
+        val app = ctx.applicationContext; appCtx = app
+        val id = nextId++; callbacks[id] = cb
+        extra.putString("path", file(app).absolutePath)
+        extra.putBoolean("heavy", prefs(app).getBoolean("heavy", false))
+        val m = Message.obtain(null, what, id, 0).apply { data = extra; replyTo = replies }
+        val s = svc
+        if (s != null) { if (runCatching { s.send(m) }.isFailure) died(app); return }
+        waiting += m
+        if (conn == null) bind(app)
+    }
+
+    private fun bind(app: Context) {
+        val c = object : ServiceConnection {
+            override fun onServiceConnected(n: ComponentName?, b: IBinder?) {
+                if (b == null) return
+                svc = Messenger(b)
+                runCatching { b.linkToDeath({ main.post { died(app) } }, 0) }
+                val q = waiting.toList(); waiting.clear()
+                q.forEach { runCatching { svc?.send(it) } }
+            }
+            override fun onServiceDisconnected(n: ComponentName?) { died(app) }
         }
-        val p = prefs(ctx)
-        p.edit().putBoolean("loading", true).commit()   // if we crash during this, next time we know
-        llm = runCatching {
-            LlmInference.createFromOptions(ctx, LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(file(ctx).absolutePath)
-                .setMaxTokens(640)   // smaller = starts answering sooner
-                .build())
-        }.onFailure { lastError = "The brain couldn't start (${it.message?.take(60) ?: "unknown"}). Try the q8 .task file." }.getOrNull()
-        p.edit().putBoolean("loading", false).apply()
-        if (llm != null) { lastError = null; p.edit().putInt("crashes", 0).apply() }
-        return llm
+        conn = c
+        val ok = runCatching { app.bindService(Intent(app, BrainService::class.java), c, Context.BIND_AUTO_CREATE) }.getOrDefault(false)
+        if (!ok) { conn = null; lastError = "The brain couldn't start on this phone."; failAll() }
     }
+
+    private fun failAll() {
+        val cbs = callbacks.values.toList(); callbacks.clear(); waiting.clear()
+        cbs.forEach { it(null, lastError) }
+    }
+
+    /** The brain process closed (usually: the phone needed the memory back). */
+    private fun died(app: Context) {
+        if (conn == null && svc == null) return
+        val working = callbacks.isNotEmpty() || waiting.isNotEmpty()
+        runCatching { conn?.let { app.unbindService(it) } }
+        conn = null; svc = null; ready = false
+        if (working) {
+            // It closed while loading/thinking: count it; switch off after twice in a row.
+            val n = prefs(app).getInt("crashes", 0) + 1
+            prefs(app).edit().putInt("crashes", n).putBoolean("crashed", n >= 2).apply()
+            lastError = if (n >= 2) "My brain closed twice — it's too heavy for the phone's free memory, so I switched it off (the launcher is fine). Open 🧠 and tap “Try Again” after closing some apps, or use the smaller 0.5B q8 brain."
+                else "My brain needed more memory than the phone had free and closed — the launcher is fine. Close a few apps and ask me again."
+        }
+        failAll()
+    }
+
+    private fun release() = main.post {
+        runCatching { conn?.let { appCtx?.unbindService(it) } }
+        conn = null; svc = null; ready = false; warming = false
+        callbacks.clear(); waiting.clear()
+    }
+
+    /** Is the brain loaded and ready right now? */
+    val loaded get() = ready
 
     /** Start loading the brain in the background (so the first answer comes quicker). */
     fun warmUp(ctx: Context) {
-        if (!installed(ctx) || llm != null) return
-        val app = ctx.applicationContext
-        exec.execute { load(app) }
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post { warmUp(ctx) }; return }
+        if (!installed(ctx) || ready || warming || crashed(ctx)) return
+        warming = true; lastError = null
+        send(ctx, BrainService.LOAD, Bundle()) { _, _ -> warming = false }
     }
 
     /**
@@ -164,24 +213,28 @@ object GilbertBrain {
      */
     fun ask(ctx: Context, history: List<Pair<Boolean, String>>, question: String,
             partial: ((String) -> Unit)? = null, done: (String?) -> Unit) {
-        busy = true
         val app = ctx.applicationContext
+        if (!installed(app)) { done(null); return }
+        if (crashed(app)) { lastError = "My brain is switched off (it kept closing). Open 🧠 and tap “Try Again”."; done(null); return }
+        busy = true
         exec.execute {
-            val answer = runCatching {
-                val m = load(app) ?: return@runCatching null
-                clean(m.generateResponse(prompt(app, history, question)))
-            }.getOrNull()?.takeIf { it.isNotBlank() }
-            if (answer == null || partial == null) { main.post { busy = false; done(answer) }; return@execute }
-            // Type it out quickly, word by word, like he's talking.
-            val words = answer.split(" ")
-            main.post(object : Runnable {
-                var n = 0
-                override fun run() {
-                    n++
-                    partial(words.take(n).joinToString(" "))
-                    if (n < words.size) main.postDelayed(this, 35) else { busy = false; done(answer) }
+            val p = runCatching { prompt(app, history, question) }.getOrDefault(question)
+            main.post {
+                send(app, BrainService.ASK, Bundle().apply { putString("prompt", p) }) { raw, _ ->
+                    val answer = raw?.let { runCatching { clean(it) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                    if (answer == null || partial == null) { busy = false; done(answer); return@send }
+                    // Type it out quickly, word by word, like he's talking.
+                    val words = answer.split(" ")
+                    main.post(object : Runnable {
+                        var n = 0
+                        override fun run() {
+                            n++
+                            partial(words.take(n).joinToString(" "))
+                            if (n < words.size) main.postDelayed(this, 35) else { busy = false; done(answer) }
+                        }
+                    })
                 }
-            })
+            }
         }
     }
 

@@ -13,6 +13,7 @@ import android.widget.FrameLayout
 class GilbertChatActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(this)
         HighRefresh.apply(this)
         window.setBackgroundDrawableResource(android.R.color.transparent)
         window.statusBarColor = Color.TRANSPARENT

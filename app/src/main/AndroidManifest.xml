@@ -112,6 +112,11 @@
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Luncher.GilbertChat" />
 
+        <!-- Gilbert's brain runs in its own process, so a heavy brain can never close the launcher. -->
+        <service
+            android:name=".BrainService"
+            android:process=":brain"
+            android:exported="false" />
         <service
             android:name=".GilbertTileService"
             android:exported="true"
