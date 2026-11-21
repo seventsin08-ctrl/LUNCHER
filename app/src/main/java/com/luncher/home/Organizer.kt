@@ -31,6 +31,9 @@ object Focus {
 
     fun homePage(ctx: Context, id: String): Int = p(ctx).getInt("focus_page_$id", 0)
     fun setHomePage(ctx: Context, id: String, page: Int) = p(ctx).edit().putInt("focus_page_$id", page).apply()
+    /** Focus Home Pages (iPhone feature 30): while this Focus is on, stay on its page only. */
+    fun onlyPage(ctx: Context, id: String): Boolean = p(ctx).getBoolean("focus_only_$id", false)
+    fun setOnlyPage(ctx: Context, id: String, on: Boolean) = p(ctx).edit().putBoolean("focus_only_$id", on).apply()
 
     fun silences(ctx: Context, id: String): Boolean = p(ctx).getBoolean("focus_dnd_$id", id != "personal")
     fun setSilences(ctx: Context, id: String, on: Boolean) {

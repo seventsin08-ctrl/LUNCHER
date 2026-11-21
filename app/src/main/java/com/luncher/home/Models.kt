@@ -12,7 +12,9 @@ data class AppInfo(val label: String, val component: ComponentName, val icon: Bi
 
 enum class WidgetType {
     PHOTO, CALENDAR, BATTERY, CLOCK_ICON, CALENDAR_ICON, MUSIC, APPWIDGET,
-    DIGITAL_CLOCK, WIDE_CLOCK, WORLD_CLOCK, DATE_CARD, QUOTE, PHOTO_WIDE, STACK, TIMER, IPOD, WEATHER, STEPS
+    DIGITAL_CLOCK, WIDE_CLOCK, WORLD_CLOCK, DATE_CARD, QUOTE, PHOTO_WIDE, STACK, TIMER, IPOD, WEATHER, STEPS,
+    // iPhone features 15, 17–20
+    XL, REMINDERS, SCREEN_TIME, STOCKS, SHORTCUTS
 }
 
 /** A widget placed on the home grid. col/row/w/h are in grid cells. */

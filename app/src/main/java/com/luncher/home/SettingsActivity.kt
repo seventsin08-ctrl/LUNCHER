@@ -51,9 +51,11 @@ class SettingsActivity : Activity() {
         Category("backup", "Backup & Transfer", 0xFF64D2FF.toInt(), R.drawable.ic_set_backup, listOf("BACKUP & TRANSFER")),
         if (Features.GILBERT) Category("gilbert", "Gilbert", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("GILBERT", "GILBERT · BRAIN & MEMORY", "NOTIFICATIONS · POP-UPS"))
             else Category("gilbert", "Notifications", 0xFFFF9F0A.toInt(), R.drawable.ic_set_island, listOf("NOTIFICATIONS · POP-UPS")),
+        Category("ios", "iPhone Features", 0xFF0A84FF.toInt(), R.drawable.ic_set_island,
+            listOf("ALL IPHONE FEATURES", "LOOK & MOTION", "HOME SCREEN · ICONS", "WIDGETS", "ISLAND · NOTIFICATIONS · CONTROL CENTRE", "SEARCH · FOCUS · EXTRAS")),
         Category("general", "General", 0xFF8E8E93.toInt(), R.drawable.ic_set_gear, listOf("GENERAL", "RESET"))
     )
-    private val groups = listOf(listOf("setup"), listOf("look", "home", "island", "gilbert", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
+    private val groups = listOf(listOf("setup"), listOf("ios"), listOf("look", "home", "island", "gilbert", "sidebar"), listOf("motion", "sound", "phone"), listOf("backup", "general"))
     /** null = the Settings home page. */
     private var page: String? = null
     private lateinit var scrollView: ScrollView
@@ -356,6 +358,63 @@ class SettingsActivity : Activity() {
         }
         list.addView(largeTitle)
         if (page == null) { buildHome(); updateNav(); return }
+
+        // ---------------- iPhone Features (1–35): every one has its own switch.
+        val iosAll = section("ALL IPHONE FEATURES")
+        if (iosAll.parent != null) {
+            val on = Ios.ALL.count { if (it.id == "clearicons") s.iconStyle == "clear" else s.ios(it.id) }
+            info(iosAll, "$on of ${Ios.ALL.size} on. They never cover each other: only one panel (Notification Centre, Today, " +
+                "StandBy, lock page) shows at a time, nothing is added to your Home Screen unless you add it, and only one " +
+                "always-moving animation runs at once.")
+            button(iosAll, "Turn All On", 0xFF0A84FF.toInt()) { Ios.ALL.forEach { if (it.id != "clearicons") s.setIos(it.id, true) }; rebuild() }
+            button(iosAll, "Turn All Off", 0xFFFF453A.toInt()) { Ios.ALL.forEach { if (it.id != "clearicons") s.setIos(it.id, false) }; rebuild() }
+        }
+        fun feature(card: LinearLayout, id: String) {
+            val f = Ios.byId(id)
+            if (id == "clearicons") {
+                toggle(card, "${f.n}. ${f.title}", f.what, s.iconStyle == "clear") { s.iconStyle = if (it) "clear" else "dark" }
+                return
+            }
+            toggle(card, "${f.n}. ${f.title}", f.what, s.ios(id)) { s.setIos(id, it) }
+        }
+        val iosLook = section("LOOK & MOTION")
+        if (iosLook.parent != null) listOf("spring", "zoomback", "shine", "glassall", "clearicons", "morph", "ccbounce", "folders").forEach { feature(iosLook, it) }
+        val iosHome = section("HOME SCREEN · ICONS")
+        if (iosHome.parent != null) {
+            listOf("freeplace", "jiggle", "stacking", "searchpill", "applock", "quickglass").forEach { feature(iosHome, it) }
+            info(iosHome, "App Lock: hold an app icon › Require Fingerprint. Locked now: ${s.lockedApps.size}.")
+            if (s.lockedApps.isNotEmpty()) button(iosHome, "Unlock All Apps", 0xFFFF453A.toInt()) { s.lockedApps = emptySet(); rebuild() }
+        }
+        val iosWidgets = section("WIDGETS")
+        if (iosWidgets.parent != null) {
+            listOf("xlwidget", "smartstack", "interactive", "screentime", "stocks", "shortcuts", "today").forEach { feature(iosWidgets, it) }
+            info(iosWidgets, "Add the new widgets from Edit Home Screen › Add Widgets. Today View: swipe right on your first page.")
+            button(iosWidgets, "Choose Shortcuts (${s.shortcutIds.size})…", 0xFF0A84FF.toInt()) {
+                val all = IosWidgets.SHORTCUTS
+                val picked = all.map { it.id in s.shortcutIds }.toBooleanArray()
+                android.app.AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Shortcuts (up to 16)")
+                    .setMultiChoiceItems(all.map { "${it.emoji}  ${it.label}" }.toTypedArray(), picked) { _, i, v -> picked[i] = v }
+                    .setPositiveButton("Done") { _, _ -> s.shortcutIds = all.filterIndexed { i, _ -> picked[i] }.map { it.id }.take(16); rebuild() }
+                    .setNegativeButton("Cancel", null).show()
+            }
+        }
+        val iosIsland = section("ISLAND · NOTIFICATIONS · CONTROL CENTRE")
+        if (iosIsland.parent != null) {
+            listOf("split", "nc", "summary", "ccpages", "ccresize").forEach { feature(iosIsland, it) }
+            info(iosIsland, "Notification Centre: pull down from the top of the Home Screen. Control Centre page 2: swipe sideways.")
+            button(iosIsland, "Summary Apps (${s.summaryApps.size})…", 0xFF0A84FF.toInt()) {
+                chooseApps("Scheduled Summary", launchableApps(), s.summaryApps) { s.summaryApps = it }
+            }
+            segment(iosIsland, "Summary Times", listOf("480,1080" to "8 AM · 6 PM", "420,720,1140" to "7 · 12 · 7 PM", "540" to "9 AM"),
+                s.summaryTimes.joinToString(",").let { cur -> if (cur in setOf("480,1080", "420,720,1140", "540")) cur else "480,1080" }) {
+                s.summaryTimes = it.split(',').map { x -> x.toInt() }
+            }
+        }
+        val iosExtra = section("SEARCH · FOCUS · EXTRAS")
+        if (iosExtra.parent != null) {
+            listOf("spotlight", "siri", "glow", "focuspages", "standby", "charging", "weatherwall", "lockpage", "haptics").forEach { feature(iosExtra, it) }
+            info(iosExtra, "StandBy: turn the phone on its side while charging, on the Home Screen. Focus pages: open a Focus › Stay on page only.")
+        }
 
         // ---------------- Permissions & Setup
         val perms = section("PERMISSIONS")

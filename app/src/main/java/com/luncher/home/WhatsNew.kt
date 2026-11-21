@@ -21,6 +21,13 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        184 to listOf("🍎 35 iPhone features, each with its own switch in Settings › iPhone Features",
+            "✨ Motion: spring bounce everywhere, zoom back into the icon, Liquid Glass shine, smoother folders and island stretch, bouncy Control Centre",
+            "🏠 Home: icon stacking (tap other icons while dragging), fingerprint App Lock, the app's own shortcuts in its menu",
+            "🧩 Widgets: Extra Large page widget, auto Smart Stack, tick-off Reminders, Screen Time, Stocks, Shortcuts grid; Today View (swipe right on page 1)",
+            "🔔 Notification Centre (pull down from the top), Scheduled Summary, Split Island bubble, Control Centre page 2 with resizable controls",
+            "🔍 Siri Suggestions, better Spotlight (launcher settings + photos), Siri Glow, Focus stay-on-page, StandBy, charging ring, live weather sky, lock-style page, tuned haptics",
+            "🛡 One stage keeps them apart: never two panels at once, nothing added to your Home Screen by itself, one always-moving animation max — checked by 420,000+ simulations"),
         183 to listOf("🔧 Dragging files, photos or text into the share bar (Messenger, Telegram, Save to Files…) now works everywhere: the launcher’s floating pieces — tools circle, side island, side bars, game ball, pop-ups — turn see-through while you drag, then come back"),
         182 to listOf("🎯 Tools button: its touch area is now only its own circle — taps beside it (and the old tap line to its left) go through to whatever is underneath", "🔧 The tap ripple stays inside the circle; the unused Tap Line Length slider is gone"),
         181 to listOf("⬇ Classic launcher: Gilbert and All Father are removed — no orb, console, voice, brain, files, wake word, archive, Quick Settings tile or Share to Gilbert", "🔧 Everything else stays the same: Dynamic Island, lyrics and player styles, side island, sidebar, dock, App Library, themes, pop-ups, game mode and all settings (Settings › Notifications keeps Calm Mode, Priority and Quiet apps)", "🔧 If All Father mode had turned off the island, tools or side bars, they're switched back on"),

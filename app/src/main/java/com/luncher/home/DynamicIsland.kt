@@ -233,12 +233,55 @@ class DynamicIsland(
         }.also { root.addView(it, FrameLayout.LayoutParams(WRAP_CONTENT, dp(36), Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
     }
 
+    // ---------------------------------------------------------------- 22. Split Island
+    /** iPhone feature: with two live activities, the second shows as a small bubble beside the pill. */
+    var splitOn = true
+    private val splitBubble: FrameLayout by lazy {
+        FrameLayout(act).apply {
+            visibility = View.GONE
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK); setStroke(maxOf(1, dp(1)), 0x26FFFFFF) }
+            elevation = dp(4).toFloat()
+            addView(ImageView(act).apply { scaleType = ImageView.ScaleType.CENTER_CROP
+                outlineProvider = object : ViewOutlineProvider() { override fun getOutline(view: View, outline: Outline) = outline.setOval(0, 0, view.width, view.height) }
+                clipToOutline = true },
+                FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+            setOnClickListener { buzz(); cycle(1) }
+        }.also { root.addView(it, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.CENTER_HORIZONTAL)) }
+    }
+
+    private fun updateSplit() {
+        val list = visibleList()
+        val heldShown = !overlayMode && heldRow.visibility == View.VISIBLE
+        val show = splitOn && !overlayMode && list.size >= 2 && !expanded && !quickMode && !toolsOpen &&
+            pill.visibility == View.VISIBLE && !heldShown
+        val b = splitBubble
+        if (!show) {
+            if (b.visibility == View.VISIBLE) b.animate().alpha(0f).scaleX(0.4f).scaleY(0.4f).setDuration(160).withEndAction { b.visibility = View.GONE }.start()
+            return
+        }
+        val other = list[(index.coerceIn(0, list.size - 1) + 1) % list.size]
+        val img = b.getChildAt(0) as ImageView
+        if (other.icon != null) { img.setImageBitmap(other.icon); img.clearColorFilter() }
+        else { img.setImageResource(other.iconRes); img.setColorFilter(other.iconTint) }
+        val w = (if (targetW > 0) targetW else pill.width) * pill.scaleX
+        val h = (if (targetH > 0) targetH else pill.height) * pill.scaleY
+        val x = Ios.splitX(pill.translationX, w, dp(36).toFloat(), dp(6).toFloat(), screenW().toFloat(), dp(6).toFloat())
+        if (x == null) { b.visibility = View.GONE; return }
+        (b.layoutParams as FrameLayout.LayoutParams).topMargin = topMargin + ((h - dp(36)) / 2).toInt().coerceAtLeast(0)
+        b.requestLayout()
+        if (b.visibility != View.VISIBLE) {
+            b.visibility = View.VISIBLE; b.alpha = 0f; b.scaleX = 0.3f; b.scaleY = 0.3f; b.translationX = pill.translationX
+            Motion.scaleTo(b, 1f, Motion.BOUNCY); Motion.alphaTo(b, 1f, Motion.SNAPPY)
+        }
+        Motion.spring(b, DynamicAnimation.TRANSLATION_X, x, Motion.FLUID)
+    }
+
     /** Apps Gilbert is holding notifications for: (logo, count, package), shown next to him. */
     private var heldSig = ""
     private val hideHeld = Runnable {
         val row = heldRow
         if (row.visibility == View.VISIBLE)
-            row.animate().alpha(0f).scaleX(0.7f).scaleY(0.7f).setDuration(220).withEndAction { row.visibility = View.GONE }.start()
+            row.animate().alpha(0f).scaleX(0.7f).scaleY(0.7f).setDuration(220).withEndAction { row.visibility = View.GONE; updateSplit() }.start()
     }
 
     fun setHeld(items: List<Triple<android.graphics.Bitmap?, Int, String>>) {
@@ -288,6 +331,7 @@ class DynamicIsland(
 
     /** Keep the held-app logos just to the right of the island. */
     private fun positionSide() {
+        if (splitOn || splitBubble.visibility == View.VISIBLE) updateSplit()
         if (overlayMode) return
         val row = heldRow
         if (row.visibility != View.VISIBLE) return
@@ -1430,9 +1474,18 @@ class DynamicIsland(
             lp.width = w; lp.height = h; pill.layoutParams = lp; return
         }
         widthSpring?.cancel(); heightSpring?.cancel()
+        // Smoother morphing (iPhone feature 6): a big change in width gives a soft, gooey squash
+        // that springs back, so the island feels like liquid instead of a resizing box.
+        val k = if (morphOn && !toolsMode) Ios.squash(startW, w, dp(40)) else null
+        if (k != null) {
+            pill.scaleY = sizeScale * k
+            Motion.spring(pill, DynamicAnimation.SCALE_Y, sizeScale, Motion.BOUNCY)
+        }
         widthSpring = springInt(startW, w) { v -> lp.width = v; pill.layoutParams = lp }
         heightSpring = springInt(startH, h) { v -> lp.height = v; pill.layoutParams = lp }
     }
+
+    var morphOn = true
 
     private fun springInt(from: Int, to: Int, apply: (Int) -> Unit): SpringAnimation {
         val holder = FloatValueHolder(from.toFloat())

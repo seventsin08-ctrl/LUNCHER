@@ -12,6 +12,8 @@ import androidx.dynamicanimation.animation.SpringForce
 object Motion {
     /** Settings animation scale: 0 = no animation, 0.6 fast, 1 normal, 1.5 slow. */
     var scale = 1f
+    /** Spring Motion (iPhone feature 1). Off = same timing but no bounce/overshoot. */
+    var bouncy = true
 
     // Presets tuned to feel like iOS.
     /** Quick, no bounce: finger-down feedback, snapping. */
@@ -54,7 +56,7 @@ object Motion {
         val anim = SpringAnimation(view, prop, target).apply {
             spring = SpringForce(target).apply {
                 this.stiffness = stiffness
-                dampingRatio = spec.damping
+                dampingRatio = if (bouncy) spec.damping else maxOf(spec.damping, 1f)
             }
             setMinimumVisibleChange(
                 if (prop === DynamicAnimation.TRANSLATION_X || prop === DynamicAnimation.TRANSLATION_Y)

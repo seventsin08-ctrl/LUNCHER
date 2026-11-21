@@ -32,6 +32,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.dynamicanimation.animation.DynamicAnimation
 import kotlin.math.roundToInt
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 
 /**
  * iPhone-style Control Center: glass tiles over a blurred Home Screen.
@@ -88,6 +90,94 @@ class ControlCenter(
     var tileStyle = "dark"
 
     private var musicTicker: Runnable? = null
+
+    /** iPhone features 25/26: a second page of your own controls, each resizable by holding it. */
+    var pagesOn = true
+    /** Bouncy Control Center (feature 7): tiles drop in with a spring; off = a quick fade. */
+    var bounceIn = true
+    var resizeOn = true
+    /** Runs a control from page 2 (torch, timer, focus…); set by the launcher. */
+    var runControl: ((String, View) -> Unit)? = null
+
+    private class FixedPages(private val views: List<View>) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        override fun getItemCount() = views.size
+        override fun getItemViewType(position: Int) = position
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            val v = views[viewType]
+            (v.parent as? android.view.ViewGroup)?.removeView(v)
+            v.layoutParams = RecyclerView.LayoutParams(MATCH_PARENT, MATCH_PARENT)
+            return object : RecyclerView.ViewHolder(v) {}
+        }
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {}
+    }
+
+    private fun parseControls(): List<Ios.Tile> {
+        val raw = com.luncher.home.Settings(act).myControls
+        return raw.split(',').mapNotNull { e ->
+            val p = e.split(':'); val id = p.getOrNull(0)?.trim().orEmpty()
+            if (IosWidgets.SHORTCUTS.none { it.id == id }) null
+            else Ios.Tile(id, p.getOrNull(1)?.toIntOrNull() ?: 1, p.getOrNull(2)?.toIntOrNull() ?: 1)
+        }
+    }
+
+    private fun saveControls(tiles: List<Ios.Tile>) {
+        com.luncher.home.Settings(act).myControls = tiles.joinToString(",") { "${it.id}:${it.w}:${it.h}" }
+    }
+
+    /** Page 2: "My Controls", packed into the same 4-wide grid as page 1 (never overlapping). */
+    private fun myControlsPage(W: Int, c: Int, gap: Int, pad: Int, top: Int, bottom: Int): View {
+        val col = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, top + dp(40), pad, bottom + dp(24))
+            isClickable = true
+            setOnClickListener { hide() }
+        }
+        col.addView(TextView(act).apply {
+            text = "My Controls"; setTextColor(Color.WHITE); textSize = 22f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        })
+        col.addView(TextView(act).apply {
+            text = if (resizeOn) "Hold a control to change its size" else ""; setTextColor(0x99FFFFFF.toInt()); textSize = 13f
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = dp(14) })
+        val grid = FrameLayout(act)
+        col.addView(grid, LinearLayout.LayoutParams(W, WRAP_CONTENT))
+        fun render(animateId: String?) {
+            grid.removeAllViews()
+            val tiles = parseControls()
+            val placed = Ios.pack(tiles)
+            val rows = (placed.maxOfOrNull { it.row + it.h } ?: 0)
+            grid.layoutParams = (grid.layoutParams as LinearLayout.LayoutParams).apply { height = rows * c + (rows - 1).coerceAtLeast(0) * gap }
+            for (p in placed) {
+                val s = IosWidgets.SHORTCUTS.first { it.id == p.id }
+                val w = p.w * c + (p.w - 1) * gap; val h = p.h * c + (p.h - 1) * gap
+                val tile = LinearLayout(act).apply {
+                    orientation = if (p.w == 2 && p.h == 1) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    background = tileBg(if (p.w == 1 && p.h == 1) c / 2f else dp(30).toFloat())
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                }
+                tile.addView(TextView(act).apply { text = s.emoji; textSize = if (p.h == 2) 34f else 22f; gravity = Gravity.CENTER; setTextColor(Color.WHITE) })
+                if (p.w > 1) tile.addView(TextView(act).apply {
+                    text = s.label; setTextColor(Color.WHITE); textSize = if (p.h == 2) 16f else 14f
+                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                    setPadding(if (p.h == 1) dp(10) else 0, if (p.h == 2) dp(8) else 0, 0, 0)
+                })
+                tile.setOnClickListener { v -> tick(v); press(v); runControl?.invoke(p.id, v) }
+                if (resizeOn) tile.setOnLongClickListener { v ->
+                    if (haptics()) v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    val now = parseControls().map { t -> if (t.id == p.id) Ios.nextSize(t.w, t.h).let { (nw, nh) -> Ios.Tile(t.id, nw, nh) } else t }
+                    saveControls(now); render(p.id); true
+                }
+                grid.addView(tile, lp(w, h, p.col * (c + gap), p.row * (c + gap)))
+                if (p.id == animateId) Motion.scaleTo(tile, 1f, Motion.BOUNCY, start = 0.8f)
+            }
+        }
+        render(null)
+        return android.widget.ScrollView(act).apply {
+            isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER
+            addView(col, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+    }
 
     private fun tileBg(radius: Float, active: Boolean = false, activeColor: Int = ThemeEngine.accent): GradientDrawable =
         GradientDrawable().apply {
@@ -305,7 +395,23 @@ class ControlCenter(
             isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER
             addView(panel, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
-        l.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.TOP))
+        if (pagesOn) {
+            // Multi-page Control Center: swipe sideways to "My Controls".
+            val second = myControlsPage(W, c, gap, pad, topInset, bottomInset)
+            val vp = ViewPager2(act).apply { adapter = FixedPages(listOf(scroll, second)); offscreenPageLimit = 1 }
+            (vp.getChildAt(0) as? RecyclerView)?.overScrollMode = View.OVER_SCROLL_NEVER
+            l.addView(vp, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.TOP))
+            val dotsRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+            val dotViews = (0..1).map { View(act).apply { background = circle(Color.WHITE); alpha = if (it == 0) 1f else 0.35f } }
+            dotViews.forEach { dotsRow.addView(it, LinearLayout.LayoutParams(dp(7), dp(7)).apply { setMargins(dp(4), 0, dp(4), 0) }) }
+            l.addView(dotsRow, FrameLayout.LayoutParams(MATCH_PARENT, dp(16), Gravity.BOTTOM).apply { bottomMargin = bottomInset + dp(6) })
+            vp.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+                override fun onPageSelected(position: Int) {
+                    dotViews.forEachIndexed { i, d -> d.animate().alpha(if (i == position) 1f else 0.35f).setDuration(150).start() }
+                    if (haptics()) vp.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                }
+            })
+        } else l.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT, Gravity.TOP))
         // Tapping empty space in the panel closes it too.
         panel.setOnClickListener { hide() }
         root.addView(l, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -317,6 +423,7 @@ class ControlCenter(
         for (i in 0 until panel.childCount) {
             val ch = panel.getChildAt(i)
             ch.alpha = 0f
+            if (!bounceIn) { ch.animate().alpha(1f).setDuration((160 * Motion.scale).toLong()).start(); continue }
             ch.postDelayed({
                 Motion.spring(ch, DynamicAnimation.TRANSLATION_Y, 0f, Motion.BOUNCY, start = -dp(60).toFloat())
                 Motion.alphaTo(ch, 1f, Motion.SNAPPY)

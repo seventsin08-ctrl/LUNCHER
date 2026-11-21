@@ -697,6 +697,33 @@ class Settings(ctx: Context) {
             e.putBoolean("s_simple", on).putInt("s_version", version + 1).apply()
         }
 
+    // ---- iPhone Features (1–35). Each one can be switched off in Settings › iPhone Features.
+    fun ios(id: String): Boolean = p.getBoolean("s_ios_$id", Ios.byId(id).defaultOn)
+    fun setIos(id: String, on: Boolean) = put("s_ios_$id", on)
+    /** Apps that need your fingerprint to open (App Lock). */
+    var lockedApps: Set<String>
+        get() = p.getStringSet("s_locked_apps", emptySet())?.toSet() ?: emptySet()
+        set(v) { p.edit().putStringSet("s_locked_apps", HashSet(v)).apply() }
+    /** Apps whose notifications wait for the Scheduled Summary. */
+    var summaryApps: Set<String>
+        get() = p.getStringSet("s_summary_apps", emptySet())?.toSet() ?: emptySet()
+        set(v) = putSet("s_summary_apps", v)
+    /** Summary times as minutes after midnight, e.g. "480,1080". */
+    var summaryTimes: List<Int>
+        get() = (p.getString("s_summary_times", "480,1080") ?: "480,1080").split(',').mapNotNull { it.trim().toIntOrNull() }
+        set(v) = put("s_summary_times", v.joinToString(","))
+    var stockTickers: String
+        get() = p.getString("s_stocks", "AAPL,GOOGL,TSLA,MSFT") ?: "AAPL,GOOGL,TSLA,MSFT"
+        set(v) { p.edit().putString("s_stocks", v).apply() }
+    /** Shortcuts grid buttons (ids from IosWidgets.SHORTCUTS). */
+    var shortcutIds: List<String>
+        get() = (p.getString("s_shortcuts", "torch,timer,alarm,camera,calc,wifi,bt,record") ?: "").split(',').filter { it.isNotBlank() }
+        set(v) = put("s_shortcuts", v.joinToString(","))
+    /** Control Center page 2: "id:w:h" entries. */
+    var myControls: String
+        get() = p.getString("s_my_controls", "torch:1:1,timer:1:1,alarm:2:1,camera:1:1,calc:1:1,qr:1:1,notes:1:1,screen:2:1") ?: ""
+        set(v) { p.edit().putString("s_my_controls", v).apply() }
+
     private fun put(k: String, v: Any) {
         val e = p.edit()
         when (v) {

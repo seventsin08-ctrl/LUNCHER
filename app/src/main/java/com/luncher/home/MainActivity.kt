@@ -150,6 +150,23 @@ class MainActivity : Activity() {
     private lateinit var island: DynamicIsland
     private lateinit var controlCenter: ControlCenter
     private var focusId: String? = null
+
+    // ---- iPhone features 1–35 (see Ios.kt). One Stage decides what may show, so nothing overlaps.
+    private val stage = Ios.Stage()
+    private lateinit var nc: NotificationCenter
+    private lateinit var todayView: TodayView
+    private lateinit var standBy: StandBy
+    private lateinit var lockCover: LockCover
+    private lateinit var chargingRing: ChargingRing
+    private var sky: SkyView? = null
+    private var orientationWatch: android.view.OrientationEventListener? = null
+    private var sidewaysDir = 0f
+    private var sidewaysSince = 0L
+    private var lastLaunchView: View? = null
+    private var lastLaunchAt = 0L
+    /** Icon Stacking: extra apps carried along with the one being dragged. */
+    private val stackCarry = ArrayList<String>()
+    private var stackBadge: TextView? = null
     private val timerListener: () -> Unit = { refreshIslandTimer() }
     private var timerWasRunning = false
     private lateinit var spatialWall: SpatialImageView
@@ -215,7 +232,7 @@ class MainActivity : Activity() {
 
     private val io = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val showSearchPill = Runnable { setPillMode(search = true) }
+    private val showSearchPill = Runnable { setPillMode(wantSearch = true) }
 
     private val cols: Int get() = settings.columns
     /** Icon size, never bigger than a grid cell (so the 4th column always fits on screen). */
@@ -374,7 +391,9 @@ class MainActivity : Activity() {
     /** Zoom the home screen in when the phone is unlocked. */
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
-            if (isActive || hasWindowFocus()) playUnlockZoom()
+            if (isActive || hasWindowFocus()) {
+                if (settings.ios("lockpage") && ::lockCover.isInitialized && !overlayOpen()) lockCover.show() else playUnlockZoom()
+            }
         }
     }
 
@@ -524,9 +543,14 @@ class MainActivity : Activity() {
                 if (pages.getOrNull(pager.currentItem) is Page.Library) return false
                 val dy = e2.y - e1.y
                 val dx = e2.x - e1.x
+                // Today View: swipe right on the first page.
+                if (abs(dx) > abs(dy) * 1.5f && dx > dp(80) && velocityX > 800 && pager.currentItem == 0 &&
+                    settings.ios("today")) { openToday(); return true }
                 if (abs(dy) < abs(dx) * 1.5f) return false
                 if (dy > dp(70) && velocityY > 700) {
-                    onSwipeDown(); return true
+                    // Pull down from the top of the screen: Notification Center; anywhere else: Search.
+                    if (settings.ios("nc") && e1.rawY < root.height * 0.22f) openNc() else onSwipeDown()
+                    return true
                 }
                 if (dy < -dp(80) && velocityY < -700) {
                     if (settings.swipeUp == "library") {
@@ -558,7 +582,10 @@ class MainActivity : Activity() {
             // Other apps keep popping up as usual.
             val inThatApp = (settings.gilbertQuietInApp && !isActive && GameState.foreground == pkg) ||
                 settings.notifStyle == "original"   // Android's own banners only
-            if (!inThatApp && !gameHandled) {
+            // Scheduled Summary (feature 24): these apps wait quietly and arrive together later.
+            val held = settings.ios("summary") && pkg in settings.summaryApps && !gameHandled
+            if (held) holdForSummary(pkg, title, text)
+            if (!inThatApp && !gameHandled && !held) {
                 if (pkg !in settings.gilbertQuiet) peekApp(pkg)
                 val isMessage = NotificationService.lastChat[pkg] != null && title.isNotBlank()
                 if (Gilbert.shouldPop(this, settings, pkg, isMessage)) showNotificationInIsland(pkg, title, text)
@@ -598,6 +625,7 @@ class MainActivity : Activity() {
         GameState.listen(gameListener)
         GameState.appListeners += appMoodListener
         root.postDelayed({ setupTapZone() }, 600)
+        setupIos()
         InfoData.listen(infoListener)
         mainHandler.postDelayed(infoTicker, 1500)
         runCatching { getSystemService(android.hardware.camera2.CameraManager::class.java).registerTorchCallback(torchCallback, mainHandler) }
@@ -649,8 +677,11 @@ class MainActivity : Activity() {
             root.postDelayed({ showHello() }, 250)
         }
         Tilt.resume()
+        zoomBackToIcon()
+        sky?.wake()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
+        if (settings.ios("standby")) runCatching { orientationWatch?.enable() }
         // The "System online" wake word was replaced by double-tapping Gilbert: switch it off once.
         getSharedPreferences("luncher", MODE_PRIVATE).let { pr ->
             if (!pr.getBoolean("wake_off_v176", false)) { settings.voiceOn = false; pr.edit().putBoolean("wake_off_v176", true).apply() } }
@@ -676,6 +707,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         Tilt.pause()
+        orientationWatch?.disable()
         isActive = false
         // Wait a moment: if you're only opening the launcher's own Settings, stay off.
         mainHandler.postDelayed({
@@ -730,6 +762,10 @@ class MainActivity : Activity() {
             menuLayer != null -> dismissMenu()
             switcher.isShowing -> switcher.hide(anim)
             ::controlCenter.isInitialized && controlCenter.isShowing -> controlCenter.hide()
+            ::nc.isInitialized && nc.isShowing -> nc.hide()
+            ::todayView.isInitialized && todayView.isShowing -> todayView.hide()
+            ::standBy.isInitialized && standBy.isShowing -> standBy.hide()
+            ::lockCover.isInitialized && lockCover.isShowing -> lockCover.hide()
             searchOverlay.visibility == View.VISIBLE -> closeSearch()
             editMode -> exitEditMode()
             pager.currentItem != homePageIndex() -> pager.currentItem = homePageIndex()
@@ -742,7 +778,10 @@ class MainActivity : Activity() {
 
     private fun overlayOpen() =
         menuLayer != null || switcher.isShowing || searchOverlay.visibility == View.VISIBLE ||
-            (::controlCenter.isInitialized && controlCenter.isShowing)
+            (::controlCenter.isInitialized && controlCenter.isShowing) || iosLayerOpen()
+
+    private fun iosLayerOpen() = (::nc.isInitialized && nc.isShowing) || (::todayView.isInitialized && todayView.isShowing) ||
+        (::standBy.isInitialized && standBy.isShowing) || (::lockCover.isInitialized && lockCover.isShowing)
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // Gilbert's eyes follow your finger on the Home Screen.
@@ -771,7 +810,9 @@ class MainActivity : Activity() {
         }
         if (drag != null || widgetDrag != null) {
             when (ev.actionMasked) {
-                MotionEvent.ACTION_MOVE -> if (drag != null) moveDrag(ev.rawX, ev.rawY)
+                // Icon Stacking (feature 11): tap other icons with another finger to carry them along.
+                MotionEvent.ACTION_POINTER_DOWN -> if (drag != null) stackPick(ev)
+                MotionEvent.ACTION_MOVE -> if (drag != null) { moveDrag(ev.rawX, ev.rawY); placeStackBadge() }
                     else moveWidgetDrag(ev.rawX, ev.rawY)
                 MotionEvent.ACTION_UP -> if (drag != null) endDrag(ev.rawX, ev.rawY)
                     else endWidgetDrag(ev.rawX, ev.rawY)
@@ -793,7 +834,7 @@ class MainActivity : Activity() {
     private var infoCycle = 0
     private val infoListener: () -> Unit = { updateInfoIsland(advance = false) }
     private val infoTicker = object : Runnable {
-        override fun run() { updateInfoIsland(advance = true); updateGilbertMood(); maybeTalk(); mainHandler.postDelayed(this, 10_000) }
+        override fun run() { updateInfoIsland(advance = true); updateGilbertMood(); maybeTalk(); checkSummary(); mainHandler.postDelayed(this, 10_000) }
     }
     private fun infoIcon(key: String, e: String, bg: Int = 0) = infoIcons.getOrPut(key) { InfoViews.emoji(this, e, bg) }
 
@@ -952,6 +993,7 @@ class MainActivity : Activity() {
         }
         // Liquid Glass slider: 0 = frosted (more opaque), 100 = crystal clear.
         Glass.opacity = 1.6f - settings.glassClarity / 100f * 1.2f
+        Glass.shine = settings.ios("shine")
         IconFactory.style = settings.iconStyle
         IconFactory.tint = settings.tint
     }
@@ -990,6 +1032,7 @@ class MainActivity : Activity() {
             ViewCompat.requestApplyInsets(root)
         }
         if (::controlCenter.isInitialized) controlCenter.tileStyle = settings.ccStyle
+        applyIosSettings()
         setupSidebar()
         if (::sideHud.isInitialized) runCatching { sideHud.rest() }
         loadSpatialWallpaper()
@@ -1391,7 +1434,15 @@ class MainActivity : Activity() {
     }
 
     private fun haptic(v: View?, type: Int = HapticFeedbackConstants.LONG_PRESS) {
-        if (settings.haptics) v?.performHapticFeedback(type)
+        if (settings.haptics) v?.performHapticFeedback(if (settings.ios("haptics")) tunedHaptic(type) else type)
+    }
+
+    /** Tuned Haptics (feature 35): light ticks for taps/swipes, firmer for holds, a "thunk" for drops. */
+    private fun tunedHaptic(type: Int): Int = when (type) {
+        HapticFeedbackConstants.CLOCK_TICK -> if (Build.VERSION.SDK_INT >= 34) HapticFeedbackConstants.SEGMENT_FREQUENT_TICK else type
+        HapticFeedbackConstants.CONTEXT_CLICK -> if (Build.VERSION.SDK_INT >= 27) HapticFeedbackConstants.KEYBOARD_PRESS else type
+        HapticFeedbackConstants.LONG_PRESS -> type
+        else -> type
     }
 
     // ================================================================ UI skeleton
@@ -1530,7 +1581,7 @@ class MainActivity : Activity() {
                 }
                 mainHandler.removeCallbacks(showSearchPill)
                 if (state == ViewPager2.SCROLL_STATE_IDLE) mainHandler.postDelayed(showSearchPill, 1000)
-                else setPillMode(search = false)
+                else setPillMode(wantSearch = false)
             }
 
             override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
@@ -1772,7 +1823,9 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun setPillMode(search: Boolean) {
+    private fun setPillMode(wantSearch: Boolean) {
+        // Search Pill (feature 12) can be turned off: then the page dots always show.
+        val search = wantSearch && settings.ios("searchpill")
         searchPill.animate().alpha(if (search) 1f else 0f).setDuration(dur(220)).setInterpolator(EASE).start()
         dots.animate().alpha(if (search) 0f else 1f).setDuration(dur(220)).setInterpolator(EASE).start()
     }
@@ -1881,7 +1934,7 @@ class MainActivity : Activity() {
     }
 
     private fun startJiggle(v: View) {
-        if (anim == 0f) return
+        if (anim == 0f || !settings.ios("jiggle")) return
         val a = ObjectAnimator.ofFloat(v, "rotation", -1.8f, 1.8f).apply {
             duration = 115L + (Math.random() * 40).toLong()
             repeatMode = ValueAnimator.REVERSE
@@ -2204,6 +2257,10 @@ class MainActivity : Activity() {
 
     private fun recordRecent(app: AppInfo) {
         val list = (listOf(app.key) + recentKeys().filter { it != app.key }).take(20)
+        // Siri Suggestions learn from when you open each app (last 300 opens, kept on the phone).
+        val log = (prefs.getString("launch_log", "").orEmpty().split('\n').filter { it.isNotBlank() } +
+            "${System.currentTimeMillis()}|${app.key}").takeLast(300)
+        prefs.edit().putString("launch_log", log.joinToString("\n")).apply()
         prefs.edit()
             .putString(KEY_RECENT, list.joinToString("|"))
             .putLong("rt_${app.key}", System.currentTimeMillis())
@@ -2789,7 +2846,30 @@ class MainActivity : Activity() {
                     MoreWidgets.dateCard(this), batteryWidget(), TimerWidget.create(this),
                     MoreWidgets.digitalClock(this, false)
                 ))
+                // Auto Smart Stack (feature 16): shows what matters right now.
+                if (settings.ios("smartstack")) stack.smartPick = { cur ->
+                    Ios.stackPick(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY),
+                        TimerState.endAt > System.currentTimeMillis(), batteryLevel, batteryCharging, cur)
+                }
                 widgetFrame(stack, "Smart Stack", { }, null, remove)
+            }
+            WidgetType.REMINDERS ->
+                widgetFrame(IosWidgets.reminders(this, (w.h * 2 - 1).coerceIn(2, 8)) { addReminder() }, "Reminders", { }, null, remove)
+            WidgetType.SCREEN_TIME ->
+                widgetFrame(IosWidgets.screenTime(this) { pkg -> allApps.firstOrNull { it.packageName == pkg }?.label }, "Screen Time", { }, null, remove)
+            WidgetType.STOCKS ->
+                widgetFrame(IosWidgets.stocks(this, Ios.cleanTickers(settings.stockTickers)) { editStocks() }, "Stocks", { editStocks() }, null, remove)
+            WidgetType.SHORTCUTS ->
+                widgetFrame(IosWidgets.shortcuts(this, settings.shortcutIds) { id, v -> runShortcut(id, v) }, "Shortcuts", { }, null, remove)
+            WidgetType.XL -> {
+                InfoData.loadWeather(this); InfoData.refreshWeather(this)
+                // Extra Large (feature 15): a whole-page dashboard.
+                widgetFrame(IosWidgets.extraLarge(this, listOf(
+                    InfoViews.todayWeather(this),
+                    IosWidgets.reminders(this, 3) { addReminder() },
+                    batteryWidget(),
+                    IosWidgets.screenTime(this) { pkg -> allApps.firstOrNull { it.packageName == pkg }?.label }
+                )), "Extra Large", { }, null, remove)
             }
         }
     }
@@ -3428,6 +3508,7 @@ class MainActivity : Activity() {
         if (menuLayer != null) dismissMenu(immediate = true)
         if (searchOverlay.visibility == View.VISIBLE) closeSearch(false)
         editMode = true
+        pager.isUserInputEnabled = true   // a Focus page lock never stops you arranging pages
         haptic(root)
         mainHandler.removeCallbacks(showSearchPill)
         searchPill.animate().cancel()
@@ -3450,9 +3531,10 @@ class MainActivity : Activity() {
         editBar.visibility = View.GONE
         searchPill.visibility = View.VISIBLE
         dots.visibility = View.VISIBLE
-        setPillMode(search = true)
+        setPillMode(wantSearch = true)
         refreshPages()
         buildDock(dockApps())
+        applyFocusLock()
     }
 
     private fun removeFromHome(app: AppInfo, fromDock: Boolean) {
@@ -3500,12 +3582,15 @@ class MainActivity : Activity() {
         val width = when (type) {
             WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
             WidgetType.CALENDAR, WidgetType.MUSIC, WidgetType.PHOTO_WIDE,
-            WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK, WidgetType.WEATHER, WidgetType.STEPS -> cols
+            WidgetType.WIDE_CLOCK, WidgetType.WORLD_CLOCK, WidgetType.WEATHER, WidgetType.STEPS,
+            WidgetType.XL, WidgetType.SHORTCUTS, WidgetType.STOCKS -> cols
             else -> (cols / 2).coerceAtLeast(1)
         }
         val height = when (type) {
             WidgetType.CLOCK_ICON, WidgetType.CALENDAR_ICON -> 1
             WidgetType.IPOD -> 3
+            WidgetType.XL -> Ios.xlSize(cols, rowsPerPage()).second
+            WidgetType.SHORTCUTS -> (Ios.shortcutGrid(settings.shortcutIds.size).second).coerceIn(1, 4)
             else -> 2
         }
         return width to height
@@ -3535,6 +3620,12 @@ class MainActivity : Activity() {
             Triple(WidgetType.IPOD, "iPod", "Classic click wheel: spin for volume, tap to play, skip and open music"),
             Triple(WidgetType.WEATHER, "Weather", "Today's temperature, high/low and the next two days"),
             Triple(WidgetType.STEPS, "Steps", "Today's steps and calories with your last 7 days")
+        ) + listOfNotNull(
+            Triple(WidgetType.XL, "Extra Large", "A whole page: clock, weather, reminders, battery and screen time").takeIf { settings.ios("xlwidget") },
+            Triple(WidgetType.REMINDERS, "Reminders", "Tick things off right on the Home Screen").takeIf { settings.ios("interactive") },
+            Triple(WidgetType.SCREEN_TIME, "Screen Time", "Today's phone time and your top apps").takeIf { settings.ios("screentime") },
+            Triple(WidgetType.STOCKS, "Stocks", "Live prices for the stocks you pick").takeIf { settings.ios("stocks") },
+            Triple(WidgetType.SHORTCUTS, "Shortcuts", "Up to 16 buttons: torch, timer, camera, Focus…").takeIf { settings.ios("shortcuts") }
         )
         val layer = FrameLayout(this).apply { setBackgroundColor(Color.argb(110, 0, 0, 0)); isClickable = true }
         val sheet = LinearLayout(this).apply {
@@ -4078,6 +4169,42 @@ class MainActivity : Activity() {
         drag = DragState(app, fromDock, source, floating, size, originFolderId)
     }
 
+    private var carryOnDrop: List<String> = emptyList()
+
+    private fun stackPick(ev: MotionEvent) {
+        val d = drag ?: return
+        if (!settings.ios("stacking") || d.fromDock || d.originFolderId != null) return
+        val i = ev.actionIndex
+        val rx = if (Build.VERSION.SDK_INT >= 29) ev.getRawX(i) else ev.getX(i) + (ev.rawX - ev.x)
+        val ry = if (Build.VERSION.SDK_INT >= 29) ev.getRawY(i) else ev.getY(i) + (ev.rawY - ev.y)
+        val hit = gridHit(rx, ry) ?: return
+        val app = hit.page.apps.getOrNull(hit.appIndex)?.first ?: return
+        if (app.key == d.app.key || app.key in stackCarry || folderId(app) != null || stackCarry.size >= 15) return
+        stackCarry += app.key
+        haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
+        // The picked icon flies into the stack under your finger.
+        hit.frame.findViewWithTag<View>("layout:app:${app.key}")?.let { v ->
+            val off = rootOffset(); val loc = IntArray(2); v.getLocationOnScreen(loc)
+            v.animate().translationX(d.floating.x + off[0] - loc[0]).translationY(d.floating.y + off[1] - loc[1])
+                .scaleX(0.4f).scaleY(0.4f).alpha(0f).setDuration(dur(240)).setInterpolator(EASE).start()
+        }
+        val b = stackBadge ?: TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            background = Glass.circle(0xFFFF3B30.toInt()); elevation = dp(12).toFloat()
+        }.also { stackBadge = it; root.addView(it, FrameLayout.LayoutParams(dp(24), dp(24))) }
+        b.text = "${stackCarry.size + 1}"
+        placeStackBadge()
+        Motion.scaleTo(b, 1f, Motion.BOUNCY, start = 0.5f)
+        Motion.scaleTo(d.floating, 1f, Motion.BOUNCY, start = 1.12f)
+    }
+
+    private fun placeStackBadge() {
+        val b = stackBadge ?: return
+        val d = drag ?: return
+        b.x = d.floating.x + d.size - dp(16); b.y = d.floating.y - dp(6)
+    }
+
     private fun moveDrag(rawX: Float, rawY: Float) {
         val d = drag ?: return
         val off = rootOffset()
@@ -4356,6 +4483,7 @@ class MainActivity : Activity() {
 
     private fun endDrag(rawX: Float, rawY: Float) {
         val d = drag ?: return
+        carryOnDrop = stackCarry.toList()
         val onNewPage = temporaryDragPageCount > 0 && pager.currentItem == temporaryDragPageCount - 1
         finishDragVisuals(d)
         if (overDock(rawX, rawY)) {
@@ -4372,12 +4500,15 @@ class MainActivity : Activity() {
 
     private fun finishDragVisuals(d: DragState) {
         drag = null
+        stackCarry.clear()
+        stackBadge?.let { root.removeView(it) }; stackBadge = null
         temporaryDragPageCount = 0
         cancelPendingReorder()
         highlightFolderTarget(null)
         edgeDir = 0
         mainHandler.removeCallbacks(edgeFlip)
         pager.isUserInputEnabled = true
+        applyFocusLock()
         d.source.animate().cancel()
         d.source.alpha = 1f
         clearDragGhost()
@@ -4618,6 +4749,19 @@ class MainActivity : Activity() {
 
     /** Keep the original gesture in the dialog window while the icon moves over the home screen. */
     private inner class FolderDialog : Dialog(this@MainActivity) {
+        var zoomPanel: View? = null
+        var zoomPivot: Pair<Float, Float>? = null
+        private var closing = false
+
+        /** Shrinks back into the folder icon before going away (unless an app is being dragged out). */
+        override fun dismiss() {
+            val p = zoomPanel
+            if (closing || p == null || draggingMember || anim == 0f || !p.isShown || zoomPivot == null) { super.dismiss(); return }
+            closing = true
+            Motion.cancel(p)
+            p.animate().scaleX(0.18f).scaleY(0.18f).alpha(0f).setDuration(dur(200)).setInterpolator(EASE)
+                .withEndAction { runCatching { super.dismiss() } }.start()
+        }
         var lastRawX = 0f
         var lastRawY = 0f
         var draggingMember = false
@@ -4685,7 +4829,7 @@ class MainActivity : Activity() {
         isFocusable = true
     }
 
-    private fun openFolder(app: AppInfo) {
+    private fun openFolder(app: AppInfo, from: View? = null) {
         val id = folderId(app) ?: return
         val group = folders().firstOrNull { it.id == id } ?: return
         val byKey = allApps.associateBy { it.key }
@@ -4730,8 +4874,22 @@ class MainActivity : Activity() {
         haptic(root, HapticFeedbackConstants.CONTEXT_CLICK)
         if (anim > 0f) {
             panel.alpha = 0f
-            Motion.scaleTo(panel, 1f, Motion.BOUNCY, start = 0.72f)
-            Motion.alphaTo(panel, 1f, Motion.SNAPPY)
+            // Smoother Folders (feature 8): grow out of the folder icon, and later shrink back into it.
+            val src = from?.takeIf { settings.ios("folders") && it.isAttachedToWindow }
+            if (src != null) {
+                dialog.zoomPanel = panel
+                panel.post {
+                    val p = IntArray(2); val f = IntArray(2)
+                    panel.getLocationOnScreen(p); src.getLocationOnScreen(f)
+                    panel.pivotX = (f[0] + src.width / 2f - p[0]); panel.pivotY = (f[1] + src.height / 2f - p[1])
+                    dialog.zoomPivot = panel.pivotX to panel.pivotY
+                    Motion.scaleTo(panel, 1f, Motion.FLUID, start = 0.18f)
+                    Motion.alphaTo(panel, 1f, Motion.SNAPPY)
+                }
+            } else {
+                Motion.scaleTo(panel, 1f, Motion.BOUNCY, start = 0.72f)
+                Motion.alphaTo(panel, 1f, Motion.SNAPPY)
+            }
         }
         grid.adapter = FolderGridAdapter(members, onTap = { member, _ ->
             dialog.dismiss()
@@ -4947,12 +5105,17 @@ class MainActivity : Activity() {
         if (!detachFolderMemberForDrag(d)) { previewOrder = null; rebuild(); return }
         if (hit != null && hit.centered && targetApp != null && putIntoFolder(d, targetApp)) return
         val order = currentOrder()
-        val moved = if (targetApp == null) HomeGridOrder.moveToEmpty(order, d.app.key, targetSlot)
+        // Free Icon Placement (feature 9) off: icons always fill in from the top, no gaps.
+        val moved = if (targetApp == null && !settings.ios("freeplace"))
+                order.filter { it != d.app.key && it != HomeGridOrder.EMPTY } + d.app.key
+            else if (targetApp == null) HomeGridOrder.moveToEmpty(order, d.app.key, targetSlot)
             else HomeGridOrder.moveAround(order, d.app.key, targetApp.key, hit!!.localX > cellW() / 2f)
         if (d.fromDock) saveDock(dockKeys().filter { it != d.app.key })
         settings.hiddenApps = settings.hiddenApps - d.app.key
         previewOrder = null
-        settings.order = moved
+        // Carried icons land right after the one you dropped, in the order you picked them.
+        settings.order = if (carryOnDrop.isNotEmpty()) Ios.reorderStack(moved, d.app.key, carryOnDrop) else moved
+        carryOnDrop = emptyList()
         rebuild()
     }
 
@@ -5446,14 +5609,15 @@ class MainActivity : Activity() {
         val query = q.trim()
         searchResults = if (query.isEmpty()) {
             val byKey = allApps.associateBy { it.key }
-            val recents = recentKeys().mapNotNull { byKey[it] }
+            val smart = if (settings.ios("siri")) siriSuggestions().mapNotNull { byKey[it] } else emptyList()
+            val recents = (smart + recentKeys().mapNotNull { byKey[it] }).distinctBy { it.key }
             val recentSet = recents.map { it.key }.toSet()
             (recents + allApps.filter { it.key !in recentSet }).take(8)
         } else {
             allApps.filter { it.label.contains(query, true) }
                 .sortedBy { !it.label.startsWith(query, true) }
         }
-        searchHeader.text = if (query.isEmpty()) "Suggestions" else if (searchResults.isEmpty()) "" else "Apps"
+        searchHeader.text = if (query.isEmpty()) (if (settings.ios("siri")) "Siri Suggestions" else "Suggestions") else if (searchResults.isEmpty()) "" else "Apps"
         searchAdapter.submit(searchResults)
 
         val math = if (Calc.looksLikeMath(query)) Calc.eval(query) else null
@@ -5496,9 +5660,18 @@ class MainActivity : Activity() {
     private fun launch(app: AppInfo, from: View?) {
         if (editMode) return
         if (folderId(app) != null) {
-            openFolder(app)
+            openFolder(app, from)
             return
         }
+        // App Lock (feature 13): fingerprint first.
+        if (settings.ios("applock") && app.key in settings.lockedApps) {
+            AppLock.check(this, app.label) { launchNow(app, from) }
+            return
+        }
+        launchNow(app, from)
+    }
+
+    private fun launchNow(app: AppInfo, from: View?) {
         val intent = Intent(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_LAUNCHER)
             .setComponent(app.component)
@@ -5535,6 +5708,7 @@ class MainActivity : Activity() {
     private fun startWithAnimation(intent: Intent, from: View?, onStarted: () -> Unit = {}) {
         runCatching { startActivity(intent, launchOptions(from)) }
             .onSuccess {
+                lastLaunchView = from; lastLaunchAt = System.currentTimeMillis()
                 onStarted()
                 if (anim > 0f && launchStyle() == "zoom") {
                     contentAnimate().scaleX(1.12f).scaleY(1.12f).alpha(0f)
@@ -5590,6 +5764,14 @@ class MainActivity : Activity() {
         } else if (!inDock) {
             items += MenuItem("Remove from Home Screen") { removeFromHome(app, false) }
         }
+        if (settings.ios("applock")) {
+            val locked = app.key in settings.lockedApps
+            items += MenuItem(if (locked) "Remove Fingerprint Lock" else "Require Fingerprint") {
+                if (locked) AppLock.check(this, app.label) { settings.lockedApps = settings.lockedApps - app.key; toast("${app.label} unlocked") }
+                else { settings.lockedApps = settings.lockedApps + app.key; toast("${app.label} now needs your fingerprint") }
+            }
+        }
+        if (settings.ios("quickglass")) items.addAll(0, appShortcuts(app))
         items += MenuItem("App Info") {
             runCatching {
                 startActivity(
@@ -6034,6 +6216,7 @@ class MainActivity : Activity() {
         haptic(root, HapticFeedbackConstants.CONFIRM)
         val f = Focus.current(this)
         pager.setCurrentItem(homePageIndex(), anim > 0f)
+        applyFocusLock()
         if (announce && ::island.isInitialized) {
             island.flash(IslandActivity("focus", null, R.drawable.ic_bolt, f?.color ?: Color.WHITE,
                 if (f == null) "Focus Off" else "${f.emoji} ${f.name}", f?.desc ?: "",
@@ -6113,6 +6296,14 @@ class MainActivity : Activity() {
                 }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
             }
             card.addView(pagesRow)
+            if (settings.ios("focuspages")) {
+                val only = Focus.onlyPage(this, cur)
+                card.addView(TextView(this).apply {
+                    text = if (only) "📌 Staying on page ${chosen + 1} only · tap to allow all pages" else "📄 All pages · tap to stay on page ${chosen + 1} only"
+                    setTextColor(Color.WHITE); textSize = 14f; setPadding(dp(4), dp(14), 0, dp(4))
+                    setOnClickListener { Focus.setOnlyPage(this@MainActivity, cur, !only); close(); applyFocusLock() }
+                })
+            }
             val silence = Focus.silences(this, cur)
             card.addView(TextView(this).apply {
                 text = if (silence) "🔕 Silencing notifications · tap to allow" else "🔔 Allowing notifications · tap to silence"
@@ -6349,6 +6540,25 @@ class MainActivity : Activity() {
             runCatching { startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }
         if (sets.isNotEmpty()) { section("Settings"); sets.forEach { r -> row(r.icon, r.title, r.subtitle, r.action) } }
+        if (settings.ios("spotlight")) {
+            // Better Spotlight (feature 27): the launcher's own settings pages and your photos by name.
+            val mine = launcherSettingsMatches(tq)
+            if (mine.isNotEmpty()) { section("Apple Launcher"); mine.forEach { (t, page) -> row("⚙", t, "Apple Launcher Settings") {
+                runCatching { startActivity(Intent(this, SettingsActivity::class.java).putExtra("page", page)) } } } }
+            if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+                (Build.VERSION.SDK_INT < 33 && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED)) {
+                io.execute {
+                    val found = findPhotos(query)
+                    mainHandler.post {
+                        if (pendingExtras != query || isDestroyed || found.isEmpty()) return@post
+                        section("Photos")
+                        found.forEach { (name, uri) -> row("🖼", name, "Photos") {
+                            runCatching { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        } }
+                    }
+                }
+            }
+        }
         if (SpotlightExtras.hasContactsPermission(this)) {
             // Look contacts up in the background, then add them if the query hasn't changed.
             io.execute {
@@ -6451,6 +6661,10 @@ class MainActivity : Activity() {
             it.charging = batteryCharging
         }
         batteryText?.text = "$batteryLevel%"
+        if (::chargingRing.isInitialized && Ios.chargingRing(settings.ios("charging"), wasCharging, batteryCharging, isActive && !overlayOpen())) {
+            chargingRing.level = batteryLevel; chargingRing.show()
+        }
+        if (!batteryCharging && ::standBy.isInitialized && standBy.isShowing) standBy.hide()
         if (::island.isInitialized && wasCharging == false && batteryCharging) {
             if (settings.gilbertEmotions) island.faceReact("excited", 3000)
             if (settings.islandFace) { SoundFX.play(this, "happy"); island.say(listOf("Charging! ⚡ Thank you~", "Yay, power! 🔋", "Mmm, electricity 😋").random()) }
@@ -6460,6 +6674,290 @@ class MainActivity : Activity() {
             ), 4500)
         }
         wasCharging = batteryCharging
+    }
+
+    // ================================================================ iPhone features (Ios.kt)
+
+    private fun setupIos() {
+        val blur = { on: Boolean ->
+            animateBlur(if (on) dp(24).toFloat() else 0f, dur(260))
+            if (!on) sky?.postDelayed({ sky?.wake() }, 300)
+        }
+        nc = NotificationCenter(this, root, stage).apply {
+            onBlur = blur
+            appInfo = { pkg ->
+                allApps.firstOrNull { it.packageName == pkg }?.let { it.icon to it.label }
+                    ?: runCatching { null to packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrNull()
+            }
+            summary = { summaryItems() }
+            onSummaryRead = { clearSummary() }
+        }
+        todayView = TodayView(this, root, stage).apply { onBlur = blur; cards = { todayCards() } }
+        standBy = StandBy(this, root, stage).apply { battery = { batteryLevel }; photo = { photoCache.values.firstOrNull() } }
+        lockCover = LockCover(this, root, stage).apply {
+            onBlur = blur
+            info = { listOfNotNull("⚡ $batteryLevel%", InfoData.weather?.let { "${it.temp}°" }).joinToString("  ·  ") }
+        }
+        chargingRing = ChargingRing(this, root, stage)
+        stage.onEvict = { id -> if (id == "charging") chargingRing.hide(immediate = true) }
+        orientationWatch = object : android.view.OrientationEventListener(this) {
+            override fun onOrientationChanged(deg: Int) = onTilt(deg)
+        }
+        controlCenter.runControl = { id, v -> controlCenter.hide(); runShortcut(id, v) }
+        applyIosSettings()
+    }
+
+    /** Re-read every iPhone feature switch (called after Settings change). */
+    private fun applyIosSettings() {
+        Motion.bouncy = settings.ios("spring")
+        Glass.shine = settings.ios("shine")
+        if (::island.isInitialized) {
+            island.splitOn = settings.ios("split")
+            island.morphOn = settings.ios("morph")
+        }
+        if (::controlCenter.isInitialized) {
+            controlCenter.pagesOn = settings.ios("ccpages")
+            controlCenter.resizeOn = settings.ios("ccresize")
+            controlCenter.bounceIn = settings.ios("ccbounce")
+        }
+        if (!settings.ios("standby")) orientationWatch?.disable() else if (isActive) runCatching { orientationWatch?.enable() }
+        if (!settings.ios("standby") && ::standBy.isInitialized) standBy.hide(immediate = true)
+        setupSky()
+        applyFocusLock()
+    }
+
+    private fun openNc() {
+        if (!::nc.isInitialized || overlayOpen()) return
+        nc.topInset = insetTop; nc.bottomInset = insetBottom
+        if (nc.show()) haptic(root, HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    private fun openToday() {
+        if (!::todayView.isInitialized || overlayOpen()) return
+        todayView.topInset = insetTop; todayView.bottomInset = insetBottom
+        if (todayView.show()) haptic(root, HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    /** Today View cards: fresh each time it opens. */
+    private fun todayCards(): List<View> {
+        fun sized(v: View, h: Int) = FrameLayout(this).apply { addView(v, FrameLayout.LayoutParams(MATCH_PARENT, dp(h))) }
+        val out = ArrayList<View>()
+        val byKey = allApps.associateBy { it.key }
+        val sugg = (siriSuggestions().mapNotNull { byKey[it] } + recentKeys().mapNotNull { byKey[it] }).distinctBy { it.key }.take(4)
+        if (sugg.isNotEmpty()) {
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12)) }
+            col.addView(TextView(this).apply { text = "SIRI SUGGESTIONS"; textSize = 11f; setTextColor(0x99FFFFFF.toInt()); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD) })
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (a in sugg) row.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                addView(ImageView(this@MainActivity).apply { setImageBitmap(a.icon) }, LinearLayout.LayoutParams(dp(54), dp(54)))
+                addView(TextView(this@MainActivity).apply { text = a.label; textSize = 11f; setTextColor(Color.WHITE); maxLines = 1; gravity = Gravity.CENTER; ellipsize = TextUtils.TruncateAt.END })
+                setOnClickListener { v -> todayView.hide(true); launch(a, v) }
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { topMargin = dp(8) })
+            col.addView(row)
+            out += col
+        }
+        InfoData.loadWeather(this); InfoData.refreshWeather(this)
+        out += sized(InfoViews.todayWeather(this), 150)
+        if (settings.ios("interactive")) out += IosWidgets.reminders(this, 4) { todayView.hide(true); addReminder() }
+        if (settings.ios("screentime")) out += IosWidgets.screenTime(this) { pkg -> allApps.firstOrNull { it.packageName == pkg }?.label }
+        InfoData.startSteps(this)
+        out += FrameLayout(this).apply { setPadding(dp(16), dp(14), dp(16), dp(14)); addView(InfoViews.stepsCard(this@MainActivity)) }
+        if (settings.ios("stocks")) out += IosWidgets.stocks(this, Ios.cleanTickers(settings.stockTickers)) { todayView.hide(true); editStocks() }
+        return out
+    }
+
+    /** Zoom Back to Icon (feature 2): coming home, the Home Screen settles from the icon you opened. */
+    private fun zoomBackToIcon() {
+        val v = lastLaunchView
+        lastLaunchView = null
+        if (v == null || !v.isAttachedToWindow || !::content.isInitialized ||
+            !Ios.zoomBack(settings.ios("zoomback"), anim > 0f, System.currentTimeMillis() - lastLaunchAt, overlayOpen(), editMode)) return
+        val loc = IntArray(2); val cl = IntArray(2)
+        v.getLocationOnScreen(loc); content.getLocationOnScreen(cl)
+        content.animate().cancel()
+        Motion.cancel(content)
+        content.pivotX = loc[0] - cl[0] + v.width / 2f
+        content.pivotY = loc[1] - cl[1] + v.height / 2f
+        Motion.scaleTo(content, 1f, Motion.CALM, start = 1.1f)
+        Motion.alphaTo(content, 1f, Motion.CALM, start = 0.55f)
+        Motion.scaleTo(v, 1f, Motion.BOUNCY, start = 1.22f)
+        if (currentBlur > 0f && menuLayer == null && searchOverlay.visibility != View.VISIBLE) animateBlur(0f, dur(320))
+        // Put the pivot back once settled, so other animations zoom from the centre again.
+        content.postDelayed({
+            if (abs(content.scaleX - 1f) < 0.01f) { content.pivotX = content.width / 2f; content.pivotY = content.height / 2f }
+        }, (900 * Motion.scale.coerceAtLeast(0.3f)).toLong())
+    }
+
+    /** Siri Suggestions (feature 28): apps you usually open around this time. */
+    private fun siriSuggestions(): List<String> {
+        val now = System.currentTimeMillis()
+        val log = prefs.getString("launch_log", "").orEmpty().split('\n').mapNotNull { l ->
+            val i = l.indexOf('|'); if (i <= 0) null else l.substring(0, i).toLongOrNull()?.let { Ios.Launch(l.substring(i + 1), it) }
+        }
+        val visible = allApps.map { it.key }.toSet()
+        return Ios.suggest(log, now, 4, emptySet(), java.util.TimeZone.getDefault().getOffset(now).toLong()).filter { it in visible }
+    }
+
+    // ---- Scheduled Summary (feature 24)
+    private fun holdForSummary(pkg: String, title: String, text: String) {
+        val clean = { x: String -> x.replace('\t', ' ').replace('\n', ' ').take(200) }
+        val q = (prefs.getString("summary_q", "").orEmpty().split('\n').filter { it.isNotBlank() } +
+            "$pkg\t${clean(title)}\t${clean(text)}").takeLast(60)
+        prefs.edit().putString("summary_q", q.joinToString("\n")).apply()
+    }
+
+    private fun summaryItems(): List<Triple<String, String, String>> {
+        if (!prefs.getBoolean("summary_ready", false)) return emptyList()
+        return prefs.getString("summary_q", "").orEmpty().split('\n').mapNotNull { l ->
+            val p = l.split('\t'); if (p.size < 3) null
+            else Triple(p[0], allApps.firstOrNull { it.packageName == p[0] }?.label ?: p[0], p[1].ifBlank { p[2] } + if (p[1].isNotBlank() && p[2].isNotBlank()) " — ${p[2]}" else "")
+        }
+    }
+
+    private fun clearSummary() { prefs.edit().remove("summary_q").putBoolean("summary_ready", false).apply() }
+
+    private fun checkSummary() {
+        // The live sky follows the real weather (cheap check, every 10 s with the island info).
+        sky?.let { v ->
+            val want = Ios.sky(InfoData.weather?.code ?: 0, java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+            if (v.sky != want) v.sky = want else v.wake()
+        }
+        if (!settings.ios("summary")) return
+        val now = System.currentTimeMillis()
+        val nowMin = (now + java.util.TimeZone.getDefault().getOffset(now)) / 60_000L
+        val last = prefs.getLong("summary_last", -1L)
+        if (last < 0) { prefs.edit().putLong("summary_last", nowMin).apply(); return }
+        if (!Ios.summaryDue(settings.summaryTimes, last, nowMin)) return
+        prefs.edit().putLong("summary_last", nowMin).apply()
+        val n = prefs.getString("summary_q", "").orEmpty().split('\n').count { it.isNotBlank() }
+        if (n == 0) return
+        prefs.edit().putBoolean("summary_ready", true).apply()
+        if (::island.isInitialized) island.flash(IslandActivity("summary", null, R.drawable.ic_cc_bell, 0xFFFF9F0A.toInt(),
+            "Your Summary", "$n notification${if (n == 1) "" else "s"} · pull down from the top", null, false, 0xFFFF9F0A.toInt()), 5000)
+    }
+
+    // ---- StandBy (feature 31): phone on its side while charging.
+    private fun onTilt(deg: Int) {
+        if (deg == android.view.OrientationEventListener.ORIENTATION_UNKNOWN || !::standBy.isInitialized) return
+        val dir = when (deg) { in 65..115 -> -90f; in 245..295 -> 90f; in 0..25, in 335..359 -> 0f; else -> return }
+        val now = System.currentTimeMillis()
+        if (dir != sidewaysDir) { sidewaysDir = dir; sidewaysSince = now; return }
+        if (now - sidewaysSince < 1200) return
+        if (dir == 0f) { if (standBy.isShowing) standBy.hide(); return }
+        if (!standBy.isShowing && Ios.standby(settings.ios("standby"), batteryCharging, true, isActive && !overlayOpen() && !editMode && drag == null)) {
+            standBy.turn = dir
+            standBy.show()
+        }
+    }
+
+    // ---- Live weather wallpaper (feature 33)
+    private fun setupSky() {
+        if (!::root.isInitialized) return
+        if (!settings.ios("weatherwall")) { sky?.let { root.removeView(it) }; sky = null; return }
+        val v = sky ?: SkyView(this).also { sky = it; root.addView(it, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) }
+        InfoData.loadWeather(this); InfoData.refreshWeather(this)
+        v.sky = Ios.sky(InfoData.weather?.code ?: 0, java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+        val pm = getSystemService(android.os.PowerManager::class.java)
+        v.fps = { Ios.skyFps(v.sky, isActive && stage.backgroundMayAnimate() && !overlayOpen() && drag == null, runCatching { pm.isPowerSaveMode }.getOrDefault(false)) }
+        v.wake()
+    }
+
+    /** Focus Home Pages (feature 30): a Focus can keep you on its page. */
+    private fun applyFocusLock() {
+        if (!::pager.isInitialized) return
+        val f = focusId
+        val lock = f != null && settings.ios("focuspages") && Focus.onlyPage(this, f) && !editMode && drag == null
+        pager.isUserInputEnabled = !lock
+    }
+
+    /** One place that runs a shortcut / control (Shortcuts widget, Control Center page 2). */
+    private fun runShortcut(id: String, v: View?) {
+        val task = Intent.FLAG_ACTIVITY_NEW_TASK
+        fun start(i: Intent) = runCatching { startActivity(i.addFlags(task)) }.isSuccess
+        when (id) {
+            "torch" -> setTorch(!torchOn)
+            "timer" -> showTimerPicker(v)
+            "alarm" -> openIntent(Intent(AlarmClock.ACTION_SHOW_ALARMS), v)
+            "camera", "qr" -> if (!start(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))) toast("No camera app found")
+            "calc" -> if (!start(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR))) toast("No calculator app found")
+            "wifi" -> if (Build.VERSION.SDK_INT < 29 || !start(Intent(SysSettings.Panel.ACTION_WIFI))) start(Intent(SysSettings.ACTION_WIFI_SETTINGS))
+            "bt" -> start(Intent(SysSettings.ACTION_BLUETOOTH_SETTINGS))
+            "record" -> if (!start(Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION))) toast("No voice recorder app found")
+            "cc" -> openControlCenter()
+            "focus" -> showFocusSheet()
+            "search" -> openSearch()
+            "lock" -> lockScreen()
+            "notes" -> addReminder()
+            "today" -> openToday()
+            "standby" -> if (::standBy.isInitialized && !overlayOpen()) { standBy.turn = -90f; standBy.show() }
+            "settings" -> openSettings()
+            "screen" -> if (!start(Intent("android.settings.DIGITAL_WELLBEING_SETTINGS"))) start(Intent(SysSettings.ACTION_USAGE_ACCESS_SETTINGS))
+        }
+    }
+
+    private fun addReminder() {
+        val input = glassField("").apply { hint = "New reminder"; isSingleLine = true; filters = arrayOf(android.text.InputFilter.LengthFilter(80)) }
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Add Reminder").setView(wrapField(input))
+            .setPositiveButton("Add") { _, _ ->
+                val t = input.text.toString().trim()
+                if (t.isNotEmpty()) {
+                    IosWidgets.saveReminders(this, listOf(t to false) + IosWidgets.loadReminders(this))
+                    refreshPages()
+                }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun editStocks() {
+        val input = glassField(settings.stockTickers).apply { hint = "AAPL, GOOGL, TSLA"; isSingleLine = true }
+        AlertDialog.Builder(this, R.style.Theme_Luncher_Dialog).setTitle("Stocks (up to 4)").setView(wrapField(input))
+            .setPositiveButton("Save") { _, _ ->
+                val list = Ios.cleanTickers(input.text.toString())
+                if (list.isNotEmpty()) {
+                    settings.stockTickers = list.joinToString(",")
+                    prefs.edit().remove("stk_time").apply()
+                    refreshPages()
+                }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    /** Glass Quick Actions (feature 14): the app's own shortcuts at the top of its menu. */
+    private fun appShortcuts(app: AppInfo): List<MenuItem> = runCatching {
+        val la = getSystemService(android.content.pm.LauncherApps::class.java)
+        if (!la.hasShortcutHostPermission()) return emptyList()
+        val q = android.content.pm.LauncherApps.ShortcutQuery().setPackage(app.packageName).setActivity(app.component)
+            .setQueryFlags(android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+        la.getShortcuts(q, android.os.Process.myUserHandle()).orEmpty().filter { it.isEnabled }.sortedBy { it.rank }.take(4).map { sc ->
+            MenuItem(sc.shortLabel?.toString() ?: "Shortcut") { runCatching { la.startShortcut(sc, null, null) }.onFailure { toast("Can't open this shortcut") } }
+        }
+    }.getOrDefault(emptyList())
+
+    /** Better Spotlight (feature 27): Apple Launcher's own settings pages. */
+    private fun launcherSettingsMatches(q: String): List<Pair<String, String>> {
+        if (q.length < 2) return emptyList()
+        val pages = listOf(
+            "iPhone Features" to "ios", "Appearance & Theme" to "look", "Wallpaper" to "look", "Home Screen & Widgets" to "home",
+            "Dock" to "home", "App Library" to "home", "Dynamic Island" to "island", "Sidebar" to "sidebar",
+            "Animations & Gestures" to "motion", "Sounds & Haptics" to "sound", "Notifications & Pop-ups" to "gilbert",
+            "Backup & Transfer" to "backup", "General" to "general", "Control Centre" to "ios", "StandBy" to "ios", "App Lock" to "ios"
+        )
+        return pages.filter { (t, _) -> t.lowercase().split(' ', '&', '-').any { w -> w.isNotBlank() && w.startsWith(q) } || t.lowercase().startsWith(q) }
+            .distinctBy { it.first }.take(3)
+    }
+
+    private fun findPhotos(q: String): List<Pair<String, android.net.Uri>> {
+        if (q.trim().length < 3) return emptyList()
+        val out = ArrayList<Pair<String, android.net.Uri>>()
+        runCatching {
+            contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME),
+                "${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?", arrayOf("%${q.trim()}%"), "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { c ->
+                while (c.moveToNext() && out.size < 3) {
+                    out += c.getString(1) to android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0))
+                }
+            }
+        }
+        return out
     }
 
     // ================================================================ utils

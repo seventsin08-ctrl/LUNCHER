@@ -196,10 +196,21 @@ class SmartStackView(ctx: Context, private val pages: List<View>, private val on
     private var downY = 0f
     private var downX = 0f
     private var dragging = false
+    /** Auto Smart Stack (iPhone feature 16): picks the most useful page; null = plain rotation. */
+    var smartPick: ((Int) -> Int)? = null
+    private var lastTouch = 0L
     private val rotate = object : Runnable {
         override fun run() {
-            if (isAttachedToWindow && !touching && pages.size > 1) show(index + 1, 1)
-            postDelayed(this, 25_000L)
+            val pick = smartPick
+            if (isAttachedToWindow && !touching && pages.size > 1) {
+                if (pick == null) show(index + 1, 1)
+                // Smart: only switch when something else matters more, and never right after you swiped.
+                else if (System.currentTimeMillis() - lastTouch > 60_000) {
+                    val want = pick(index).coerceIn(0, pages.size - 1)
+                    if (want != index) show(want, if (want > index) 1 else -1)
+                }
+            }
+            postDelayed(this, if (pick == null) 25_000L else 20_000L)
         }
     }
 
@@ -250,7 +261,7 @@ class SmartStackView(ctx: Context, private val pages: List<View>, private val on
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downY = e.y; downX = e.x; dragging = false; touching = true }
+            MotionEvent.ACTION_DOWN -> { downY = e.y; downX = e.x; dragging = false; touching = true; lastTouch = System.currentTimeMillis() }
             MotionEvent.ACTION_MOVE -> {
                 val dy = e.y - downY
                 if (!dragging && abs(dy) > dp(14) && abs(dy) > abs(e.x - downX) * 1.3f && pages.size > 1) {

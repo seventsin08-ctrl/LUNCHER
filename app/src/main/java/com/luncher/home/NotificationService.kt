@@ -23,6 +23,13 @@ class NotificationService : NotificationListenerService() {
         /** Recent conversations from every app, newest last (for the side island's history). */
         val chatHistory = LinkedHashMap<String, ChatInfo>()
         private var loaded = false
+        /** The running listener (null until notification access is allowed). */
+        @Volatile var instance: NotificationService? = null
+        /** Everything in the notification shade right now (for the iPhone-style Notification Center). */
+        fun active(): List<android.service.notification.StatusBarNotification> =
+            runCatching { instance?.activeNotifications?.toList() }.getOrNull().orEmpty()
+        /** Clear these notifications (swipe away / Clear All). */
+        fun clear(keys: List<String>) { val s = instance ?: return; keys.forEach { runCatching { s.cancelNotification(it) } } }
 
         /** Bring back the saved history (after a restart). */
         fun loadHistory(ctx: android.content.Context) {
@@ -98,6 +105,7 @@ class NotificationService : NotificationListenerService() {
     }
 
     override fun onListenerConnected() {
+        instance = this
         runCatching { PhotoWatcher.register(this) }
         // Keeps the headphone pop-up listening while other apps are open.
         main.post { runCatching { HeadsetPopup.get(applicationContext) } }
@@ -237,6 +245,7 @@ class NotificationService : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        if (instance === this) instance = null
         main.post {
             counts.clear()
             onChange?.invoke()

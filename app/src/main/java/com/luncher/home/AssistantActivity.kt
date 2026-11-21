@@ -89,6 +89,9 @@ class AssistantActivity : Activity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var listening = false
+        set(v) { field = v; if (v) glow?.start() else glow?.stop() }
+    /** Siri Glow (iPhone feature 29): rainbow edge while listening. */
+    private var glow: EdgeGlowView? = null
     /** A follow-up question is waiting for its answer ("What should I say to John?"). */
     private var followUp: ((String) -> Unit)? = null
     private val closeLater = Runnable { close() }
@@ -191,6 +194,8 @@ class AssistantActivity : Activity() {
         panel.addView(chipScroll, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(16) })
 
         root.addView(panel, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
+        if (Settings(this).ios("glow")) glow = EdgeGlowView(this).apply { visibility = View.GONE }
+            .also { root.addView(it, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
         setContentView(root)
         root.alpha = 0f
         root.animate().alpha(1f).setDuration(300).start()
@@ -248,7 +253,7 @@ class AssistantActivity : Activity() {
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) { orb.level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f) }
+            override fun onRmsChanged(rmsdB: Float) { orb.level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f); glow?.level = orb.level }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() { orb.level = 0f }
             override fun onEvent(eventType: Int, params: Bundle?) {}
