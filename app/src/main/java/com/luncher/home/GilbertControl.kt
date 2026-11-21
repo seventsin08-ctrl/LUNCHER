@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.view.KeyEvent
+import com.luncher.home.GilbertIntent.Kind as K
 
 /**
  * Gilbert's hands: he can work every switch, slider and style in the launcher, plus phone
@@ -100,7 +101,6 @@ object GilbertControl {
 
     fun action(ctx: Context, i: GilbertIntent.Intent): Action? {
         val s = Settings(ctx)
-        val K = GilbertIntent.Kind
         fun cap(t: String) = t.replaceFirstChar { it.uppercase() }
         return when (i.kind) {
             K.TASK_ADD -> Action("Add task", i.text) { a -> "Task ${GilbertTasks.add(a, i.text)} added." }
