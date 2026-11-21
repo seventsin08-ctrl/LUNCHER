@@ -273,7 +273,14 @@ class IslandFace(ctx: Context) : View(ctx) {
         orbPulse *= 0.94f
         val spin = when (md) { "thinking", "curious" -> 2.6f; "excited" -> 2f; "sleepy" -> 0.35f; else -> 1f }
         val coreK = when (md) { "excited", "surprised" -> 1.35f; "sleepy" -> 0.65f; "listening" -> 1f + 0.2f * sin(t * 8f); "thinking" -> 0.9f + 0.15f * sin(t * 5f); else -> 1f } + orbPulse * 0.6f
-        val base = when (md) { "love" -> 0xFFFF7EB6.toInt(); "sad" -> 0xFF5C8DFF.toInt(); "excited" -> 0xFF9FFFFF.toInt(); "sleepy" -> 0xFF4A7C8C.toInt(); else -> Hud.CYAN }
+        // His colour is how he feels: a mood reaction first, otherwise his mind's dominant emotion.
+        val target = when (md) {
+            "love" -> 0xFFFF7EB6.toInt(); "sad" -> 0xFFFF6A3D.toInt(); "excited" -> 0xFFD07CFF.toInt(); "sleepy" -> 0xFF4A6FA5.toInt()
+            "curious" -> 0xFF3DFFB8.toInt(); "happy" -> 0xFFFFC94D.toInt()
+            else -> GilbertMind.color() ?: Hud.CYAN
+        }
+        colNow = if (colNow == 0) target else blend(colNow, target, 0.05f)   // fades smoothly between feelings
+        val base = colNow
         val R = minOf(w, h) * 0.40f * (1f + 0.025f * sin(t * 1.6f))
         val rot = t * (0.45f + spinBoost * 3f) * speedK * spin
         val cr = cos(rot); val sr = sin(rot)
@@ -315,13 +322,98 @@ class IslandFace(ctx: Context) : View(ctx) {
                 c.drawLine(cx + dx * 1.1f, cy + dy * 1.1f, cx + dx * 1.2f, cy + dy * 1.2f, line)
             }
         }
-        // The dense core.
+        // The core: a cloud that gathers into his little body, which changes pose with what he's doing.
+        val now = System.currentTimeMillis()
+        val pose = when (md) {
+            "listening" -> "talk"; "excited", "surprised" -> "jump"; "sleepy" -> "slump"; "sad" -> "down"
+            "thinking", "curious" -> "think"; "happy", "love" -> if (now - waveAt < 2600) "wave" else "stand"
+            else -> "stand"
+        }
+        // Now and then (and when new data arrives) he dissolves into the cloud and reforms.
+        if (now > nextMelt) { bodyGoal = 0f; nextMelt = now + 22_000 + (Math.random() * 18_000).toLong(); meltUntil = now + 1400 }
+        if (now > meltUntil && md != "thinking") bodyGoal = 1f
+        if (orbPulse > 0.5f) { bodyGoal = 0f; meltUntil = now + 900 }
+        if (md == "thinking" && sin(t * 0.8f) > 0.6f) bodyGoal = 0f
+        bodyK += (bodyGoal - bodyK) * 0.06f
+        val bk = bodyK * bodyK * (3 - 2 * bodyK)
         val coreCol = blend(base, Color.WHITE, 0.55f)
-        for (q in core) {
+        val small = minOf(w, h) < d * 70   // in the tiny island he stays a cloud (too small for a body)
+        for ((i, q) in core.withIndex()) {
             val x = q[0] * cr + q[2] * sr; val z = -q[0] * sr + q[2] * cr
             val j = 0.04f * sin(t * 3f + q[3])
-            paint.color = coreCol; paint.alpha = (150 + 100 * ((z + 0.5f).coerceIn(0f, 1f))).toInt().coerceIn(0, 255)
-            c.drawCircle(cx + (x + j) * R * coreK, cy + (q[1] + j) * R * coreK, d * 0.75f, paint)
+            var px = cx + (x + j) * R * coreK; var py = cy + (q[1] + j) * R * coreK
+            if (!small && bk > 0.01f) {
+                val (bx, by) = bodyPoint(i, core.size, pose)
+                px += (cx + bx * R - px) * bk; py += (cy + by * R - py) * bk
+            }
+            paint.color = coreCol
+            paint.alpha = (150 + 100 * ((z + 0.5f).coerceIn(0f, 1f) * (1f - bk) + bk)).toInt().coerceIn(0, 255)
+            c.drawCircle(px, py, d * (0.75f + 0.25f * bk), paint)
+        }
+    }
+
+    private var colNow = 0
+    private var bodyK = 0f
+    private var bodyGoal = 1f
+    private var nextMelt = System.currentTimeMillis() + 15_000
+    private var meltUntil = 0L
+    private var waveAt = 0L
+    /** Wave hello (e.g. when his console opens). */
+    fun wave() { waveAt = System.currentTimeMillis(); react("happy", 2600) }
+
+    /**
+     * Where particle [i] of [n] sits in his body for a [pose] (units of the globe's radius, 0,0 = centre).
+     * A simple figure like a sign-post person: head, torso, two arms, two legs.
+     */
+    private fun bodyPoint(i: Int, n: Int, pose: String): Pair<Float, Float> {
+        val k = i.toFloat() / n
+        // Gentle life: breathing and a sway.
+        val sway = sin(t * 1.3f) * 0.008f
+        val bob = when (pose) { "talk" -> kotlin.math.abs(sin(t * 6f)) * -0.012f; "jump" -> -kotlin.math.abs(sin(t * 5f)) * 0.08f; else -> sin(t * 1.6f) * 0.006f }
+        val slump = if (pose == "slump") 0.05f else if (pose == "down") 0.03f else 0f
+        val headY = -0.33f + slump * 1.4f + bob
+        fun line(x0: Float, y0: Float, x1: Float, y1: Float, u: Float) = (x0 + (x1 - x0) * u + sway) to (y0 + (y1 - y0) * u + bob)
+        return when {
+            k < 0.2f -> {           // head (filled disc)
+                val u = k / 0.2f; val ang = u * 2f * PI.toFloat() * 3.3f; val rr = 0.075f * kotlin.math.sqrt((u * 7f) % 1f)
+                val hx = if (pose == "down" || pose == "slump") 0.01f else 0f
+                (rr * cos(ang) + hx + sway) to (headY + rr * sin(ang))
+            }
+            k < 0.48f -> {          // torso (rounded block)
+                val u = (k - 0.2f) / 0.28f; val col = (u * 5f).toInt(); val row = (u * 5f) % 1f
+                (-0.085f + col * 0.0425f + sway) to (-0.22f + slump + row * 0.33f + bob)
+            }
+            k < 0.62f -> {          // right arm (his left on screen)
+                val u = (k - 0.48f) / 0.14f
+                val (hx, hy) = when (pose) {
+                    "wave" -> (0.2f + 0.04f * sin(t * 9f)) to -0.42f
+                    "jump" -> 0.2f to -0.4f
+                    "think" -> 0.03f to -0.27f
+                    "talk" -> (0.18f + 0.03f * sin(t * 4f)) to (-0.02f + 0.03f * sin(t * 3f))
+                    "slump" -> 0.12f to 0.16f
+                    else -> 0.13f to 0.08f
+                }
+                line(0.11f, -0.2f + slump, hx, hy + slump, u)
+            }
+            k < 0.76f -> {          // left arm
+                val u = (k - 0.62f) / 0.14f
+                val (hx, hy) = when (pose) {
+                    "jump" -> -0.2f to -0.4f
+                    "talk" -> (-0.17f - 0.02f * sin(t * 3.5f)) to (0.0f + 0.03f * cos(t * 3f))
+                    "down" -> -0.09f to 0.1f
+                    "slump" -> -0.12f to 0.16f
+                    else -> -0.13f to 0.08f
+                }
+                line(-0.11f, -0.2f + slump, hx, hy + slump, u)
+            }
+            k < 0.88f -> {          // right leg
+                val u = (k - 0.76f) / 0.12f
+                line(0.04f, 0.11f + slump, if (pose == "jump") 0.09f else 0.05f, 0.42f, u)
+            }
+            else -> {               // left leg
+                val u = (k - 0.88f) / 0.12f
+                line(-0.04f, 0.11f + slump, if (pose == "jump") -0.09f else -0.05f, 0.42f, u)
+            }
         }
     }
 

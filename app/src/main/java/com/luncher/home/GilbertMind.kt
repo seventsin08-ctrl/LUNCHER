@@ -47,6 +47,15 @@ object GilbertMind {
         put(ctx, "emo", o); p(ctx).edit().putLong("emoAt", System.currentTimeMillis()).apply()
     }
 
+    /** His emotion colour (for his globe): calm = your theme colour. Null until his mind has loaded. */
+    fun color(): Int? {
+        if (!emoLoaded) return null
+        return when (emo.maxByOrNull { it.value }?.key) {
+            "curious" -> 0xFF3DFFB8.toInt(); "happy" -> 0xFFFFC94D.toInt(); "concerned" -> 0xFFFF6A3D.toInt()
+            "amused" -> 0xFFD07CFF.toInt(); "tired" -> 0xFF4A6FA5.toInt(); else -> null
+        }
+    }
+
     fun emotions(ctx: Context): Map<String, Float> { loadEmo(ctx); return EMOTIONS.associateWith { emo[it] ?: 0f } }
     fun dominant(ctx: Context): String = emotions(ctx).maxByOrNull { it.value }?.key ?: "calm"
 

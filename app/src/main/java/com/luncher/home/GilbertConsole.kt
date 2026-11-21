@@ -209,6 +209,7 @@ object GilbertConsole {
             GilbertMind.sense(a, u.count { it.level == 2 }, u.count { it.level == 3 }, h?.battery ?: 100, h?.charging ?: true)
             GilbertMind.recordOpen(a)
             face?.baseMood = GilbertMind.faceMood(a)
+            face?.wave()   // he waves hello
             val q = openingQuestion()
             // His own decision: usually he greets you aloud, sometimes just on screen.
             if (u.any { it.level == 3 } || Math.random() > 0.15) GilbertNarrator.say(a, q) else type(q.uppercase())
