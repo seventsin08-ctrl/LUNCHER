@@ -4,7 +4,7 @@ plugins {
 }
 
 // Update this number for every release; it also controls the installed app name.
-val launcherNumber = "160"
+val launcherNumber = "161"
 
 android {
     namespace = "com.luncher.home"
@@ -14,7 +14,7 @@ android {
         applicationId = "com.applelauncher.home"
         minSdk = 26
         targetSdk = 35
-        versionCode = 165
+        versionCode = 166
         versionName = launcherNumber
         // Only the 64-bit phone chip (all modern phones). The brain engine for the other
         // 3 chip types made the download ~4x bigger.

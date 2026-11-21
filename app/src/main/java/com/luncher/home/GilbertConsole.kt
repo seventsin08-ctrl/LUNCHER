@@ -147,6 +147,7 @@ object GilbertConsole {
         close = {
             closeConsole = null
             GilbertNarrator.onSpeaking = null; GilbertNarrator.stop()
+            announceJob?.let { uiHandler.removeCallbacks(it) }; announceJob = null; heard.clear(); heardCount = 0
             PocherFiles.onChanged = null; GilbertArchive.onSaved = null; Gilbert.onHeldChanged = prevHeld
             rings = null; face = null; ticker = null; frame = null
             layer.animate().alpha(0f).scaleX(1.04f).scaleY(1.04f).setDuration(180).withEndAction { root.removeView(layer); onClosed?.invoke() }.start()
@@ -182,13 +183,44 @@ object GilbertConsole {
         // ---- Live updates: new data → ping, ticker, refresh the open window.
         PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 5) }
         GilbertArchive.onSaved = { app, who -> update("NEW · ${who.uppercase()} · ${app.uppercase()}", who, -1,
-            "New message from ${who.substringAfterLast(": ")}, on $app.") }
+            "$who\u0000$app") }
         val prev = Gilbert.onHeldChanged
         prevHeld = prev
         Gilbert.onHeldChanged = { prev?.invoke(); if (current == 0) layer.post { select(0, animate = false, scanOnly = true) } }
     }
 
     private var booting = false
+
+    // ---- New-message announcements, with a random cool-down so he doesn't keep interrupting.
+    private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var lastAnnounce = 0L
+    private var gap = 0L
+    private val heard = LinkedHashMap<String, String>()   // spoken name → app
+    private var heardCount = 0
+    private var announceJob: Runnable? = null
+
+    private fun announce(whoApp: String) {
+        val who = whoApp.substringBefore('\u0000'); val app = whoApp.substringAfter('\u0000')
+        heard[spokenName(who)] = app; heardCount++
+        if (announceJob != null) return
+        val wait = maxOf(2500L, lastAnnounce + gap - System.currentTimeMillis())   // groups bursts together
+        val r = Runnable { announceJob = null; speakHeard() }
+        announceJob = r
+        uiHandler.postDelayed(r, wait)
+    }
+
+    private fun speakHeard() {
+        val a = act ?: return
+        if (heard.isEmpty()) return
+        val names = heard.keys.toList(); val apps = heard.values.distinct()
+        val line = if (heardCount == 1) "New message from ${names[0]}, on ${apps[0]}."
+            else if (names.size == 1) "${heardCount} new messages from ${names[0]}."
+            else "${heardCount} new messages, from ${names.take(2).joinToString(" and ")}${if (names.size > 2) " and ${names.size - 2} more" else ""}."
+        heard.clear(); heardCount = 0
+        GilbertNarrator.say(a, line, flush = false)
+        lastAnnounce = System.currentTimeMillis()
+        gap = (40_000L..150_000L).random()   // next one waits 40 s – 2½ min
+    }
 
     // ------------------------------------------------------------------ what Gilbert says
     private val ENDINGS = listOf("What's the task for today?", "What shall we tackle first?", "What's on the agenda?",
@@ -273,7 +305,7 @@ object GilbertConsole {
     /** New data arrived while the console is open. */
     private fun update(msg: String, who: String?, onlyWin: Int, spoken: String? = null) {
         rings?.ping(); face?.ping()
-        act?.let { a -> spoken?.let { GilbertNarrator.say(a, it, flush = false) } }
+        spoken?.let { announce(it) }
         type("▲ $msg")
         flashWho = who
         if (onlyWin < 0 || current == onlyWin) {
@@ -877,6 +909,42 @@ object GilbertConsole {
             "Files: ${files.size} (${files.count { it.img != null }} images scanned)\n" +
             "Notes: ${GilbertMemory.facts(a).size}\n" +
             "Folder: Android/data/…/files/Gilbert Archive", 12f, 0xCCFFFFFF.toInt()).typeface = mono
+
+        section(p, "VOICE")
+        GilbertNarrator.start(a)
+        val vb = box(p, 2)
+        val voices = GilbertNarrator.voices()
+        if (voices.isEmpty()) {
+            vb.addView(TextView(a).apply { text = "Loading voices… (open this window again in a moment)"; textSize = 12.5f; setTextColor(0x99FFFFFF.toInt()) })
+        } else {
+            vb.addView(TextView(a).apply { text = "Tap a voice to hear it. British voices are first."; textSize = 12f; setTextColor(0x99FFFFFF.toInt()) })
+            val chosen = s.gilbertVoice
+            val wrap = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+            var row: LinearLayout? = null
+            voices.forEachIndexed { i, (name, label) ->
+                if (i % 3 == 0) { row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }; wrap.addView(row) }
+                row!!.addView(TextView(a).apply {
+                    text = label; textSize = 11f; typeface = monoBold; gravity = Gravity.CENTER; maxLines = 1
+                    val on = name == chosen
+                    setTextColor(if (on) Color.BLACK else Hud.CYAN)
+                    setPadding(dp(6), dp(8), dp(6), dp(8))
+                    background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(if (on) Hud.CYAN else Hud.a(Hud.CYAN, 22)); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 150)) }
+                    setOnClickListener { GilbertNarrator.useVoice(a, name); select(6, animate = false) }
+                }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(6); topMargin = dp(6) })
+            }
+            vb.addView(wrap)
+        }
+        val ctl = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        vb.addView(ctl)
+        pill(ctl, if (s.gilbertEcho) "AI echo: on" else "AI echo: off") {
+            s.gilbertEcho = !s.gilbertEcho; select(6, animate = false)
+            GilbertNarrator.say(a, if (s.gilbertEcho) "Echo on. I sound like I'm in the room." else "Echo off.")
+        }
+        ctl.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
+        pill(ctl, "▶ Test") { GilbertNarrator.say(a, briefing()) }
+        vb.addView(TextView(a).apply {
+            text = "More voices: install “Speech Services by Google”, then Settings › Accessibility › Text-to-speech › English (UK) › download voices."
+            textSize = 11f; setTextColor(0x80FFFFFF.toInt()); setPadding(0, dp(8), 0, 0) })
         if (GilbertBrain.installed(a) && !GilbertBrain.loaded && !GilbertBrain.crashed(a)) room.calibrate()
     }
 }

@@ -487,6 +487,14 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_gil_voice", true)
         set(v) = put("s_gil_voice", v)
     /** How Gilbert addresses you: "sir", "ma'am", "boss" or "name". */
+    /** The text-to-speech voice he uses (name), or "" = pick the best British male voice. */
+    var gilbertVoice: String
+        get() = p.getString("s_gil_voice_name", "") ?: ""
+        set(v) = put("s_gil_voice_name", v)
+    /** "AI" sound: a soft room echo on his voice, like speakers in a lab. */
+    var gilbertEcho: Boolean
+        get() = p.getBoolean("s_gil_echo", true)
+        set(v) = put("s_gil_echo", v)
     var gilbertTitle: String
         get() = p.getString("s_gil_title", "sir") ?: "sir"
         set(v) = put("s_gil_title", v)
