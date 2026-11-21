@@ -76,7 +76,8 @@ object Ios {
         Feature(32, "charging", "Charging Animation", "A glowing ring when you plug in", Zone.TOAST, Cost.BRIEF, true),
         Feature(33, "weatherwall", "Live Weather Wallpaper", "The sky moves with the real weather", Zone.BACKGROUND, Cost.CONTINUOUS, false),
         Feature(34, "lockpage", "Lock-Style First Page", "After unlocking: big clock and date, swipe up to go", Zone.FULLSCREEN, Cost.BRIEF, false),
-        Feature(35, "haptics", "Tuned Haptics", "Different small vibrations for taps, holds and swipes", Zone.NONE, Cost.STATIC, true)
+        Feature(35, "haptics", "Tuned Haptics", "Different small vibrations for taps, holds and swipes", Zone.NONE, Cost.STATIC, true),
+        Feature(36, "landscape", "Landscape Home Screen", "Turn the phone sideways: widgets left, apps middle, dock right", Zone.FULLSCREEN, Cost.STATIC, true)
     )
 
     fun byId(id: String): Feature = ALL.first { it.id == id }
@@ -348,6 +349,9 @@ object Ios {
 
     fun standby(enabled: Boolean, charging: Boolean, landscape: Boolean, onHome: Boolean) =
         enabled && charging && landscape && onHome
+
+    /** Landscape Home: only with the feature on, rotation lock off, and the Home Screen free. */
+    fun landscape(enabled: Boolean, autoRotate: Boolean, onHomeFree: Boolean) = enabled && autoRotate && onHomeFree
 
     fun chargingRing(enabled: Boolean, was: Boolean?, now: Boolean, onHome: Boolean) =
         enabled && was == false && now && onHome

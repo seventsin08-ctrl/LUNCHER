@@ -46,9 +46,9 @@ object IosSimulations {
     // ---------------------------------------------------------------- alignment with the registry
     private fun registry(r: Report) {
         val all = Ios.ALL
-        r.check("registry", all.size == 35) { "expected 35 features, got ${all.size}" }
-        r.check("registry", all.map { it.n } == (1..35).toList()) { "numbers must be 1..35 in order" }
-        r.check("registry", all.map { it.id }.toSet().size == 35) { "duplicate ids" }
+        r.check("registry", all.size == 36) { "expected 36 features, got ${all.size}" }
+        r.check("registry", all.map { it.n } == (1..36).toList()) { "numbers must be 1..36 in order" }
+        r.check("registry", all.map { it.id }.toSet().size == 36) { "duplicate ids" }
         for (f in all) {
             r.check("registry", f.title.isNotBlank() && f.what.isNotBlank()) { "${f.id} needs title and description" }
             r.check("registry", f.what.length <= 80) { "${f.id} description too long for a settings row" }
@@ -321,6 +321,14 @@ object IosSimulations {
         r.check("32 charging", !Ios.chargingRing(true, true, true, true)) { "already charging must not replay" }
         r.check("32 charging", !Ios.chargingRing(true, null, true, true)) { "first battery reading must not play" }
         r.check("32 charging", !Ios.chargingRing(false, false, true, true) && !Ios.chargingRing(true, false, true, false)) { "off / not on home" }
+        for (e in listOf(true, false)) for (a in listOf(true, false)) for (h in listOf(true, false))
+            r.check("36 landscape", Ios.landscape(e, a, h) == (e && a && h)) { "landscape $e $a $h (rotation lock must be respected)" }
+        // Landscape and StandBy never stack, and nothing small draws over the landscape page.
+        val st = Ios.Stage()
+        r.check("36 landscape", st.request("landscape")) { "landscape should show" }
+        r.check("36 landscape", !st.request("standby") && !st.request("nc") && !st.request("today") && !st.request("charging")) { "something stacked on landscape" }
+        st.release("landscape")
+        r.check("36 landscape", st.request("standby") && !st.request("landscape")) { "landscape over StandBy" }
     }
 
     private fun sky(r: Report) {

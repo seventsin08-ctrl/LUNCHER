@@ -412,7 +412,7 @@ class SettingsActivity : Activity() {
         }
         val iosExtra = section("SEARCH · FOCUS · EXTRAS")
         if (iosExtra.parent != null) {
-            listOf("spotlight", "siri", "glow", "focuspages", "standby", "charging", "weatherwall", "lockpage", "haptics").forEach { feature(iosExtra, it) }
+            listOf("spotlight", "siri", "glow", "focuspages", "standby", "charging", "weatherwall", "lockpage", "haptics", "landscape").forEach { feature(iosExtra, it) }
             info(iosExtra, "StandBy: turn the phone on its side while charging, on the Home Screen. Focus pages: open a Focus › Stay on page only.")
         }
 

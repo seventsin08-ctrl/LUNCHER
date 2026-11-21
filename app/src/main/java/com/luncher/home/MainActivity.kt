@@ -158,6 +158,7 @@ class MainActivity : Activity() {
     private lateinit var standBy: StandBy
     private lateinit var lockCover: LockCover
     private lateinit var chargingRing: ChargingRing
+    private lateinit var landscape: LandscapeHome
     private var sky: SkyView? = null
     private var orientationWatch: android.view.OrientationEventListener? = null
     private var sidewaysDir = 0f
@@ -681,7 +682,7 @@ class MainActivity : Activity() {
         sky?.wake()
         if (Focus.applySchedule(this) || Focus.current(this)?.id != focusId) applyFocusState(announce = true)
         isActive = true
-        if (settings.ios("standby")) runCatching { orientationWatch?.enable() }
+        if (tiltWanted()) runCatching { orientationWatch?.enable() }
         // The "System online" wake word was replaced by double-tapping Gilbert: switch it off once.
         getSharedPreferences("luncher", MODE_PRIVATE).let { pr ->
             if (!pr.getBoolean("wake_off_v176", false)) { settings.voiceOn = false; pr.edit().putBoolean("wake_off_v176", true).apply() } }
@@ -766,6 +767,7 @@ class MainActivity : Activity() {
             ::todayView.isInitialized && todayView.isShowing -> todayView.hide()
             ::standBy.isInitialized && standBy.isShowing -> standBy.hide()
             ::lockCover.isInitialized && lockCover.isShowing -> lockCover.hide()
+            ::landscape.isInitialized && landscape.isShowing -> landscape.hide()
             searchOverlay.visibility == View.VISIBLE -> closeSearch()
             editMode -> exitEditMode()
             pager.currentItem != homePageIndex() -> pager.currentItem = homePageIndex()
@@ -781,7 +783,8 @@ class MainActivity : Activity() {
             (::controlCenter.isInitialized && controlCenter.isShowing) || iosLayerOpen()
 
     private fun iosLayerOpen() = (::nc.isInitialized && nc.isShowing) || (::todayView.isInitialized && todayView.isShowing) ||
-        (::standBy.isInitialized && standBy.isShowing) || (::lockCover.isInitialized && lockCover.isShowing)
+        (::standBy.isInitialized && standBy.isShowing) || (::lockCover.isInitialized && lockCover.isShowing) ||
+        (::landscape.isInitialized && landscape.isShowing)
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // Gilbert's eyes follow your finger on the Home Screen.
@@ -6692,13 +6695,20 @@ class MainActivity : Activity() {
             summary = { summaryItems() }
             onSummaryRead = { clearSummary() }
         }
-        todayView = TodayView(this, root, stage).apply { onBlur = blur; cards = { todayCards() } }
+        todayView = TodayView(this, root, stage).apply { onBlur = blur; cards = { todayCards() }; onEdit = { showWidgetGallery() } }
         standBy = StandBy(this, root, stage).apply { battery = { batteryLevel }; photo = { photoCache.values.firstOrNull() } }
         lockCover = LockCover(this, root, stage).apply {
             onBlur = blur
             info = { listOfNotNull("⚡ $batteryLevel%", InfoData.weather?.let { "${it.temp}°" }).joinToString("  ·  ") }
         }
         chargingRing = ChargingRing(this, root, stage)
+        landscape = LandscapeHome(this, root, stage).apply {
+            apps = { pages.filterIsInstance<Page.Home>().flatMap { p -> p.apps.map { it.first } } }
+            dock = { dockApps() }
+            onLaunch = { a, v -> launch(a, v) }
+            battery = { batteryLevel }
+            charging = { batteryCharging }
+        }
         stage.onEvict = { id -> if (id == "charging") chargingRing.hide(immediate = true) }
         orientationWatch = object : android.view.OrientationEventListener(this) {
             override fun onOrientationChanged(deg: Int) = onTilt(deg)
@@ -6720,7 +6730,8 @@ class MainActivity : Activity() {
             controlCenter.resizeOn = settings.ios("ccresize")
             controlCenter.bounceIn = settings.ios("ccbounce")
         }
-        if (!settings.ios("standby")) orientationWatch?.disable() else if (isActive) runCatching { orientationWatch?.enable() }
+        if (!tiltWanted()) orientationWatch?.disable() else if (isActive) runCatching { orientationWatch?.enable() }
+        if (!settings.ios("landscape") && ::landscape.isInitialized) landscape.hide(immediate = true)
         if (!settings.ios("standby") && ::standBy.isInitialized) standBy.hide(immediate = true)
         setupSky()
         applyFocusLock()
@@ -6758,11 +6769,19 @@ class MainActivity : Activity() {
             out += col
         }
         InfoData.loadWeather(this); InfoData.refreshWeather(this)
-        out += sized(InfoViews.todayWeather(this), 150)
+        // Weather: the full card once there's data, otherwise one slim "tap to update" row (no empty box).
+        out += if (InfoData.weather != null) sized(InfoViews.todayWeather(this), 150) else LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(14))
+            addView(TextView(this@MainActivity).apply { text = "⛅"; textSize = 26f }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginEnd = dp(12) })
+            addView(TextView(this@MainActivity).apply {
+                text = "Weather\nTap to update · needs location"; setTextColor(0xCCFFFFFF.toInt()); textSize = 14f
+            })
+            setOnClickListener { InfoData.refreshWeather(this@MainActivity, force = true); toast("Updating weather…") }
+        }
         if (settings.ios("interactive")) out += IosWidgets.reminders(this, 4) { todayView.hide(true); addReminder() }
         if (settings.ios("screentime")) out += IosWidgets.screenTime(this) { pkg -> allApps.firstOrNull { it.packageName == pkg }?.label }
         InfoData.startSteps(this)
-        out += FrameLayout(this).apply { setPadding(dp(16), dp(14), dp(16), dp(14)); addView(InfoViews.stepsCard(this@MainActivity)) }
+        out += FrameLayout(this).apply { setPadding(dp(16), dp(14), dp(16), dp(14)); addView(InfoViews.stepsCard(this@MainActivity, compact = true)) }
         if (settings.ios("stocks")) out += IosWidgets.stocks(this, Ios.cleanTickers(settings.stockTickers)) { todayView.hide(true); editStocks() }
         return out
     }
@@ -6839,17 +6858,32 @@ class MainActivity : Activity() {
 
     // ---- StandBy (feature 31): phone on its side while charging.
     private fun onTilt(deg: Int) {
-        if (deg == android.view.OrientationEventListener.ORIENTATION_UNKNOWN || !::standBy.isInitialized) return
+        if (deg == android.view.OrientationEventListener.ORIENTATION_UNKNOWN || !::standBy.isInitialized || !::landscape.isInitialized) return
         val dir = when (deg) { in 65..115 -> -90f; in 245..295 -> 90f; in 0..25, in 335..359 -> 0f; else -> return }
         val now = System.currentTimeMillis()
-        if (dir != sidewaysDir) { sidewaysDir = dir; sidewaysSince = now; return }
-        if (now - sidewaysSince < 1200) return
-        if (dir == 0f) { if (standBy.isShowing) standBy.hide(); return }
-        if (!standBy.isShowing && Ios.standby(settings.ios("standby"), batteryCharging, true, isActive && !overlayOpen() && !editMode && drag == null)) {
-            standBy.turn = dir
-            standBy.show()
+        if (dir != sidewaysDir) { sidewaysDir = dir; sidewaysSince = now }
+        // Back upright: leave right away (no waiting), like the iPhone rotating back.
+        if (dir == 0f) { if (standBy.isShowing) standBy.hide(); if (landscape.isShowing) landscape.hide(); return }
+        val steadyMs = now - sidewaysSince
+        // Turned to the other side while sideways: turn the page round.
+        if (landscape.isShowing && landscape.turn != dir && steadyMs > 400) { landscape.hide(immediate = true); landscape.turn = dir; landscape.show(); return }
+        if (standBy.isShowing || landscape.isShowing) return
+        val free = isActive && !overlayOpen() && !editMode && drag == null
+        if (steadyMs > 1200 && Ios.standby(settings.ios("standby"), batteryCharging, true, free)) {
+            standBy.turn = dir; standBy.show(); return
+        }
+        if (steadyMs > 500 && Ios.landscape(settings.ios("landscape"), autoRotateOn(), free) && !(batteryCharging && settings.ios("standby"))) {
+            landscape.turn = dir
+            landscape.showLabels = settings.showLabels
+            landscape.show()
         }
     }
+
+    /** Respect the phone's rotation lock, like the iPhone's Portrait Orientation Lock. */
+    private fun autoRotateOn(): Boolean =
+        runCatching { SysSettings.System.getInt(contentResolver, SysSettings.System.ACCELEROMETER_ROTATION) == 1 }.getOrDefault(true)
+
+    private fun tiltWanted() = settings.ios("standby") || settings.ios("landscape")
 
     // ---- Live weather wallpaper (feature 33)
     private fun setupSky() {

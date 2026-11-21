@@ -21,6 +21,10 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        185 to listOf("📅 Today View redesigned: fixed header below the status bar, dark frosted cards, cards float in one by one, press effect, large title shrinks as you scroll, Edit button",
+            "🔧 Today: no more empty weather box (slim 'tap to update' row) and the steps chart no longer shows a green blob",
+            "👋 New iPhone-style hello: one flowing pen stroke on a slate screen, soft glow, 'Swipe up to begin'",
+            "📱 Landscape Home Screen: turn the phone sideways — clock and status rings on the left, apps in the middle, dock on the right; follows your rotation lock (Settings › iPhone Features)"),
         184 to listOf("🍎 35 iPhone features, each with its own switch in Settings › iPhone Features",
             "✨ Motion: spring bounce everywhere, zoom back into the icon, Liquid Glass shine, smoother folders and island stretch, bouncy Control Centre",
             "🏠 Home: icon stacking (tap other icons while dragging), fingerprint App Lock, the app's own shortcuts in its menu",

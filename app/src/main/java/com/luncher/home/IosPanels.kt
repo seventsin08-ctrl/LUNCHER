@@ -250,47 +250,115 @@ class TodayView(act: Activity, root: FrameLayout, stage: Ios.Stage) : IosLayer(a
     var cards: (() -> List<View>)? = null
     var topInset = 0
     var bottomInset = 0
-    private var column: View? = null
+    private var sheet: View? = null
+    private val tiles = ArrayList<View>()
+
+    /** iOS widget material: dark frosted glass with a hairline edge (readable on any wallpaper). */
+    private fun material(): GradientDrawable = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(Color.argb(150, 44, 44, 50), Color.argb(170, 24, 24, 28))).apply {
+        cornerRadius = act.dpx(26).toFloat(); setStroke(maxOf(1, act.dpx(1) / 2 + 1), Color.argb(34, 255, 255, 255))
+    }
 
     override fun build(l: FrameLayout) {
-        l.setBackgroundColor(Color.argb(90, 0, 0, 0))
-        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dpx(16), topInset + act.dpx(14), act.dpx(16), bottomInset + act.dpx(24)) }
-        col.addView(TextClock(act).apply {
-            format12Hour = "EEEE, MMMM d"; format24Hour = "EEEE, d MMMM"; textSize = 15f; setTextColor(0xCCFFFFFF.toInt())
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        })
-        col.addView(label(act, "Today", 34f, Color.WHITE, true), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { bottomMargin = act.dpx(12) })
+        // Whole-screen frosted dim, like the blurred Home Screen behind iPhone's Today View.
+        l.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xCC0B0B0F.toInt(), 0xB30B0B0F.toInt(), 0xE60B0B0F.toInt()))
+        val top = maxOf(topInset, act.window?.decorView?.rootWindowInsets?.stableInsetTop ?: 0, act.dpx(24))
+        val frame = FrameLayout(act)
+        sheet = frame
+        tiles.clear()
+
+        // Cards scroll under a fixed header.
+        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(act.dpx(16), top + act.dpx(92), act.dpx(16), bottomInset + act.dpx(28)) }
         for (card in cards?.invoke().orEmpty()) {
-            val f = FrameLayout(act).apply { background = Glass.panel(act, 24f); addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) }
-            col.addView(f, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = act.dpx(12) })
+            val f = FrameLayout(act).apply {
+                background = material(); clipToOutline = true
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(v: View, o: android.graphics.Outline) = o.setRoundRect(0, 0, v.width, v.height, act.dpx(26).toFloat())
+                }
+                addView(card, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            }
+            pressable(f)
+            tiles += f
+            col.addView(f, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = act.dpx(14) })
         }
-        val scroll = ScrollView(act).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; addView(col) }
-        column = scroll
-        l.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        l.setOnClickListener { hide() }
-        // Swipe left to go back to the Home Screen.
-        var x0 = 0f; var y0 = 0f
-        val back = View.OnTouchListener { _, e ->
+        col.addView(label(act, "Edit", 15f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER; setPadding(act.dpx(22), act.dpx(9), act.dpx(22), act.dpx(9)); background = Glass.pill(0x33FFFFFF, act.dpx(18).toFloat())
+            setOnClickListener { hide(); onEdit?.invoke() }
+        }, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = act.dpx(6) })
+        val scroll = ScrollView(act).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; addView(col); clipToPadding = false }
+        frame.addView(scroll, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
+        // Header: small date over a big bold "Today", on a soft fade so cards slide under it cleanly.
+        val head = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(act.dpx(20), top + act.dpx(10), act.dpx(20), act.dpx(14))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xF20B0B0F.toInt(), 0xCC0B0B0F.toInt(), 0x000B0B0F))
+        }
+        head.addView(TextClock(act).apply {
+            format12Hour = "EEEE, MMMM d"; format24Hour = "EEEE, d MMMM"; textSize = 14f; setTextColor(0x99FFFFFF.toInt())
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); isAllCaps = true; letterSpacing = 0.04f
+        })
+        val title = label(act, "Today", 34f, Color.WHITE, true)
+        head.addView(title)
+        frame.addView(head, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
+        // Big title gently shrinks as you scroll, like iOS large titles.
+        scroll.setOnScrollChangeListener { _, _, y, _, _ ->
+            val k = (y / act.dpx(80).toFloat()).coerceIn(0f, 1f)
+            title.pivotX = 0f; title.pivotY = title.height.toFloat()
+            title.scaleX = 1f - 0.22f * k; title.scaleY = 1f - 0.22f * k
+        }
+        l.addView(frame, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
+        // Swipe left anywhere to go back; tap the dim area to close.
+        var x0 = 0f; var y0 = 0f; var horizontal = false
+        scroll.setOnTouchListener { _, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY }
-                MotionEvent.ACTION_MOVE -> { val dx = e.rawX - x0; if (dx < 0 && abs(dx) > abs(e.rawY - y0) * 1.4f) scroll.translationX = dx }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (scroll.translationX < -act.dpx(90)) { hide(); return@OnTouchListener true }
-                    if (scroll.translationX != 0f) Motion.spring(scroll, DynamicAnimation.TRANSLATION_X, 0f, Motion.FLUID)
+                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; horizontal = false }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - x0
+                    if (!horizontal && dx < -act.dpx(14) && abs(dx) > abs(e.rawY - y0) * 1.4f) horizontal = true
+                    if (horizontal) { frame.translationX = dx.coerceAtMost(0f); frame.alpha = 1f + dx / (frame.width * 1.5f); return@setOnTouchListener true }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (horizontal) {
+                    if (frame.translationX < -act.dpx(90)) hide()
+                    else { Motion.spring(frame, DynamicAnimation.TRANSLATION_X, 0f, Motion.FLUID); frame.animate().alpha(1f).setDuration(160).start() }
+                    return@setOnTouchListener true
                 }
             }
             false
         }
-        scroll.setOnTouchListener(back)
+    }
+
+    /** Called by the Edit button (opens the widget gallery). */
+    var onEdit: (() -> Unit)? = null
+
+    private fun pressable(v: View) {
+        v.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> Motion.scaleTo(v, 0.97f, Motion.SNAPPY)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> Motion.scaleTo(v, 1f, Motion.BOUNCY)
+            }
+            false
+        }
     }
 
     override fun enter(l: FrameLayout) {
         super.enter(l)
-        column?.let { Motion.spring(it, DynamicAnimation.TRANSLATION_X, 0f, Motion.FLUID, start = -act.resources.displayMetrics.widthPixels * 0.6f) }
+        val f = sheet ?: return
+        // The page slides in from the left, then each card floats up into place one after another.
+        Motion.spring(f, DynamicAnimation.TRANSLATION_X, 0f, Motion.FLUID, start = -act.resources.displayMetrics.widthPixels * 0.35f)
+        for ((i, t) in tiles.withIndex()) {
+            t.alpha = 0f; t.translationY = act.dpx(36).toFloat(); t.scaleX = 0.96f; t.scaleY = 0.96f
+            t.postDelayed({
+                Motion.spring(t, DynamicAnimation.TRANSLATION_Y, 0f, Motion.FLUID)
+                Motion.scaleTo(t, 1f, Motion.BOUNCY)
+                Motion.alphaTo(t, 1f, Motion.SNAPPY)
+            }, ((60 + i * 55) * Motion.scale).toLong())
+        }
     }
 
     override fun exit(l: FrameLayout, done: () -> Unit) {
-        column?.animate()?.translationX(-act.resources.displayMetrics.widthPixels.toFloat())?.setDuration((240 * Motion.scale).toLong())?.setInterpolator(EASE_IOS)?.start()
+        sheet?.animate()?.translationX(-act.resources.displayMetrics.widthPixels * 0.6f)?.alpha(0f)?.setDuration((240 * Motion.scale).toLong())?.setInterpolator(EASE_IOS)?.start()
         super.exit(l, done)
     }
 }

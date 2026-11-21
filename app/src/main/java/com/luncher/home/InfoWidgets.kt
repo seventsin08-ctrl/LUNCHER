@@ -281,12 +281,14 @@ object InfoViews {
     private class BarsChart(ctx: Context, val values: List<Int>) : View(ctx) {
         private val p = Paint(Paint.ANTI_ALIAS_FLAG)
         override fun onDraw(c: Canvas) {
-            val v = values.takeLast(7); if (v.isEmpty()) return
+            // Always 7 slim bars (missing days as stubs), so one value never becomes a big blob.
+            val v = (List(7) { 0 } + values).takeLast(7)
             val max = (v.maxOrNull() ?: 1).coerceAtLeast(1)
-            val bw = width / (v.size * 1.6f)
+            val bw = minOf(width / (7 * 1.6f), resources.displayMetrics.density * 8f)
+            val step = (width - bw) / 6f
             for ((i, x) in v.withIndex()) {
-                val h = (height * (x.toFloat() / max)).coerceAtLeast(height * 0.06f)
-                val left = i * bw * 1.6f
+                val h = (height * (x.toFloat() / max)).coerceAtLeast(height * 0.08f)
+                val left = width - bw - (6 - i) * step
                 p.color = if (i == v.lastIndex) 0xFF30D158.toInt() else 0x6630D158
                 c.drawRoundRect(RectF(left, height - h, left + bw, height.toFloat()), bw / 2, bw / 2, p)
             }
