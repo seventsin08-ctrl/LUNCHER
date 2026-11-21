@@ -4,7 +4,7 @@ plugins {
 }
 
 // Update this number for every release; it also controls the installed app name.
-val launcherNumber = "150"
+val launcherNumber = "151"
 
 android {
     namespace = "com.luncher.home"
@@ -14,7 +14,7 @@ android {
         applicationId = "com.applelauncher.home"
         minSdk = 26
         targetSdk = 35
-        versionCode = 155
+        versionCode = 156
         versionName = launcherNumber
         // Only the 64-bit phone chip (all modern phones). The brain engine for the other
         // 3 chip types made the download ~4x bigger.
@@ -79,5 +79,8 @@ dependencies {
     implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
     // Gilbert's offline brain (runs a small language model on the phone).
     implementation("com.google.mediapipe:tasks-genai:0.10.22")
+    // Pocher's scanner: reads text in images and names what's in them (on the phone, via Google Play services).
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-image-labeling:16.0.8")
     testImplementation("junit:junit:4.13.2")
 }

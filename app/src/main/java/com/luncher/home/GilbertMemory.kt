@@ -120,7 +120,7 @@ object GilbertMemory {
         lastSong = ""; lastApp = ""
     }
 
-    /** A short, readable profile ("what Gilbert knows about you"). */
+    /** A short, readable profile ("what Pocher knows about you"). */
     fun profile(ctx: Context): String {
         val sb = StringBuilder()
         GilbertTalk.ownerName(ctx)?.let { sb.append("Name: $it\n") }

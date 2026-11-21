@@ -112,6 +112,10 @@
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Luncher.GilbertChat" />
 
+        <!-- Pocher's scanner models (downloaded by Google Play services). -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr,ica" />
         <!-- Gilbert's brain runs in its own process, so a heavy brain can never close the launcher. -->
         <service
             android:name=".BrainService"

@@ -176,7 +176,7 @@ class Sidebar(
         }
         // Gilbert first: tap to chat with him from anywhere.
         val gil = assistantItem { close(); GilbertLauncher.open(act) }
-        ((gil as? LinearLayout)?.getChildAt(1) as? TextView)?.text = "Gilbert"
+        ((gil as? LinearLayout)?.getChildAt(1) as? TextView)?.text = "Pocher"
         put(gil); items += gil
         for ((i, a) in chosen.withIndex()) {
             if (!twoCols && i == 2 && chosen.size > 3) col.addView(View(act).apply {

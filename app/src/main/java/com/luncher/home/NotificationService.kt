@@ -135,6 +135,8 @@ class NotificationService : NotificationListenerService() {
                 lastChat[sbn.packageName] = chat
                 remember(this, sbn.packageName, chat)
                 saveHistory(this)
+                // Pocher keeps (and scans) photos & attachments from chats.
+                runCatching { PocherFiles.capture(this, sbn.packageName, chat) }
             }
             onPosted?.invoke(sbn.packageName, title, text)
         }

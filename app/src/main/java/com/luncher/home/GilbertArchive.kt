@@ -28,7 +28,8 @@ object GilbertArchive {
         if (!Settings(ctx).gilbertArchive) return
         if (title.isBlank() && text.isBlank()) return
         val now = Date()
-        val line = "${time.format(now)} | ${label(ctx, pkg)} | ${title.replace('\n', ' ').take(80)}: ${text.replace('\n', ' ').take(400)}\n"
+        // "HH:mm | App | Name<TAB>message" (the tab keeps names with ":" in them intact).
+        val line = "${time.format(now)} | ${label(ctx, pkg)} | ${title.replace('\n', ' ').replace('\t', ' ').take(80)}\t${text.replace('\n', ' ').replace('\t', ' ').take(400)}\n"
         runCatching { File(dir(ctx), "${day.format(now)}.txt").appendText(line) }
         if (Math.random() < 0.02) prune(ctx)
     }
@@ -57,6 +58,40 @@ object GilbertArchive {
             if (out.size > 200) break
         }
         return out.sortedByDescending { it.first }.take(limit).map { it.second }
+    }
+
+    /** One archived message. */
+    class Entry(val day: String, val time: String, val app: String, val who: String, val text: String) {
+        val today get() = day == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val stamp get() = if (today) time else "${day.substring(5)} $time"
+    }
+
+    private fun parse(day: String, line: String): Entry? {
+        val p = line.split(" | ", limit = 3)
+        if (p.size < 3) return null
+        val rest = p[2]
+        var who: String; var text: String
+        if ('\t' in rest) { who = rest.substringBefore('\t'); text = rest.substringAfter('\t') }
+        else {
+            // Older lines: "Name: message" — and Instagram's "account: Name: message".
+            who = rest.substringBefore(": "); text = rest.substringAfter(": ", "")
+            if (Regex("^[\\w.]{2,30}$").matches(who) && (who.contains('.') || who.contains('_')) && text.contains(": ")) {
+                who = text.substringBefore(": "); text = text.substringAfter(": ")
+            }
+        }
+        who = Gilbert.cleanTitle(who)
+        if (who.isBlank() && text.isBlank()) return null
+        return Entry(day, p[0].trim(), p[1].trim(), who.trim(), text.trim())
+    }
+
+    /** Everything from the last [days] days, newest first. */
+    fun entries(ctx: Context, days: Int = 2): List<Entry> {
+        val out = ArrayList<Entry>()
+        for (f in days(ctx).take(days)) {
+            val lines = runCatching { f.readLines() }.getOrDefault(emptyList())
+            for (l in lines.asReversed()) parse(f.nameWithoutExtension, l)?.let { out += it }
+        }
+        return out
     }
 
     fun clear(ctx: Context) { dir(ctx).listFiles()?.forEach { it.delete() } }

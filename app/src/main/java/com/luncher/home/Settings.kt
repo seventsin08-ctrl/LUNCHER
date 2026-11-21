@@ -462,8 +462,8 @@ class Settings(ctx: Context) {
         set(v) = put("s_gil_emotions", v)
     /** Gilbert says things now and then (check-ins, reminders, updates). */
     var gilbertTalk: Boolean
-        get() = p.getBoolean("s_gil_talk", true)
-        set(v) = put("s_gil_talk", v)
+        get() = p.getBoolean("s_pocher_talk", false)
+        set(v) = put("s_pocher_talk", v)
     var gilbertTalkMin: Int
         get() = p.getInt("s_gil_talk_min", 12)
         set(v) = put("s_gil_talk_min", v)

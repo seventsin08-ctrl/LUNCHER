@@ -69,7 +69,7 @@ class BrainService : Service() {
         return runCatching {
             llm = LlmInference.createFromOptions(this, LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(path)
-                .setMaxTokens(512)   // smaller = less memory and quicker answers
+                .setMaxTokens(1024)   // room for a digest of many messages
                 .build())
             null
         }.getOrElse { "The brain couldn't start (${it.message?.take(60) ?: "unknown"}). Try the q8 .task file." }

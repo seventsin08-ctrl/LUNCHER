@@ -78,7 +78,7 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
             if (has && !GilbertBrain.loaded) GilbertBrain.lastError?.let { append("\n\n⚠️ $it") }
         }
         val off = has && GilbertBrain.crashed(act)
-        pickBtn.text = if (off) "Try Again" else if (has) "Change Brain" else "Give Gilbert a Brain"
+        pickBtn.text = if (off) "Try Again" else if (has) "Change Brain" else "Give Pocher a Brain"
         ring.level = if (has && GilbertBrain.loaded) 1f else if (has) 0.6f else 0.25f
     }
 

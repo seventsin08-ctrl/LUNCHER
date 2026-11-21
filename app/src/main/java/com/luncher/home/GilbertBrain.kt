@@ -93,7 +93,7 @@ object GilbertBrain {
                 lastError = null
             }
             if (r.isFailure) File(app.filesDir, "gilbert_brain.tmp").delete()
-            main.post { done(r.isSuccess, r.exceptionOrNull()?.message ?: "Gilbert's brain is ready 🧠") }
+            main.post { done(r.isSuccess, r.exceptionOrNull()?.message ?: "Pocher's brain is ready 🧠") }
         }
     }
 
@@ -238,6 +238,28 @@ object GilbertBrain {
         }
     }
 
+    /**
+     * Pocher's digest: turn a list of messages into a few factual bullet points (no chatting).
+     * [done] gets the bullets, or null if the brain couldn't run.
+     */
+    fun digest(ctx: Context, lines: List<String>, done: (String?) -> Unit) {
+        val app = ctx.applicationContext
+        if (!installed(app) || crashed(app) || busy) { done(null); return }
+        busy = true
+        val sys = "You are Pocher, a data assistant. Turn the chat messages into a short factual digest: " +
+            "3 to 5 bullet points, each starting with \"• \", naming who said what and anything to do or remember. " +
+            "No greetings, no advice, no questions."
+        val body = StringBuilder()
+        for (l in lines) { if (body.length + l.length > 1400) break; body.append(l.take(160)).append('\n') }
+        val p = "<|im_start|>system\n$sys<|im_end|>\n<|im_start|>user\nMessages:\n$body<|im_end|>\n<|im_start|>assistant\n"
+        send(app, BrainService.ASK, Bundle().apply { putString("prompt", p) }) { raw, _ ->
+            busy = false
+            var t = raw ?: ""
+            for (stop in listOf("<|im_end|>", "<|im_start|>")) t = t.substringBefore(stop)
+            done(t.replace("\\n", "\n").trim().takeIf { it.isNotBlank() })
+        }
+    }
+
     /** Cut the answer at any chat markers and keep it short. */
     private fun clean(raw: String): String {
         var t = raw
@@ -267,7 +289,7 @@ object GilbertBrain {
         GilbertArchive.search(ctx, q, 3).takeIf { it.isNotEmpty() }?.let { facts.append(" Relevant messages: ${it.joinToString(" / ") { l -> l.take(120) }}.") }
         val name = GilbertTalk.ownerName(ctx) ?: "friend"
         val unread = Gilbert.heldCount()
-        val system = "You are Gilbert, $name's personal assistant and best friend, living in their phone. " +
+        val system = "You are Pocher, $name's personal assistant and best friend, living in their phone. " +
             "Personality: professional, calm and capable like a great executive assistant, but warm and loyal like a best friend. " +
             "Speak clearly in 1-2 short sentences. Be specific and helpful, offer a next step when useful, " +
             "use their name now and then, at most one emoji. Never say \"How can I assist you today\". " +
