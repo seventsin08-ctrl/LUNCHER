@@ -74,13 +74,13 @@ object GilbertPlanner {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     /** Exact when allowed; otherwise within a few minutes (Android's rule). */
-    fun schedule(ctx: Context, it: Item) {
+    fun schedule(ctx: Context, item: Item) {
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return
-        val pi = pi(ctx, it.id, it.text)
+        val pi = pi(ctx, item.id, item.text)
         runCatching {
-            if (android.os.Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, it.at, pi)
-            else am.setWindow(AlarmManager.RTC_WAKEUP, it.at, 60_000L, pi)
-        }.onFailure { am.setWindow(AlarmManager.RTC_WAKEUP, it.at, 60_000L, pi) }
+            if (android.os.Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.at, pi)
+            else am.setWindow(AlarmManager.RTC_WAKEUP, item.at, 60_000L, pi)
+        }.onFailure { runCatching { am.setWindow(AlarmManager.RTC_WAKEUP, item.at, 60_000L, pi) } }
     }
     fun exactAllowed(ctx: Context) = android.os.Build.VERSION.SDK_INT < 31 || ctx.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == true
     fun rescheduleAll(ctx: Context) = reminders(ctx).filter { it.at > System.currentTimeMillis() - 60_000 }.forEach { schedule(ctx, it) }
