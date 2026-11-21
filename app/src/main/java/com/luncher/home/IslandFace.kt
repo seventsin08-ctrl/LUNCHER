@@ -329,12 +329,7 @@ class IslandFace(ctx: Context) : View(ctx) {
         val w = width.toFloat(); val h = height.toFloat()
         if (style == "orb") {
             drawOrb(c, w, h)
-            if (badge > 0) {
-                val br = minOf(w, h) * 0.17f
-                c.drawCircle(w - br, br, br, badgeP)
-                badgeT.textSize = br * 1.15f
-                c.drawText(if (badge > 9) "9+" else "$badge", w - br, br - (badgeT.descent() + badgeT.ascent()) / 2, badgeT)
-            }
+            if (badge > 0) drawBadge(c, w, h)
             val lg = logo
             if (lg != null && logoK > 0.02f) {
                 val ls = minOf(w, h) * 0.45f * logoK
@@ -405,14 +400,7 @@ class IslandFace(ctx: Context) : View(ctx) {
             val size = p.size * d * (0.55f + 0.45f * (depth + (1f - depth) * k)) * (if (p.part != 0) 1f + 0.25f * k else 1f)
             c.drawCircle(px, py, size, paint)
         }
-        if (badge > 0 && logoK < 0.5f) {
-            // Red bubble: how many notifications Gilbert is holding.
-            val br = minOf(w, h) * 0.17f
-            val bx = w - br; val by = br
-            c.drawCircle(bx, by, br, badgeP)
-            badgeT.textSize = br * 1.15f
-            c.drawText(if (badge > 9) "9+" else "$badge", bx, by - (badgeT.descent() + badgeT.ascent()) / 2, badgeT)
-        }
+        if (badge > 0 && logoK < 0.5f) drawBadge(c, w, h)
         val lg = logo
         if (lg != null && logoK > 0.02f) {
             val ls = R * 1.15f * logoK
@@ -422,6 +410,24 @@ class IslandFace(ctx: Context) : View(ctx) {
             c.drawBitmap(lg, null, r, Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (255 * logoK).toInt().coerceIn(0, 255) })
             c.restore()
         }
+    }
+
+    /**
+     * Red bubble: how many notifications Gilbert is holding. It sits fully INSIDE his round face
+     * (top-right), because the island clips him to a circle and a corner badge got cut off.
+     */
+    private val badgeRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.BLACK }
+    private fun drawBadge(c: Canvas, w: Float, h: Float) {
+        val R = minOf(w, h) / 2f
+        val br = R * 0.36f
+        val dist = (R - br - R * 0.04f).coerceAtLeast(0f)
+        val bx = w / 2f + dist * 0.7071f; val by = h / 2f - dist * 0.7071f
+        badgeRing.strokeWidth = maxOf(1f, br * 0.18f)
+        c.drawCircle(bx, by, br, badgeP)
+        c.drawCircle(bx, by, br, badgeRing)
+        val label = if (badge > 9) "9+" else "$badge"
+        badgeT.textSize = br * (if (label.length > 1) 0.95f else 1.2f)
+        c.drawText(label, bx, by - (badgeT.descent() + badgeT.ascent()) / 2, badgeT)
     }
 
     private fun blend(a: Int, b: Int, t: Float): Int {
