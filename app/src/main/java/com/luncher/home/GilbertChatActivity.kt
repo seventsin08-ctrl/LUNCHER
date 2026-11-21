@@ -31,6 +31,8 @@ class GilbertChatActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         picking = false
+        if (requestCode == GilbertConsole.REQ_MIC && grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            android.widget.Toast.makeText(this, "Microphone allowed — tap 🎤 again", android.widget.Toast.LENGTH_SHORT).show()
         if (requestCode == GilbertConsole.REQ_PHOTOS && PhotoWatcher.allowed(this)) {
             PhotoWatcher.register(this)
             android.widget.Toast.makeText(this, "Gilbert will pick up photos saved from your chats", android.widget.Toast.LENGTH_SHORT).show()

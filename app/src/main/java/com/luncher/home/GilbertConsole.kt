@@ -130,6 +130,30 @@ object GilbertConsole {
         }
         col.addView(ticker, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
 
+        // ---- Command bar: tell him what to do (type or 🎤). Every action waits for your Allow.
+        val cmd = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0) }
+        val cin = EditText(a).apply {
+            hint = "Tell Gilbert what to do…"; setHintTextColor(0x66FFFFFF); setTextColor(Color.WHITE); textSize = 13.5f; isSingleLine = true
+            typeface = mono; imeOptions = EditorInfo.IME_ACTION_GO
+            background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(0x14FFFFFF); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 110)) }
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        cmdInput = cin
+        watchTyping(cin)
+        cin.setOnEditorActionListener { _, _, _ -> val t = cin.text.toString(); cin.setText(""); command(t); true }
+        cmd.addView(cin, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        cmd.addView(TextView(a).apply {
+            text = "🎤"; textSize = 15f; gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Hud.a(Hud.CYAN, 30)); setStroke(maxOf(1, dp(1)), Hud.CYAN) }
+            setOnClickListener { listen() }
+        }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(8) })
+        cmd.addView(TextView(a).apply {
+            text = "↵"; textSize = 16f; gravity = Gravity.CENTER; setTextColor(Color.BLACK)
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Hud.CYAN) }
+            setOnClickListener { val t = cin.text.toString(); cin.setText(""); command(t) }
+        }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(6) })
+        col.addView(cmd)
+
         wins = listOf(
             Win("00", "MIND", "MIND") { buildMind(it) },
             Win("01", "NOW", "NOW") { buildNow(it, s) },
@@ -234,6 +258,76 @@ object GilbertConsole {
     }
 
     private var booting = false
+    private var cmdInput: EditText? = null
+    const val REQ_MIC = 5143
+
+    /** You told him to do something: understand it, then ask for permission (Rule 3). */
+    fun command(text: String) {
+        val a = act ?: return
+        val t = text.trim()
+        if (t.isEmpty()) return
+        (a.getSystemService(android.view.inputmethod.InputMethodManager::class.java))?.hideSoftInputFromWindow(cmdInput?.windowToken, 0)
+        type("> ${t.uppercase()}")
+        GilbertMind.feel(a, "curious", 0.05f)
+        // Moving around his own console needs no permission.
+        val low = t.lowercase()
+        wins.indexOfFirst { w -> low.matches(Regex("(?:go to |show |open )(?:the )?(?:${w.tab.lowercase()}|${w.prog.lowercase()}|win ${w.num})(?: window)?")) }
+            .takeIf { it >= 0 }?.let { select(it); return }
+        if (low == "help" || low.contains("what can you do")) { select(7); GilbertNarrator.say(a, "Here's what I can do. Everything waits for your permission."); return }
+        val action = runCatching { GilbertControl.parse(a, t) }.getOrNull()
+        if (action == null) {
+            face?.react("curious", 1500)
+            GilbertNarrator.say(a, listOf("I didn't catch that. Try: turn off the dock, open Spotify, or flashlight on.",
+                "Not sure what you mean, ${GilbertNarrator.title(a)}. Say “help” to see what I can do.").random())
+            return
+        }
+        if (!action.needsOk) { GilbertNarrator.say(a, action.title + "."); type(action.title.uppercase()); return }
+        askPermission(action)
+    }
+
+    /** A permission card at the top of the window: nothing happens until you tap Allow. */
+    private fun askPermission(action: GilbertControl.Action) {
+        val a = act ?: return
+        val body = content ?: return
+        val card = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Hud.a(Hud.CYAN, 26)); setStroke(maxOf(1, dp(2)), Hud.CYAN) }
+        }
+        card.addView(TextView(a).apply { text = "PERMISSION REQUEST"; textSize = 10f; typeface = monoBold; letterSpacing = 0.1f; setTextColor(Hud.CYAN) })
+        card.addView(TextView(a).apply { text = action.title; textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; setPadding(0, dp(4), 0, 0) })
+        if (action.detail.isNotEmpty()) card.addView(TextView(a).apply { text = action.detail; textSize = 12.5f; setTextColor(0xB3FFFFFF.toInt()) })
+        val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        card.addView(row)
+        pill(row, "Allow") {
+            val r = runCatching { action.run(a) }.getOrElse { "That didn't work: ${it.message?.take(60)}" }
+            GilbertMind.log(a, "${action.title} — you allowed it")
+            body.removeView(card)
+            if (r.isNotEmpty()) { GilbertNarrator.say(a, r); type(r.uppercase()) }
+            face?.react("happy", 1200)
+        }
+        row.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
+        pill(row, "Cancel") { body.removeView(card); type("CANCELLED"); GilbertNarrator.say(a, listOf("As you wish.", "Cancelled.", "Understood.").random()) }
+        body.addView(card, 0, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        (body.parent as? ScrollView)?.smoothScrollTo(0, 0)
+        card.alpha = 0f; card.animate().alpha(1f).setDuration(200).start()
+        rings?.ping()
+        GilbertNarrator.say(a, "${action.title}. Shall I?")
+    }
+
+    /** 🎤: say a command. */
+    private fun listen() {
+        val a = act ?: return
+        if (a.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            GilbertChatActivity.picking = true
+            runCatching { a.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC) }
+            return
+        }
+        GilbertNarrator.stop()
+        face?.react("listening", 8000); type("LISTENING…")
+        GilbertVoice.listen(a, { partial -> type("> ${partial.uppercase()}") }) { heard ->
+            if (heard.isNullOrBlank()) { type("DIDN'T CATCH THAT"); face?.react("curious", 1000) } else command(heard)
+        }
+    }
     private var lastTabTap = 0L
     private var motion: android.hardware.SensorEventListener? = null
 
@@ -1341,6 +1435,11 @@ object GilbertConsole {
             "Files: ${files.size} (${files.count { it.img != null }} images scanned)\n" +
             "Notes: ${GilbertMemory.facts(a).size}\n" +
             "Folder: Android/data/…/files/Gilbert Archive", 12f, 0xCCFFFFFF.toInt()).typeface = mono
+
+        section(p, "WHAT I CAN CONTROL · SAY OR TYPE IT")
+        val hb = box(p, 2)
+        GilbertControl.HELP.forEach { h -> hb.addView(TextView(a).apply { text = "› $h"; textSize = 12f; setTextColor(0xCCFFFFFF.toInt()); setPadding(0, dp(3), 0, dp(3)) }) }
+        hb.addView(TextView(a).apply { text = "Every action shows a permission card first. Nothing happens until you tap Allow."; textSize = 11f; setTextColor(Hud.a(Hud.SOFT, 200)); setPadding(0, dp(6), 0, 0) })
 
         section(p, "VOICE")
         GilbertNarrator.start(a)
