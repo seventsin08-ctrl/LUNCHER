@@ -1454,7 +1454,8 @@ object GilbertConsole {
         wb.addView(TextView(a).apply {
             text = when {
                 !on -> "OFF — turn it on and say “System online” to wake me from anywhere (keeps a small listening notification)."
-                VoiceService.running -> "LISTENING ✓ — say “System online” anywhere. Add a command: “System online, open Spotify”."
+                VoiceService.running -> "LISTENING ✓ — say “System online” anywhere. Add a command: “System online, open Spotify”." +
+                    (VoiceService.lastHeard?.let { "\nLast heard: “$it”" } ?: "\nLast heard: nothing yet — close me, then say it.")
                 VoiceService.problem != null -> "NOT LISTENING — ${VoiceService.problem}"
                 else -> "STARTING… (open this window again in a moment)"
             }

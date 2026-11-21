@@ -62,6 +62,19 @@ class VoiceService : Service() {
         @Volatile var running = false
         /** Why the wake word isn't listening (shown in Gilbert's 07 SYSTEM), or null. */
         @Volatile var problem: String? = null
+        /** The last thing the wake-word listener heard (shown in 07 SYSTEM to help set it up). */
+        @Volatile var lastHeard: String? = null
+
+        /** "System online" — forgiving of how the recogniser spells it (sistem on line, systems online…). */
+        private val WAKE_RE = Regex("(?:s[iy]st[ae]ms?'?s?|sister|cistern)\\s*(?:is\\s*)?(?:on\\s*-?\\s*l[iy]ne?|online|onlin|on lie|on lion|on time)")
+        fun wakeIn(t: String): Pair<Boolean, String?> {
+            val m = WAKE_RE.find(t)
+            if (m != null) return true to t.substring(m.range.last + 1).trim(' ', ',', '.')
+            // Heard only the end ("online") right after it started listening — still count it.
+            val w = t.trim().split(Regex("\\s+"))
+            if (w.size <= 4 && (w.firstOrNull() == "online" || t.startsWith("on line"))) return true to t.substringAfter("line").trim(' ', ',', '.')
+            return false to null
+        }
 
         fun hasMic(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
@@ -117,9 +130,14 @@ class VoiceService : Service() {
     // ------------------------------------------------------------------ 1. hear someone talking
 
     /** Cheap loudness check on the mic; when it sounds like speech, hand over to the recogniser. */
+    /** Phones with an on-device recogniser listen continuously (silent, nothing missed). */
+    private val continuous by lazy { Build.VERSION.SDK_INT >= 31 && runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(this) }.getOrDefault(false) }
+    private var errors = 0
+
     private fun startWatching() {
         if (listening || busy) return
         if (!hasMic(this)) { stopSelf(); return }
+        if (continuous) { if (!GilbertConsole.isOpen) recognize(command = false) else main.postDelayed({ startWatching() }, 1500); return }
         val rate = 16000
         val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val rec = runCatching {
@@ -143,9 +161,9 @@ class VoiceService : Service() {
                 val rms = sqrt(sum / n)
                 // Follow the room's background noise so a quiet room and a busy one both work.
                 noise = noise * 0.97 + minOf(rms, noise * 1.5) * 0.03
-                if (rms > maxOf(900.0, noise * 3.2)) loud++ else loud = maxOf(0, loud - 1)
+                if (rms > maxOf(450.0, noise * 2.4)) loud++ else loud = maxOf(0, loud - 1)
                 if (GilbertConsole.isOpen) loud = 0   // his console is open: you talk to him there
-                if (loud >= 3) {
+                if (loud >= 2) {
                     listening = false
                     main.post { stopWatching(); recognize(command = false) }
                 }
@@ -178,7 +196,14 @@ class VoiceService : Service() {
                 val t = partial?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
                 if (command) overlay?.heard(t)
             }
-            override fun onError(error: Int) = done(emptyList(), command)
+            override fun onError(error: Int) {
+                // Busy / client errors: rebuild the recogniser and back off a little.
+                if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT || error == 11 /* server disconnected */) {
+                    runCatching { recognizer?.destroy() }; recognizer = null; errors++
+                }
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) problem = "Speech recognition was refused permission."
+                done(emptyList(), command)
+            }
             override fun onResults(results: Bundle?) =
                 done(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty(), command)
         })
@@ -188,16 +213,25 @@ class VoiceService : Service() {
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
         runCatching { r.startListening(i) }.onFailure { done(emptyList(), command) }
     }
 
     private fun done(results: List<String>, command: Boolean) {
         val all = results.map { it.lowercase() }
         if (!command) {
-            val woke = all.any { t -> WAKE.any { t.contains(it) } }
-            if (!woke) { busy = false; main.postDelayed({ startWatching() }, 250); return }
-            // Said it all in one go? "voice activation open messenger"
-            val rest = all.firstNotNullOfOrNull { t -> WAKE.firstOrNull { t.contains(it) }?.let { w -> t.substringAfter(w).trim() } }
+            all.firstOrNull()?.let { lastHeard = it; errors = 0 }
+            val hit = all.map { wakeIn(it) }.firstOrNull { it.first }
+            if (hit == null) {
+                busy = false
+                val wait = if (errors > 3) 4000L else if (continuous) 150L else 250L
+                main.postDelayed({ if (running) startWatching() }, wait); return
+            }
+            // Said it all in one go? "System online, open Messenger"
+            val rest = hit.second
+            SoundFX.play(this, "success")
+            main.postDelayed({ if (!GilbertConsole.isOpen) wakeFallback() }, 2500)
             // Hand over to the assistant screen (timers, messages, calls, notes, report…),
             // then go back to waiting for the wake word once it closes.
             // Wake Gilbert: his console opens (and does what you said after the phrase, if anything).
@@ -206,6 +240,19 @@ class VoiceService : Service() {
             return
         }
         handle(all)
+    }
+
+    /** Android wouldn't let the console open from the background: offer a tap instead. */
+    private fun wakeFallback() {
+        runCatching {
+            val nm = getSystemService(NotificationManager::class.java)
+            if (nm.getNotificationChannel("gil_wake") == null)
+                nm.createNotificationChannel(NotificationChannel("gil_wake", "Gilbert wake", NotificationManager.IMPORTANCE_HIGH))
+            val pi = PendingIntent.getActivity(this, 2, Intent(this, GilbertChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)
+            nm.notify(7303, Notification.Builder(this, "gil_wake").setSmallIcon(R.drawable.ic_cc_mic)
+                .setContentTitle("System online").setContentText("Tap to open Gilbert").setContentIntent(pi).setAutoCancel(true)
+                .setTimeoutAfter(15_000).build())
+        }
     }
 
     private fun waitForAssistant() {
