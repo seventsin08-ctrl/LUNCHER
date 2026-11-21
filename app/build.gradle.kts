@@ -4,7 +4,7 @@ plugins {
 }
 
 // Update this number for every release; it also controls the installed app name.
-val launcherNumber = "147"
+val launcherNumber = "148"
 
 android {
     namespace = "com.luncher.home"
@@ -14,8 +14,11 @@ android {
         applicationId = "com.applelauncher.home"
         minSdk = 26
         targetSdk = 35
-        versionCode = 152
+        versionCode = 153
         versionName = launcherNumber
+        // Only the 64-bit phone chip (all modern phones). The brain engine for the other
+        // 3 chip types made the download ~4x bigger.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     // One permanent key for every build, so each new version installs over the last one.
@@ -49,6 +52,10 @@ android {
             signingConfig = signingConfigs.getByName("launcher")
             resValue("string", "app_name", "Apple Launcher $launcherNumber")
         }
+    }
+
+    packaging {
+        resources.excludes += listOf("**/*.proto", "com/google/auto/**", "META-INF/*.version", "META-INF/LICENSE*", "META-INF/NOTICE*", "**/*.vm")
     }
 
     lint {
