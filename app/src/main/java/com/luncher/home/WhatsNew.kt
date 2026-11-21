@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        171 to listOf("⬆ Gilbert's brain upgraded from Gilbert_Brain: his new persona (calm, precise, dry wit, English/Tagalog/Taglish, never claims what he didn't do), task list (“add task: …”, “show tasks”, “complete task 2”), notes (“remember: …”, “show notes”)", "⬆ Ask him anything that isn't a command (“explain a while loop in Taglish”): his brain answers, the full answer shows on screen and he speaks the first sentences; he remembers the last two turns", "⬆ YOUR TASKS in 00 MIND with ✓ to complete; “Hey Gilbert” also wakes him"),
         170 to listOf("🔧 Wake word: listens continuously on phones with on-device speech (no more missing the start of “System online”), always in English, forgiving of how it's spelled, a chime when he hears it, a “Tap to open Gilbert” alert if Android blocks him from opening, and 07 SYSTEM shows the last thing he heard"),
         169 to listOf("🔧 Wake word fixed: the listening notification is now visible, turning it on also asks for notification permission, and 07 SYSTEM shows LISTENING ✓ or exactly why it isn't listening"),
         168 to listOf("⬆ Wake word “System online”: say it anywhere and Gilbert opens — or say it with a command (“System online, open Spotify”) and he just does it. Turn it on in 07 SYSTEM", "🔧 What you ask him to do now happens right away — no confirmation card. Only his own suggestions still ask for Allow"),

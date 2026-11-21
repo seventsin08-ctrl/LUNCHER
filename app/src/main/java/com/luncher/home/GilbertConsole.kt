@@ -280,19 +280,64 @@ object GilbertConsole {
         wins.indexOfFirst { w -> low.matches(Regex("(?:go to |show |open )(?:the )?(?:${w.tab.lowercase()}|${w.prog.lowercase()}|win ${w.num})(?: window)?")) }
             .takeIf { it >= 0 }?.let { select(it); return }
         if (low == "help" || low.contains("what can you do")) { select(7); GilbertNarrator.say(a, "Here's what I can do. Everything waits for your permission."); return }
+        if (Regex("^(gilbert|hey gilbert|system online)[,.!]?$").matches(low)) { GilbertNarrator.say(a, "Listening, John."); return }
         val action = runCatching { GilbertControl.parse(a, t) }.getOrNull()
-        if (action == null) {
-            face?.react("curious", 1500)
-            GilbertNarrator.say(a, listOf("I didn't catch that. Try: turn off the dock, open Spotify, or flashlight on.",
-                "Not sure what you mean, ${GilbertNarrator.title(a)}. Say “help” to see what I can do.").random())
-            return
-        }
+        if (action == null) { think(t); return }
         if (!action.needsOk) { GilbertNarrator.say(a, action.title + "."); type(action.title.uppercase()); return }
         // You asked for it, so he just does it (his own suggestions still wait for Allow).
         val r = runCatching { action.run(a) }.getOrElse { "That didn't work: ${it.message?.take(60)}" }
         GilbertMind.log(a, "${action.title} — you asked")
-        if (r.isNotEmpty()) { GilbertNarrator.say(a, r); type(r.uppercase()) }
+        if (r.contains('\n') || r.length > 110) { reply(action.title, r); GilbertNarrator.say(a, action.title + ". " + GilbertBrain.spoken(r.lines().first())) }
+        else if (r.isNotEmpty()) { GilbertNarrator.say(a, r); type(r.uppercase()) }
         face?.react("happy", 1200); rings?.ping()
+    }
+
+    private val talk = ArrayList<Pair<Boolean, String>>()   // the last turns with his brain
+
+    /** Not a command: ask his brain (persona from Gilbert_Brain), show the answer, speak the start. */
+    private fun think(q: String) {
+        val a = act ?: return
+        if (!GilbertBrain.installed(a)) {
+            GilbertNarrator.say(a, "Local chat is unavailable — I need a brain for that. Add one in System. Tasks, notes, timers and controls are ready.")
+            type("NO BRAIN · ADD ONE IN 07 SYSTEM"); return
+        }
+        if (GilbertBrain.busy) { GilbertNarrator.say(a, "One moment, still thinking."); return }
+        face?.react("thinking", 60_000); type("THINKING…")
+        GilbertMind.feel(a, "curious", 0.08f)
+        GilbertBrain.ask(a, talk.toList(), q) { ans ->
+            if (act == null) return@ask
+            face?.react("happy", 800)
+            if (ans == null) {
+                GilbertNarrator.say(a, GilbertBrain.lastError ?: "My brain didn't answer that time. Try again in a moment.")
+                type("NO ANSWER"); return@ask
+            }
+            talk += true to q; talk += false to ans
+            while (talk.size > 4) talk.removeAt(0)
+            reply(q, ans)
+            GilbertNarrator.say(a, GilbertBrain.spoken(ans))
+        }
+    }
+
+    /** A reply card at the top of the window (long answers, lists, code). */
+    private fun reply(title: String, text: String) {
+        val a = act ?: return
+        val body = content ?: return
+        val card = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Hud.a(Hud.CYAN, 18)); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 160)) }
+        }
+        val head = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(TextView(a).apply { text = "GILBERT · ${title.uppercase().take(40)}"; textSize = 10f; typeface = monoBold; letterSpacing = 0.08f; setTextColor(Hud.CYAN); maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+            LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        head.addView(TextView(a).apply { text = "✕"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); setPadding(dp(10), 0, 0, 0); setOnClickListener { body.removeView(card) } })
+        card.addView(head)
+        card.addView(TextView(a).apply {
+            this.text = text; textSize = 14f; setTextColor(Color.WHITE); setLineSpacing(0f, 1.15f); setTextIsSelectable(true)
+            if (text.contains("```") || text.contains("    ")) typeface = mono
+            setPadding(0, dp(6), 0, 0) })
+        body.addView(card, 0, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        (body.parent as? ScrollView)?.smoothScrollTo(0, 0)
+        card.alpha = 0f; card.animate().alpha(1f).setDuration(200).start()
     }
 
     /** A permission card at the top of the window: nothing happens until you tap Allow. */
@@ -717,6 +762,24 @@ object GilbertConsole {
             r.addView(Gilbert.SegBar(a, v, if (e == GilbertMind.dominant(a)) Hud.CYAN else Hud.a(Hud.SOFT, 150)), LinearLayout.LayoutParams(0, dp(12), 1f))
             st.addView(r)
         }
+        // ---- your task list (add / complete by voice or text: “add task: …”, “complete task 2”)
+        val tasks = GilbertTasks.open(a)
+        if (tasks.isNotEmpty()) {
+            section(p, "YOUR TASKS · ${tasks.size}")
+            for (t in tasks.take(10)) {
+                val b = box(p, 4)
+                val r = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                r.addView(TextView(a).apply { text = "${t.id}."; textSize = 13f; typeface = monoBold; setTextColor(Hud.CYAN); setPadding(0, 0, dp(8), 0) })
+                r.addView(TextView(a).apply { text = t.title; textSize = 14f; setTextColor(Color.WHITE) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                r.addView(TextView(a).apply {
+                    text = "✓"; textSize = 14f; setTextColor(Color.BLACK); gravity = Gravity.CENTER
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Hud.CYAN) }
+                    setOnClickListener { GilbertTasks.complete(a, t.id); SoundFX.play(a, "success"); GilbertNarrator.say(a, "Task ${t.id} complete."); select(0, animate = false, scanOnly = true) }
+                }, LinearLayout.LayoutParams(dp(28), dp(28)))
+                b.addView(r)
+            }
+        }
+
         // ---- what's on his mind, by kind
         val items = mindItems()
         val labels = linkedMapOf("PRIORITY" to "PRIORITIES", "TASK" to "TASKS", "PROBLEM" to "PROBLEMS", "IDEA" to "IDEAS", "CHAT" to "CHATS", "UPDATE" to "UPDATES")

@@ -89,7 +89,9 @@ object GilbertControl {
         "Open <app> · open launcher settings · open wifi / bluetooth / battery / display / sound settings",
         "Flashlight on/off · volume up/down/mute · brightness 50% · play / pause / next / previous",
         "Do not disturb on/off · lock the phone · set alarm 6:30 · timer 10 minutes · call <contact> · search <anything>",
-        "Go to <window> · remember <note>")
+        "Add task: <thing> · show tasks · complete task 2 · remember: <note> · show notes",
+        "Anything else — “explain a while loop in Taglish” — goes to his brain (needs a brain in 07 SYSTEM)",
+        "Go to <window>")
 
     // ------------------------------------------------------------------ understanding you
     fun parse(ctx: Context, input: String): Action? {
@@ -98,6 +100,24 @@ object GilbertControl {
         val s = Settings(ctx)
         val onWords = Regex("^(turn on|switch on|enable|activate|show|start|open up|bring back)\\b")
         val offWords = Regex("^(turn off|switch off|disable|deactivate|hide|stop|remove|kill)\\b")
+
+        // ---- tasks & notes (from his desktop brain)
+        Regex("^(?:add|new|create)(?: a)? task\\s*[: ]\\s*(\\S.*)$").find(q)?.let { m ->
+            val title = input.trim().let { raw -> Regex("task\\s*[: ]\\s*", RegexOption.IGNORE_CASE).split(raw, 2).getOrNull(1) ?: m.groupValues[1] }
+            return Action("Add task", title) { a -> "Task ${GilbertTasks.add(a, title)} added." }
+        }
+        if (q in setOf("show tasks", "list tasks", "my tasks", "tasks", "what are my tasks")) return Action("Tasks", "", needsOk = true) { a ->
+            val t = GilbertTasks.open(a)
+            if (t.isEmpty()) "No open tasks." else t.joinToString("\n") { "${it.id}. ${it.title}" }
+        }
+        Regex("^(?:complete|finish|done|tick off)(?: with)? task (\\d{1,6})[.!]?$").find(q)?.let { m ->
+            val id = m.groupValues[1].toInt()
+            return Action("Complete task $id", "") { a -> if (GilbertTasks.complete(a, id)) "Task $id complete." else "I couldn't find that open task." }
+        }
+        if (q in setOf("show notes", "list notes", "my notes", "notes")) return Action("Notes", "") { a ->
+            val n = GilbertMemory.facts(a).take(10)
+            if (n.isEmpty()) "No saved notes." else n.mapIndexed { i, x -> "${i + 1}. $x" }.joinToString("\n")
+        }
 
         // ---- phone functions first (specific words)
         if (Regex("flash ?light|torch").containsMatchIn(q)) {
@@ -178,8 +198,8 @@ object GilbertControl {
                 runCatching { a.startActivity(Intent(Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, m.groupValues[1])) }; "Searching."
             }
         }
-        Regex("^(?:remember|note|take a note)(?: that)? (.+)$").find(q)?.let { m ->
-            return Action("Save a note", m.groupValues[1]) { a -> GilbertMemory.addFact(a, m.groupValues[1]); "Noted." }
+        Regex("^(?:remember|save note|note|take a note)(?: that)?\\s*[: ]\\s*(\\S.+)$").find(q)?.let { m ->
+            return Action("Save a note", m.groupValues[1]) { a -> GilbertMemory.addFact(a, m.groupValues[1]); "Saved, ${GilbertNarrator.ownerName(a) ?: "John"}." }
         }
         // Settings pages
         val pages = linkedMapOf("wi-?fi|internet" to android.provider.Settings.ACTION_WIFI_SETTINGS, "bluetooth" to android.provider.Settings.ACTION_BLUETOOTH_SETTINGS,

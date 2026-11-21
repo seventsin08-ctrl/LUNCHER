@@ -267,48 +267,50 @@ object GilbertBrain {
         return "About them: " + t.replace(Regex("[#*_>-]+"), " ").replace(Regex("\\s+"), " ").trim().take(max) + ". "
     }
 
-    /** Cut the answer at any chat markers and keep it short. */
+    /** Gilbert's persona (from Gilbert_Brain/persona.txt). */
+    const val PERSONA = "You are Gilbert, John's private voice assistant for school, coding, and client work. " +
+        "Speak with calm precision and occasional understated dry wit. Lead with the result or next action. " +
+        "Default to one to three short spoken sentences. Use English, Tagalog, or Taglish to match John. " +
+        "Address him as John occasionally. If uncertain, say what is missing and ask one focused question. " +
+        "Use humor sparingly and skip it when the stakes are serious. " +
+        "Never claim to have saved, sent, scheduled, or completed an action unless the app confirms success. " +
+        "Never invent client details, deadlines, grades, or test results. " +
+        "For long code or plans, give a short spoken summary and put the details in text."
+
+    /** Cut the answer at any chat markers (keeps the full text — the console shows it; he speaks the start). */
     private fun clean(raw: String): String {
         var t = raw
-        for (stop in listOf("<|im_end|>", "<|im_start|>", "<end_of_turn>", "<start_of_turn>", "\nUser:", "\nuser", "\nGilbert:"))
+        for (stop in listOf("<|im_end|>", "<|im_start|>", "<end_of_turn>", "<start_of_turn>", "\nUser:", "\nuser\n", "\nGilbert:"))
             t = t.substringBefore(stop)
-        // Some answers come with a literal "\\n" — turn it into a space.
-        t = t.replace("\\n", " ").replace("\\t", " ")
-        t = t.trim().removePrefix("Gilbert:").removePrefix("assistant").trim()
-        // At most 3 sentences.
-        val parts = t.split(Regex("(?<=[.!?])\\s+"))
-        return parts.take(3).joinToString(" ").trim()
+        t = t.replace("\\n", "\n").replace("\\t", " ")
+        return t.trim().removePrefix("Gilbert:").removePrefix("assistant").trim().take(1600)
     }
 
+    /** The first one to three sentences (what he says out loud). */
+    fun spoken(text: String): String {
+        val first = text.substringBefore("```").replace(Regex("\\s+"), " ").trim()
+        return first.split(Regex("(?<=[.!?])\\s+")).take(3).joinToString(" ").take(300)
+    }
 
     /**
-     * A SHORT prompt in the chat format the model was trained on (long prompts made it slow and
-     * made it repeat the facts back instead of answering).
+     * A short prompt in the chat format the model was trained on: his persona, a little context
+     * (name, a few notes, open tasks, time, relevant messages), the last two turns, your message.
      */
     private fun prompt(ctx: Context, history: List<Pair<Boolean, String>>, q: String): String {
         val facts = StringBuilder()
-        GilbertTalk.ownerName(ctx)?.let { facts.append("Their name: $it. ") }
-        GilbertMemory.facts(ctx).take(6).takeIf { it.isNotEmpty() }?.let { facts.append("About them: ${it.joinToString("; ")}. ") }
-        GilbertMemory.topArtists(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Loves: ${it.joinToString { a -> a.first }}. ") }
-        GilbertMemory.topPeople(ctx, 3).takeIf { it.isNotEmpty() }?.let { facts.append("Chats with: ${it.joinToString { p -> p.first }}. ") }
-        facts.append("Time: ${java.text.SimpleDateFormat("EEE h:mm a", java.util.Locale.getDefault()).format(java.util.Date())}.")
-        // What came in that's relevant to the question (from his archive).
-        GilbertArchive.search(ctx, q, 3).takeIf { it.isNotEmpty() }?.let { facts.append(" Relevant messages: ${it.joinToString(" / ") { l -> l.take(120) }}.") }
-        val name = GilbertTalk.ownerName(ctx) ?: "friend"
-        val unread = Gilbert.heldCount()
-        val system = "You are Gilbert, $name's personal AI assistant, inspired by JARVIS: calm, precise, observant, with subtle dry humour. " +
-            "Give the most useful answer first in 1-2 short sentences. Call them $name, occasionally sir. Follow their language (English, Filipino or Taglish). " +
-            "Never invent facts, deadlines or prices. " + profile(ctx, 500) +
-            "Facts: $facts" + (if (unread > 0) " They have $unread waiting notifications." else "")
+        GilbertNarrator.ownerName(ctx)?.let { facts.append("His name: $it. ") }
+        GilbertMemory.facts(ctx).take(4).takeIf { it.isNotEmpty() }?.let { facts.append("Notes: ${it.joinToString("; ") { n -> n.take(80) }}. ") }
+        GilbertTasks.open(ctx).take(4).takeIf { it.isNotEmpty() }?.let { facts.append("Open tasks: ${it.joinToString("; ") { t -> t.title.take(60) }}. ") }
+        facts.append("Now: ${java.text.SimpleDateFormat("EEE MMM d, h:mm a", java.util.Locale.getDefault()).format(java.util.Date())} (Asia/Manila).")
+        GilbertArchive.search(ctx, q, 2).takeIf { it.isNotEmpty() }?.let { facts.append(" Related messages: ${it.joinToString(" / ") { l -> l.take(100) }}.") }
+        val system = PERSONA + " " + profile(ctx, 400) + "Context: " + facts
         val sb = StringBuilder()
         sb.append("<|im_start|>system\n").append(system).append("<|im_end|>\n")
-        // One example so the small brain gets the tone right.
-        sb.append("<|im_start|>user\nhey<|im_end|>\n<|im_start|>assistant\n")
-            .append("Hey $name, good to see you. Everything's under control — want a quick rundown of your messages? 🙂<|im_end|>\n")
+        // Two recent turns (like the desktop brain).
         for ((user, text) in history.takeLast(4)) {
-            sb.append(if (user) "<|im_start|>user\n" else "<|im_start|>assistant\n").append(text.take(160)).append("<|im_end|>\n")
+            sb.append(if (user) "<|im_start|>user\n" else "<|im_start|>assistant\n").append(text.take(200)).append("<|im_end|>\n")
         }
-        sb.append("<|im_start|>user\n").append(q.take(200)).append("<|im_end|>\n<|im_start|>assistant\n")
+        sb.append("<|im_start|>user\n").append(q.take(400)).append("<|im_end|>\n<|im_start|>assistant\n")
         return sb.toString()
     }
 }
