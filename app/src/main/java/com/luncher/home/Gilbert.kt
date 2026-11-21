@@ -87,8 +87,16 @@ object Gilbert {
     class Note(val pkg: String, val title: String, val text: String, val time: Long, val mention: Boolean)
 
     /** Gilbert writes down every message / notification (latest 80), and spots mentions of you. */
-    fun note(ctx: Context, pkg: String, title: String, text: String) {
-        GilbertMemory.person(ctx, title)
+    /** "jxhn.mrqs: Jia rxse." → "Jia rxse" (Instagram & co. put your account name in front). */
+    fun cleanTitle(t: String): String {
+        var x = t.trim()
+        Regex("^[\\w.]{2,30}:\\s+(.+)$").find(x)?.let { x = it.groupValues[1] }
+        return x.trim().trimEnd('.').trim().ifEmpty { t.trim() }
+    }
+
+    fun note(ctx: Context, pkg: String, title0: String, text: String) {
+        val title = cleanTitle(title0)
+        if (!GilbertTalk.isMe(ctx, title)) GilbertMemory.person(ctx, title)
         GilbertArchive.save(ctx, pkg, title, text)
         val name = GilbertTalk.ownerName(ctx)?.lowercase()
         val low = (title + " " + text).lowercase()
@@ -106,7 +114,7 @@ object Gilbert {
         val arr = runCatching { org.json.JSONArray(ctx.getSharedPreferences("luncher", Context.MODE_PRIVATE).getString("gil_notes", "[]")) }
             .getOrDefault(org.json.JSONArray())
         return (0 until arr.length()).map { arr.getJSONObject(it) }.map {
-            Note(it.optString("p"), it.optString("t"), it.optString("x"), it.optLong("w"), it.optBoolean("m"))
+            Note(it.optString("p"), cleanTitle(it.optString("t")), it.optString("x"), it.optLong("w"), it.optBoolean("m"))
         }.reversed()
     }
 

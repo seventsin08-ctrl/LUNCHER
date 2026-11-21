@@ -111,7 +111,9 @@ object GilbertMemory {
     fun topSongs(ctx: Context, n: Int = 5) = top(obj(ctx, "songs"), n)
     fun topArtists(ctx: Context, n: Int = 5) = top(obj(ctx, "artists"), n).filter { it.first.isNotBlank() }
     fun topApps(ctx: Context, n: Int = 5) = top(obj(ctx, "apps"), n)
-    fun topPeople(ctx: Context, n: Int = 5) = top(obj(ctx, "people"), n)
+    fun topPeople(ctx: Context, n: Int = 5) = top(obj(ctx, "people"), n + 3)
+        .map { Gilbert.cleanTitle(it.first) to it.second }.filterNot { GilbertTalk.isMe(ctx, it.first) }
+        .distinctBy { it.first }.take(n)
 
     fun forget(ctx: Context) {
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().clear().apply()
@@ -160,7 +162,7 @@ object GilbertMemory {
         val dayStart = java.util.Calendar.getInstance().apply {
             set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
         }.timeInMillis
-        val today = notes.filter { it.time >= dayStart && isMessage(it) }
+        val today = notes.filter { it.time >= dayStart && isMessage(it) && !GilbertTalk.isMe(ctx, it.title) }
         if (today.isEmpty()) {
             val last = notes.firstOrNull() ?: return "Nothing came in today yet — all quiet ✨"
             return "Nothing new today. Last one was from ${last.title}: “${last.text.take(50)}”"

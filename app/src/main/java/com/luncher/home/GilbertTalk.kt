@@ -87,9 +87,17 @@ object GilbertTalk {
         cachedName = runCatching {
             ctx.contentResolver.query(android.provider.ContactsContract.Profile.CONTENT_URI,
                 arrayOf(android.provider.ContactsContract.Profile.DISPLAY_NAME), null, null, null)?.use { c ->
-                if (c.moveToFirst()) c.getString(0)?.trim()?.split(" ")?.firstOrNull() else null
+                if (c.moveToFirst()) c.getString(0)?.trim()?.also { fullName = it }?.split(" ")?.firstOrNull() else null
             }
         }.getOrNull()?.takeIf { it.isNotBlank() }
         return cachedName
+    }
+    private var fullName: String? = null
+
+    /** Is this name you? (Your own replies show up in chat notifications.) */
+    fun isMe(ctx: Context, who: String): Boolean {
+        ownerName(ctx)
+        val full = fullName ?: return false
+        return who.trim().equals(full, true)
     }
 }

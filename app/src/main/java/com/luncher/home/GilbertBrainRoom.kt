@@ -32,7 +32,11 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
     private val status = TextView(act).apply { textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER }
     private val detail = TextView(act).apply { textSize = 12.5f; setTextColor(0x99FFFFFF.toInt()); gravity = Gravity.CENTER }
     private val steps = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(4)) }
-    private val pickBtn = pill("", 0xFF0A84FF.toInt()) { onPick() }
+    private val pickBtn = pill("", 0xFF0A84FF.toInt()) {
+        if (GilbertBrain.installed(act) && GilbertBrain.crashed(act)) {
+            GilbertBrain.retry(act); GilbertBrain.warmUp(act); calibrate()
+        } else onPick()
+    }
 
     init {
         val stage = FrameLayout(act)
@@ -72,7 +76,8 @@ class GilbertBrainRoom(private val act: Activity, private val s: Settings, priva
             if (has) append("${name ?: "Brain"} · ${GilbertBrain.sizeMb(act)} MB\n")
             append("Memory: ${GilbertMemory.facts(act).size} facts · Archive: ${GilbertArchive.count(act)} messages (${GilbertArchive.days(act).size} days)")
         }
-        pickBtn.text = if (has) "Change Brain" else "Give Gilbert a Brain"
+        val off = has && GilbertBrain.crashed(act)
+        pickBtn.text = if (off) "Try Again" else if (has) "Change Brain" else "Give Gilbert a Brain"
         ring.level = if (has && GilbertBrain.loaded) 1f else if (has) 0.6f else 0.25f
     }
 

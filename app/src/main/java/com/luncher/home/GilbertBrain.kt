@@ -97,9 +97,24 @@ object GilbertBrain {
     /** Did the last brain crash the launcher while loading? (Then it stays off until you pick another.) */
     fun crashed(ctx: Context): Boolean {
         val p = prefs(ctx)
+        // An app update (or Android closing the launcher) also stops a brain mid-load — that's not
+        // the brain's fault, so a new version always starts with a clean slate.
+        val updated = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime }.getOrDefault(0L)
+        if (p.getLong("seenUpdate", 0L) != updated)
+            p.edit().putLong("seenUpdate", updated).putBoolean("loading", false).putBoolean("crashed", false).putInt("crashes", 0).apply()
         // "loading" still set = the app died while loading the brain last time.
-        if (p.getBoolean("loading", false)) p.edit().putBoolean("loading", false).putBoolean("crashed", true).apply()
+        // Only switch it off after it happens twice in a row (once can be bad luck).
+        if (p.getBoolean("loading", false)) {
+            val n = p.getInt("crashes", 0) + 1
+            p.edit().putBoolean("loading", false).putInt("crashes", n).putBoolean("crashed", n >= 2).apply()
+        }
         return p.getBoolean("crashed", false)
+    }
+
+    /** Give a switched-off brain another go. */
+    fun retry(ctx: Context) {
+        prefs(ctx).edit().putBoolean("loading", false).putBoolean("crashed", false).putInt("crashes", 0).apply()
+        lastError = null
     }
 
     fun remove(ctx: Context) {
@@ -113,7 +128,7 @@ object GilbertBrain {
     private fun load(ctx: Context): LlmInference? {
         llm?.let { return it }
         if (!installed(ctx)) return null
-        if (crashed(ctx)) { lastError = "This brain crashed the launcher, so I switched it off. Pick a smaller “q8” .task file in Settings."; return null }
+        if (crashed(ctx)) { lastError = "This brain crashed the launcher twice, so I switched it off. Open my brain room (🧠) and tap “Try Again”, or pick a smaller “q8” .task file."; return null }
         // Enough memory? (A brain needs roughly its own size in free RAM.)
         val am = ctx.getSystemService(android.app.ActivityManager::class.java)
         val mi = android.app.ActivityManager.MemoryInfo(); runCatching { am.getMemoryInfo(mi) }
@@ -132,7 +147,7 @@ object GilbertBrain {
                 .build())
         }.onFailure { lastError = "The brain couldn't start (${it.message?.take(60) ?: "unknown"}). Try the q8 .task file." }.getOrNull()
         p.edit().putBoolean("loading", false).apply()
-        if (llm != null) lastError = null
+        if (llm != null) { lastError = null; p.edit().putInt("crashes", 0).apply() }
         return llm
     }
 

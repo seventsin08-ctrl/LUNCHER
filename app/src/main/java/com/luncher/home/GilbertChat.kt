@@ -54,7 +54,9 @@ object GilbertChat {
 
     fun ruleAnswer(act: Activity, s: Settings, q: String): String {
         val t = q.lowercase()
-        fun has(vararg w: String) = w.any { t.contains(it) }
+        // Short words must match whole words ("you" isn't "yo", "this" isn't "hi").
+        fun has(vararg w: String) = w.any { k ->
+            if (k.length <= 3) Regex("\\b${Regex.escape(k)}\\b").containsMatchIn(t) else t.contains(k) }
         return when {
             t.startsWith("search the web") || t.startsWith("google ") -> {
                 val q2 = q.substringAfter(" ").removePrefix("the web for").removePrefix("web for").trim()
@@ -84,9 +86,12 @@ object GilbertChat {
                 ?.let { "You talk most with ${it.joinToString { p -> p.first }} 💬" } ?: "I haven't seen many messages yet."
             has("battery", "phone", "storage", "hot", "temperature") -> Gilbert.health(act).let { h -> Gilbert.mood(act, h) +
                 " (battery ${h.battery}%, ${h.tempC?.roundToInt() ?: "?"}°C)" }
+            has("how are you", "how r u", "how do you feel", "how you feel", "are you ok", "you okay", "how's it going", "hows it going") ->
+                listOf("Honestly? Pretty good — sharp, rested, and keeping an eye on things for you 🙂 How are you holding up?",
+                    "I feel great, thanks for asking 🤍 Everything's quiet on my side. How's your day going?",
+                    "Running smooth and happy to see you ✨ What about you — good day so far?").random()
             has("hi", "hello", "hey", "yo", "sup") -> "Hey ${GilbertTalk.ownerName(act) ?: "there"}, good to see you. Want your briefing? Just say “report” 🙂"
             has("thank") -> "Anytime 🤍"
-            has("how are you", "how r u") -> "I'm glowing ✨ How about you?"
             has("sad", "tired", "stress", "bad day") -> "I'm here with you 🤍 Take a breath, drink some water, and maybe put on your favourite song."
             has("eat", "hungry", "food") -> "Have you eaten yet? Go get something yummy 🍜"
             else -> GilbertTalk.line(act, s, "curious") +
