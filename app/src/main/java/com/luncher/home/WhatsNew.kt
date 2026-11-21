@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 object WhatsNew {
     /** Launcher number → what changed in it. */
     val notes: Map<Int, List<String>> = linkedMapOf(
+        163 to listOf("⬆ Mute button: a 🔊 appears next to ✕ while Gilbert speaks — tap to mute him (🔇 stays so you can turn him back on)", "⬆ Tap his globe in the middle of the HUD: hushes him if he's talking, otherwise he tells you about the window you're on"),
         162 to listOf("⬆ Gilbert's greeting is short and never the same twice: he only tells you what's NEW since he last briefed you, picks the one or two things that matter most (mentions, a possible task, who messaged), and says “Welcome back” if you were just here"),
         161 to listOf("⬆ Pick Gilbert's voice: console › 06 SYSTEM › VOICE lists your phone's English voices (British first) — tap one to hear it", "⬆ AI echo: a soft room echo on his voice so he sounds like he's speaking through speakers (on/off in the same place)", "🔧 New-message announcements now wait a random 40 s – 2½ min between each, and group what came in (“3 new messages, from Jia and Contra”)"),
         160 to listOf("⬆ Gilbert speaks in his console: “Good afternoon, sir.” then a quick briefing (messages, who's most active, mentions, things that look like tasks, battery) and “What's the task for today?”", "⬆ He talks you through each window you open, reads out new messages as they arrive and reads your digest; his globe pulses while he talks and his words show as subtitles", "⬆ Settings › Gilbert: Gilbert's Voice on/off and Call Me (Sir, Ma'am, Boss or your name)"),

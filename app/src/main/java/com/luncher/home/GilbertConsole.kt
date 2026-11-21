@@ -81,6 +81,13 @@ object GilbertConsole {
                     textSize = 9.5f; typeface = mono; letterSpacing = 0.08f; setTextColor(Hud.a(Hud.SOFT, 190))
                 })
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            // Mute: shows while he talks (and while he's muted, to turn him back on).
+            val mb = TextView(a).apply {
+                textSize = 14f; gravity = Gravity.CENTER
+                setOnClickListener { SoundFX.play(a, "tick"); toggleMute() }
+            }
+            muteBtn = mb
+            addView(mb, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(8) })
             addView(TextView(a).apply {
                 text = "✕"; textSize = 14f; setTextColor(Hud.SOFT); gravity = Gravity.CENTER
                 background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x14FFFFFF); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 120)) }
@@ -96,6 +103,15 @@ object GilbertConsole {
         val fc = IslandFace(a).apply { configure(s) }; face = fc
         val fs = (hudH * 0.58f).toInt()
         hud.addView(fc, FrameLayout.LayoutParams(fs, fs, Gravity.CENTER))
+        // Tap his globe: hush him if he's talking, otherwise he tells you about this window.
+        fc.setOnClickListener {
+            SoundFX.play(a, "tick"); rg.ping()
+            when {
+                GilbertNarrator.speaking() -> GilbertNarrator.stop()
+                !s.gilbertSpeaks -> { type("VOICE MUTED · TAP 🔇 TO TURN ON"); face?.react("sleepy", 1200) }
+                else -> runCatching { narrate(a, current) }.getOrNull()?.let { GilbertNarrator.say(a, it) }
+            }
+        }
         col.addView(hud, LinearLayout.LayoutParams(MATCH_PARENT, hudH).apply { topMargin = dp(4) })
         // ticker: what he's doing / what just came in
         ticker = TextView(a).apply {
@@ -178,7 +194,9 @@ object GilbertConsole {
         GilbertNarrator.onSpeaking = { line ->
             if (line != null) { face?.react("listening", 60_000); type(line.uppercase()) }
             else face?.react("happy", 600)
+            updateMute()
         }
+        updateMute()
 
         // ---- Live updates: new data → ping, ticker, refresh the open window.
         PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 5) }
@@ -190,6 +208,29 @@ object GilbertConsole {
     }
 
     private var booting = false
+    private var muteBtn: TextView? = null
+
+    /** Show the mute button while he speaks (or while muted); hide it otherwise. */
+    private fun updateMute() {
+        val a = act ?: return
+        val b = muteBtn ?: return
+        val muted = !Settings(a).gilbertSpeaks
+        val talking = GilbertNarrator.speaking()
+        b.text = if (muted) "🔇" else "🔊"
+        b.background = GradientDrawable().apply { shape = GradientDrawable.OVAL
+            setColor(if (muted) 0x14FFFFFF else Hud.a(Hud.CYAN, 50)); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, if (talking) 230 else 120)) }
+        val show = muted || talking
+        if (show && b.visibility != View.VISIBLE) { b.visibility = View.VISIBLE; b.scaleX = 0.4f; b.scaleY = 0.4f; b.animate().scaleX(1f).scaleY(1f).setDuration(180).start() }
+        else if (!show && b.visibility == View.VISIBLE) b.animate().scaleX(0.4f).scaleY(0.4f).setDuration(150).withEndAction { b.visibility = View.INVISIBLE }.start()
+    }
+
+    private fun toggleMute() {
+        val a = act ?: return
+        val s = Settings(a)
+        if (s.gilbertSpeaks) { GilbertNarrator.stop(); s.gilbertSpeaks = false; type("VOICE MUTED") }
+        else { s.gilbertSpeaks = true; type("VOICE ON"); GilbertNarrator.say(a, "Voice on, ${GilbertNarrator.title(a)}.") }
+        updateMute()
+    }
 
     // ---- New-message announcements, with a random cool-down so he doesn't keep interrupting.
     private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
