@@ -818,7 +818,7 @@ class SettingsActivity : Activity() {
             button(gilB, "Open Gilbert's Console", 0xFF0A84FF.toInt()) { GilbertLauncher.open(this) }
             toggle(gilB, "Gilbert's Voice", "In his console he greets you (good morning / afternoon), briefs you and talks you " +
                 "through each window — a calm British voice. Uses the phone's text-to-speech (media volume)", s.gilbertSpeaks) { s.gilbertSpeaks = it }
-            segment(gilB, "Call Me", listOf("sir" to "Sir", "ma'am" to "Ma'am", "boss" to "Boss", "name" to "My name"), s.gilbertTitle) { s.gilbertTitle = it }
+            segment(gilB, "Call Me", listOf("auto" to "Name + sir", "sir" to "Sir", "boss" to "Boss", "name" to "My name"), s.gilbertTitle) { s.gilbertTitle = it }
             toggle(gilB, "Gilbert's Archive", "Saves every notification and chat (one file per day, 60 days) in Android/data/…/files/Gilbert Archive, " +
                 "so Gilbert can search and answer about them. Stays on your phone", s.gilbertArchive) { s.gilbertArchive = it }
             info(gilB, "Archive: ${GilbertArchive.count(this)} messages over ${GilbertArchive.days(this).size} days")

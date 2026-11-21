@@ -109,9 +109,12 @@ object GilbertConsole {
             when {
                 GilbertNarrator.speaking() -> GilbertNarrator.stop()
                 !s.gilbertSpeaks -> { type("VOICE MUTED · TAP 🔇 TO TURN ON"); face?.react("sleepy", 1200) }
+                !briefedThisOpen -> brief()
                 else -> runCatching { narrate(a, current) }.getOrNull()?.let { GilbertNarrator.say(a, it) }
             }
         }
+        // Tapping anywhere on the HUD does the same.
+        rg.setOnClickListener { fc.performClick() }
         col.addView(hud, LinearLayout.LayoutParams(MATCH_PARENT, hudH).apply { topMargin = dp(4) })
         // ticker: what he's doing / what just came in
         ticker = TextView(a).apply {
@@ -121,13 +124,14 @@ object GilbertConsole {
         col.addView(ticker, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
 
         wins = listOf(
-            Win("00", "NOW", "NOW") { buildNow(it, s) },
-            Win("01", "DIGEST", "SUMMARY") { buildSummary(it) },
-            Win("02", "CHAT.LOG", "CHATS") { buildChats(it) },
-            Win("03", "PEOPLE.IDX", "NAMES") { buildNames(it) },
-            Win("04", "NOTES", "NOTES") { buildNotes(it) },
-            Win("05", "SCAN", "FILES") { buildFiles(it) },
-            Win("06", "SYSTEM", "SYSTEM") { buildSystem(it, s) })
+            Win("00", "UPDATES", "UPDATES") { buildUpdates(it) },
+            Win("01", "NOW", "NOW") { buildNow(it, s) },
+            Win("02", "DIGEST", "SUMMARY") { buildSummary(it) },
+            Win("03", "CHAT.LOG", "CHATS") { buildChats(it) },
+            Win("04", "PEOPLE.IDX", "NAMES") { buildNames(it) },
+            Win("05", "NOTES", "NOTES") { buildNotes(it) },
+            Win("06", "SCAN", "FILES") { buildFiles(it) },
+            Win("07", "SYSTEM", "SYSTEM") { buildSystem(it, s) })
 
         // ---- Window tabs (HUD labels)
         tabs = ArrayList()
@@ -185,8 +189,9 @@ object GilbertConsole {
             select(startWin.coerceIn(0, wins.size - 1)); startWin = 0
             booting = false
             SoundFX.play(a, "success")
-            // He greets you and briefs you.
-            GilbertNarrator.say(a, briefing())
+            // He greets you and asks — the briefing only comes when you tap him or the screen.
+            briefedThisOpen = false
+            GilbertNarrator.say(a, openingQuestion())
         }, 900)
 
         // While he talks: the globe "listens"/pulses and his words show as subtitles in the ticker.
@@ -199,12 +204,12 @@ object GilbertConsole {
         updateMute()
 
         // ---- Live updates: new data → ping, ticker, refresh the open window.
-        PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 5) }
+        PocherFiles.onChanged = { update("FILE CAPTURED · SCANNING", null, 6) }
         GilbertArchive.onSaved = { app, who -> update("NEW · ${who.uppercase()} · ${app.uppercase()}", who, -1,
             "$who\u0000$app") }
         val prev = Gilbert.onHeldChanged
         prevHeld = prev
-        Gilbert.onHeldChanged = { prev?.invoke(); if (current == 0) layer.post { select(0, animate = false, scanOnly = true) } }
+        Gilbert.onHeldChanged = { prev?.invoke(); if (current == 1 || current == 0) layer.post { select(current, animate = false, scanOnly = true) } }
     }
 
     private var booting = false
@@ -270,66 +275,22 @@ object GilbertConsole {
     /** Greeting + a short briefing from the data (spoken when the console opens). */
     private fun briefing(): String {
         val a = act ?: return ""
-        val p = a.getSharedPreferences("gil_brief", android.content.Context.MODE_PRIVATE)
-        val now = System.currentTimeMillis()
-        val lastOpen = p.getLong("open", 0L)
-        val away = now - lastOpen
-        val sir = GilbertNarrator.title(a)
-        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
-        fun at(e: GilbertArchive.Entry) = runCatching { fmt.parse("${e.day} ${e.time}")?.time }.getOrNull() ?: 0L
-        // Only what's NEW since he last briefed you (so he never repeats himself).
-        val since = if (lastOpen > 0) lastOpen - 60_000 else now - 12 * 3_600_000L
-        val fresh = messages(2).filter { at(it) >= since }
-        val mentions = Gilbert.notes(a).count { it.mention && it.time >= since }
-        val held = Gilbert.heldCount()
-        val flag = fresh.firstOrNull { FLAG.containsMatchIn(it.text) }
-        val h = runCatching { Gilbert.health(a) }.getOrNull()
-        val said = p.getStringSet("said", emptySet()) ?: emptySet()
-        fun pick(list: List<String>, key: String): String {
-            // Never the same line twice in a row.
-            val opts = list.filterNot { "$key:$it" in said }.ifEmpty { list }
-            return opts.random().also { newSaid += "$key:$it" }
+        val name = GilbertNarrator.title(a)
+        val u = updates()
+        if (u.isEmpty()) return listOf("Nothing new since your last briefing, $name.", "All quiet, $name. Nothing needs you.",
+            "No updates. I'll let you know if that changes.").random()
+        val intro = listOf("Here's the update, $name.", "Right. The short version, $name.", "Briefing, $name.", "Here's where things stand.").random()
+        val high = u.filter { it.level == 3 }
+        val main = (high + u.filter { it.level < 3 }).take(3).joinToString(" ") { it.spoken }
+        val more = u.size - minOf(3, u.size)
+        val rest = if (more > 0) " ${GilbertNarrator.plural(more, "more item")} on screen." else ""
+        val quip = when {
+            u.count { it.level == 2 } >= 5 -> listOf(" Popular today.", " A busy afternoon, then.", "").random()
+            high.isEmpty() -> listOf(" Nothing urgent.", "").random()
+            else -> ""
         }
-        newSaid.clear()
-
-        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        val part = when (hour) { in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; in 18..21 -> "Good evening"; else -> "Late night" }
-        val opening = when {
-            away < 10 * 60_000L -> pick(listOf("Welcome back, $sir.", "Back again, $sir.", "Yes, $sir?", "At your service."), "back")
-            lastOpen == 0L || away > 4 * 3_600_000L -> pick(listOf("$part, $sir.", "$part, $sir. Systems are online.", "$part. Good to have you back, $sir.",
-                "$part, $sir. Everything is running smoothly."), "hello$part")
-            else -> pick(listOf("$sir.", "Hello again, $sir.", "Systems ready, $sir.", "$part, $sir."), "again")
-        }
-
-        // The most important thing or two — not a list of everything.
-        val facts = ArrayList<String>()
-        if (mentions > 0) facts += pick(listOf("You were mentioned ${if (mentions == 1) "once" else "$mentions times"}.",
-            "${GilbertNarrator.plural(mentions, "mention")} waiting for you."), "men")
-        if (flag != null) {
-            val w = FLAG.find(flag.text)?.value?.lowercase() ?: "something"
-            facts += pick(listOf("${spokenName(flag.who)} brought up $w.", "Something about $w, from ${spokenName(flag.who)}.",
-                "Possible task: $w, from ${spokenName(flag.who)}."), "flag")
-        }
-        if (fresh.isNotEmpty()) {
-            val top = fresh.groupBy { it.who }.maxByOrNull { it.value.size }!!
-            val people = fresh.map { it.who }.distinct().size
-            val n = fresh.size
-            facts += if (people == 1) pick(listOf("${GilbertNarrator.plural(n, "new message")} from ${spokenName(top.key)}.",
-                "${spokenName(top.key)} sent ${GilbertNarrator.plural(n, "message")}."), "msg1")
-            else pick(listOf("${GilbertNarrator.plural(n, "new message")}, mostly ${spokenName(top.key)}.",
-                "$n messages from $people people. ${spokenName(top.key)} is the busiest.",
-                "${spokenName(top.key)} leads with ${top.value.size} of $n new messages."), "msgN")
-        } else if (away < 10 * 60_000L) facts += pick(listOf("Nothing new since.", "All quiet since you left.", "No changes."), "none")
-        if (held > 0 && facts.size < 2) facts += pick(listOf("$held held quietly for you.", "I'm holding ${GilbertNarrator.plural(held, "notification")}."), "held")
-        h?.let {
-            if (it.battery in 0..20 && !it.charging) facts += "Battery at ${it.battery} percent."
-            else if ((it.tempC ?: 0f) >= 42f) facts += "The phone is running warm."
-        }
-        if (facts.isEmpty()) facts += pick(listOf("All quiet.", "Nothing needs your attention.", "No new messages.", "All clear."), "quiet")
-
-        val ending = if (away < 10 * 60_000L || Math.random() < 0.35) "" else " " + pick(ENDINGS, "end")
-        p.edit().putLong("open", now).putStringSet("said", newSaid.toSet()).apply()
-        return opening + " " + facts.take(2).joinToString(" ") + ending
+        val end = listOf(" What's the task for today?", " Where would you like to start?", " Shall I pull anything up?", "", "").random()
+        return "$intro $main$rest$quip$end"
     }
     private val newSaid = HashSet<String>()
 
@@ -344,12 +305,13 @@ object GilbertConsole {
     private fun narrate(a: Activity, i: Int): String? {
         val sir = GilbertNarrator.title(a)
         return when (i) {
-            0 -> {
+            0 -> updatesLine()
+            1 -> {
                 val h = Gilbert.health(a); val held = Gilbert.heldCount()
                 "Status. " + (if (held > 0) "${GilbertNarrator.plural(held, "notification")} waiting. " else "Nothing waiting. ") +
                     "Battery ${h.battery} percent${if (h.charging) " and charging" else ""}."
             }
-            1 -> {
+            2 -> {
                 val today = messages(1).filter { it.today }
                 if (today.isEmpty()) "Nothing to summarise yet, $sir."
                 else {
@@ -357,19 +319,19 @@ object GilbertConsole {
                     "Today's summary. ${GilbertNarrator.plural(today.size, "message")}. Most active: ${top.joinToString(" and ")}."
                 }
             }
-            2 -> messages(3).firstOrNull()?.let { "Your chats. The latest is from ${spokenName(it.who)}: ${it.text.take(80)}" } ?: "No chats yet."
-            3 -> messages(7).groupBy { it.who }.maxByOrNull { it.value.size }?.let {
+            3 -> messages(3).firstOrNull()?.let { "Your chats. The latest is from ${spokenName(it.who)}: ${it.text.take(80)}" } ?: "No chats yet."
+            4 -> messages(7).groupBy { it.who }.maxByOrNull { it.value.size }?.let {
                 "Your people. Top contact this week is ${spokenName(it.key)}, with ${GilbertNarrator.plural(it.value.size, "message")}." } ?: "No names yet."
-            4 -> {
+            5 -> {
                 val notes = GilbertMemory.facts(a).size
                 val flagged = messages(3).count { FLAG.containsMatchIn(it.text) }
                 "Notes. You have ${GilbertNarrator.plural(notes, "note")}, and I flagged ${GilbertNarrator.plural(flagged, "item")} that look like tasks or dates."
             }
-            5 -> {
+            6 -> {
                 val f = PocherFiles.list(a)
                 "Files. ${GilbertNarrator.plural(f.size, "file")}, ${f.count { it.img != null }} scanned."
             }
-            6 -> if (GilbertBrain.installed(a)) "System. Brain ${if (GilbertBrain.loaded) "online" else "standing by"}: ${GilbertBrain.modelName(a) ?: "installed"}."
+            7 -> if (GilbertBrain.installed(a)) "System. Brain ${if (GilbertBrain.loaded) "online" else "standing by"}: ${GilbertBrain.modelName(a) ?: "installed"}."
                 else "System. Running on memory, no brain installed."
             else -> null
         }
@@ -381,11 +343,12 @@ object GilbertConsole {
     /** New data arrived while the console is open. */
     private fun update(msg: String, who: String?, onlyWin: Int, spoken: String? = null) {
         rings?.ping(); face?.ping()
-        spoken?.let { announce(it) }
+        // New messages are shown (ticker, ring, glow) but he doesn't speak unless you tap him.
+        if (current == 0 && onlyWin < 0) Unit
         type("▲ $msg")
         flashWho = who
         if (onlyWin < 0 || current == onlyWin) {
-            if (current != 4) select(current, animate = false, scanOnly = true)   // don't wipe a note you're typing
+            if (current != 5) select(current, animate = false, scanOnly = true)   // don't wipe a note you're typing
         }
     }
 
@@ -429,7 +392,7 @@ object GilbertConsole {
             }
             if (!scanOnly) type("OPEN · WIN ${w.num} · ${w.prog}")
             // He talks you through the window you opened (not during start-up — that's the briefing).
-            if (!booting) act?.let { a -> runCatching { narrate(a, i) }.getOrNull()?.let { GilbertNarrator.say(a, it) } }
+            // (He stays quiet when you switch windows — tap his globe to hear about this one.)
         }
         tabs.getOrNull(i)?.let { t -> (t.parent?.parent as? HorizontalScrollView)?.smoothScrollTo(maxOf(0, t.left - dp(40)), 0) }
     }
@@ -501,6 +464,127 @@ object GilbertConsole {
             .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(n).map { it.key }
 
     private val FLAG = Regex("\\b(tomorrow|tonight|later|deadline|due|exam|quiz|meeting|class|schedule|bukas|mamaya|pay|bayad|send|submit|call me|asap|urgent|\\d{1,2}(:\\d{2})?\\s?(am|pm))\\b", RegexOption.IGNORE_CASE)
+
+    // ------------------------------------------------------------------ 00 UPDATES
+    /** One thing that changed since your last briefing. level: 3 high, 2 medium, 1 low. */
+    private class Upd(val level: Int, val title: String, val detail: String, val time: String, val spoken: String, val who: String? = null)
+
+    private fun briefPrefs(a: Activity) = a.getSharedPreferences("gil_brief", android.content.Context.MODE_PRIVATE)
+    private var briefedThisOpen = false
+
+    /** Everything new since the last briefing, most important first. */
+    private fun updates(): List<Upd> {
+        val a = act ?: return emptyList()
+        val now = System.currentTimeMillis()
+        val last = briefPrefs(a).getLong("brief", 0L)
+        val since = if (last > 0) last else now - 12 * 3_600_000L
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+        fun at(e: GilbertArchive.Entry) = runCatching { fmt.parse("${e.day} ${e.time}")?.time }.getOrNull() ?: 0L
+        val fresh = messages(2).filter { at(it) >= since - 60_000 }
+        val out = ArrayList<Upd>()
+        // HIGH: mentions, things that look like tasks / dates, battery, heat
+        Gilbert.notes(a).filter { it.mention && it.time >= since }.take(3).forEach { n ->
+            out += Upd(3, "Mention · ${n.title}", n.text.take(120), java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(n.time)),
+                "${spokenName(Gilbert.cleanTitle(n.title))} mentioned you.", n.title)
+        }
+        fresh.filter { FLAG.containsMatchIn(it.text) }.distinctBy { it.who }.take(4).forEach { e ->
+            val w = FLAG.find(e.text)?.value?.lowercase() ?: "a date"
+            out += Upd(3, "Possible task · ${w.uppercase()}", "${e.who}: ${e.text.take(110)}", e.stamp,
+                "${spokenName(e.who)} brought up $w.", e.who)
+        }
+        val h = runCatching { Gilbert.health(a) }.getOrNull()
+        h?.let {
+            if (it.battery in 0..20 && !it.charging) out += Upd(3, "Battery ${it.battery}%", "Not charging", "now",
+                "Battery is at ${it.battery} percent. I'd suggest a charger before it makes the decision for us.")
+            if ((it.tempC ?: 0f) >= 42f) out += Upd(3, "Phone running hot", "${it.tempC?.roundToInt()}°C", "now", "The phone is running warm.")
+        }
+        // MEDIUM: who messaged, held notifications
+        fresh.groupBy { it.who }.entries.sortedByDescending { it.value.size }.take(6).forEach { (who, list) ->
+            out += Upd(2, "$who · ${list.size}", list.first().text.take(110), list.first().stamp,
+                "${GilbertNarrator.plural(list.size, "message")} from ${spokenName(who)}.", who)
+        }
+        if (Gilbert.heldCount() > 0) out += Upd(2, "Held quietly · ${Gilbert.heldCount()}", "Notifications I kept off your screen", "now",
+            "I'm holding ${GilbertNarrator.plural(Gilbert.heldCount(), "notification")} for you.")
+        // LOW: files, storage
+        val files = PocherFiles.list(a).filter { it.time >= since }
+        if (files.isNotEmpty()) out += Upd(1, "Files · ${files.size}", files.take(3).joinToString(", ") { "${it.who} (${it.app})" }, "",
+            "${GilbertNarrator.plural(files.size, "new file")} in your files.")
+        h?.let { if (it.storageTotalGb > 0 && it.storageFreeGb / it.storageTotalGb < 0.1f) out += Upd(1, "Storage low", "${"%.0f".format(it.storageFreeGb)} GB free", "", "Storage is getting low.") }
+        return out.sortedByDescending { it.level }
+    }
+
+    private fun updatesLine(): String {
+        val u = updates()
+        return if (u.isEmpty()) "No updates since your last briefing." else "${GilbertNarrator.plural(u.size, "update")}. ${u.take(2).joinToString(" ") { it.spoken }}"
+    }
+
+    private fun buildUpdates(p: LinearLayout) {
+        val a = act ?: return
+        val last = briefPrefs(a).getLong("brief", 0L)
+        val u = updates()
+        winInfo?.text = "${u.size} updates"
+        line(p, if (last > 0) "SINCE LAST BRIEFING · " + java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.getDefault()).format(java.util.Date(last)).uppercase()
+            else "LAST 12 HOURS", 10.5f, Hud.a(Hud.SOFT, 200)).typeface = monoBold
+        val ctl = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+        p.addView(ctl)
+        pill(ctl, "▶ Brief me") { brief() }
+        ctl.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
+        pill(ctl, "✓ Mark as seen") { briefPrefs(a).edit().putLong("brief", System.currentTimeMillis()).apply(); select(0, animate = false) }
+        if (u.isEmpty()) { empty(p, "Nothing new since your last briefing. Remarkably quiet."); return }
+        val RED = 0xFFFF453A.toInt(); val AMBER = 0xFFFFC53D.toInt()
+        for ((lvl, name) in listOf(3 to "PRIORITY", 2 to "MESSAGES & ACTIVITY", 1 to "OTHER")) {
+            val group = u.filter { it.level == lvl }
+            if (group.isEmpty()) continue
+            section(p, name)
+            for (x in group) {
+                val b = box(p, 4)
+                val top = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                val col = when (lvl) { 3 -> RED; 2 -> Hud.CYAN; else -> 0xFF8E8E93.toInt() }
+                top.addView(View(a).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(col) } },
+                    LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(8) })
+                top.addView(TextView(a).apply { text = x.title; textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                    LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                if (x.time.isNotEmpty()) top.addView(TextView(a).apply { text = x.time; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
+                b.addView(top)
+                b.addView(TextView(a).apply { text = x.detail; textSize = 12.5f; setTextColor(0xB3FFFFFF.toInt()); maxLines = 2; ellipsize = TextUtils.TruncateAt.END; setPadding(dp(16), dp(2), 0, 0) })
+                if (lvl == 3) b.background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor((AMBER and 0x00FFFFFF) or 0x10000000); setStroke(maxOf(1, dp(1)), (RED and 0x00FFFFFF) or 0x66000000) }
+                x.who?.let { w -> b.setOnClickListener { openChat = w; select(3) } }
+            }
+        }
+    }
+
+    /** Speak the briefing (only when you ask: tap him, the HUD, or "Brief me"). */
+    private fun brief() {
+        val a = act ?: return
+        GilbertNarrator.say(a, briefing())
+        briefedThisOpen = true
+        briefPrefs(a).edit().putLong("brief", System.currentTimeMillis()).apply()
+        if (current == 0) a.window?.decorView?.postDelayed({ if (act != null && current == 0) select(0, animate = false, scanOnly = true) }, 600)
+    }
+
+    /** What he says when the console opens: a greeting and a question — nothing more until you tap. */
+    private fun openingQuestion(): String {
+        val a = act ?: return ""
+        val n = updates().size
+        val name = GilbertNarrator.title(a)
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val part = when (hour) { in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; in 18..21 -> "Good evening"; else -> "Still up" }
+        val p = briefPrefs(a)
+        val away = System.currentTimeMillis() - p.getLong("open", 0L)
+        p.edit().putLong("open", System.currentTimeMillis()).apply()
+        val hello = when {
+            away < 10 * 60_000L -> listOf("Welcome back, $name.", "Back already, $name.", "Yes, $name?").random()
+            hour >= 23 || hour < 4 -> listOf("Still up, $name? Bold choice.", "Working late again, $name.").random()
+            else -> listOf("$part, $name.", "$part, $name. Systems are online.", "$part, $name. Good to see you.").random()
+        }
+        val ask = when {
+            n == 0 -> listOf("Nothing new to report.", "All quiet. Suspiciously so.", "No updates. Enjoy it while it lasts.").random()
+            n >= 8 -> listOf("A busy stretch, then. $n updates. Want the briefing?", "$n updates waiting. Shall I brief you?").random()
+            else -> listOf("Would you like the update?", "Want to know the update, $name?", "$n ${if (n == 1) "update" else "updates"}. Shall I brief you?",
+                "I have ${GilbertNarrator.plural(n, "update")} for you. Shall I?").random()
+        }
+        return "$hello $ask"
+    }
 
     // ------------------------------------------------------------------ 00 NOW (what his card used to show)
     /** Set by the launcher: open the message history / the tools. */
@@ -599,7 +683,7 @@ object GilbertConsole {
             hb.addView(row)
             pill(row, "◐ Open inbox") { thenHome(openInbox) }
             row.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))
-            pill(row, "Clear all") { Gilbert.clearHeld(); select(0, animate = false) }
+            pill(row, "Clear all") { Gilbert.clearHeld(); select(1, animate = false) }
         }
 
         // Noisiest apps: tap the tag to cycle Normal → Priority → Quiet
@@ -618,7 +702,7 @@ object GilbertConsole {
                         pkg in s.gilbertQuiet -> s.gilbertQuiet = s.gilbertQuiet - pkg
                         else -> s.gilbertPriority = s.gilbertPriority + pkg
                     }
-                    select(0, animate = false)
+                    select(1, animate = false)
                 }
                 appRow(nb, pkg, "${appName(pkg)} · $n", t, null)
             }
@@ -679,7 +763,7 @@ object GilbertConsole {
                 text = "${list.first().app} · last ${list.first().time}" + if (kw.isNotEmpty()) " · about: ${kw.joinToString(", ")}" else ""
                 textSize = 12f; setTextColor(0x99FFFFFF.toInt()) })
             b.addView(TextView(a).apply { text = "“${list.first().text.take(90)}”"; textSize = 13f; setTextColor(0xCCFFFFFF.toInt()); maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
-            b.setOnClickListener { openChat = who; select(2) }
+            b.setOnClickListener { openChat = who; select(3) }
             if (who == flashWho) flash(b)
         }
 
@@ -704,7 +788,7 @@ object GilbertConsole {
                     GilbertBrain.digest(a, today.take(40).reversed().map { "${it.time} ${it.who}: ${it.text}" }) { r ->
                         digestText = r ?: ("Couldn't write the digest — " + (GilbertBrain.lastError ?: "the brain didn't answer") + ".")
                         GilbertNarrator.say(a, if (r != null) "Here's your digest. " + r.replace("•", ". ") else "I couldn't write the digest this time.")
-                        if (current == 1) select(1, animate = false)
+                        if (current == 2) select(2, animate = false)
                     }
                 }
             }
@@ -799,7 +883,7 @@ object GilbertConsole {
             col.addView(TextView(a).apply {
                 text = "$apps · today $today · last ${list.first().stamp}"; textSize = 10.5f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
             row.addView(col, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-            row.setOnClickListener { openChat = who; select(2) }
+            row.setOnClickListener { openChat = who; select(3) }
             p.addView(row)
         }
     }
@@ -807,6 +891,30 @@ object GilbertConsole {
     // ------------------------------------------------------------------ 04 NOTES
     private fun buildNotes(p: LinearLayout) {
         val a = act ?: return
+        // About you: your name and profile, kept only on this phone. Gilbert reads it (and his brain does).
+        section(p, "ABOUT YOU · PRIVATE, ON THIS PHONE")
+        val prof = a.getSharedPreferences("gil_profile", android.content.Context.MODE_PRIVATE)
+        val ab = box(p, 2)
+        fun field(hint: String, value: String, lines: Int) = EditText(a).apply {
+            this.hint = hint; setText(value); setHintTextColor(0x66FFFFFF); setTextColor(Color.WHITE); textSize = 13.5f
+            background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(0x14FFFFFF); setStroke(maxOf(1, dp(1)), Hud.a(Hud.SOFT, 50)) }
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            if (lines > 1) { minLines = 3; maxLines = lines; gravity = Gravity.TOP or Gravity.START; isSingleLine = false } else isSingleLine = true
+        }
+        val nameF = field("What should I call you? (e.g. John)", prof.getString("name", "") ?: "", 1)
+        ab.addView(nameF)
+        val aboutF = field("Paste anything about you: school, work, projects, goals, how you like help…", prof.getString("about", "") ?: "", 8)
+        ab.addView(aboutF, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+        val saveRow = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        ab.addView(saveRow)
+        pill(saveRow, "Save") {
+            prof.edit().putString("name", nameF.text.toString().trim()).putString("about", aboutF.text.toString().trim().take(20_000)).apply()
+            SoundFX.play(a, "success"); type("PROFILE SAVED · ${aboutF.text.length} CHARACTERS")
+            GilbertNarrator.say(a, "Noted, ${GilbertNarrator.title(a)}. I'll keep that in mind.")
+        }
+        saveRow.addView(TextView(a).apply {
+            text = "  ${(prof.getString("about", "") ?: "").length} saved"; textSize = 11f; typeface = mono; setTextColor(0x80FFFFFF.toInt()) })
+
         val inputRow = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val input = EditText(a).apply {
             hint = "Write a note…"; setHintTextColor(0x80FFFFFF.toInt()); setTextColor(Color.WHITE); textSize = 14.5f
@@ -816,7 +924,7 @@ object GilbertConsole {
         inputRow.addView(input, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         fun add() {
             val t = input.text.toString().trim()
-            if (t.isNotEmpty()) { GilbertMemory.addFact(a, t); input.setText(""); SoundFX.play(a, "success"); select(4, animate = false) }
+            if (t.isNotEmpty()) { GilbertMemory.addFact(a, t); input.setText(""); SoundFX.play(a, "success"); select(5, animate = false) }
         }
         inputRow.addView(TextView(a).apply {
             text = "＋"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
@@ -835,7 +943,7 @@ object GilbertConsole {
             r.addView(TextView(a).apply { text = f; textSize = 14f; setTextColor(Color.WHITE) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             r.addView(TextView(a).apply {
                 text = "✕"; textSize = 13f; setTextColor(0x99FFFFFF.toInt()); setPadding(dp(10), dp(4), dp(4), dp(4))
-                setOnClickListener { GilbertMemory.removeFact(a, f); select(4, animate = false) }
+                setOnClickListener { GilbertMemory.removeFact(a, f); select(5, animate = false) }
             })
             b.addView(r)
         }
@@ -854,7 +962,7 @@ object GilbertConsole {
             val hit = FLAG.find(e.text)?.value?.uppercase() ?: ""
             b.addView(TextView(a).apply { text = "⚑ $hit · ${e.who} · ${e.stamp}"; textSize = 10.5f; typeface = monoBold; setTextColor(IconFactory.blend(tint, Color.WHITE, 0.4f)) })
             b.addView(TextView(a).apply { text = e.text.take(160); textSize = 13.5f; setTextColor(Color.WHITE) })
-            b.setOnClickListener { openChat = e.who; select(2) }
+            b.setOnClickListener { openChat = e.who; select(3) }
         }
     }
 
@@ -965,7 +1073,7 @@ object GilbertConsole {
         android.widget.Toast.makeText(a, "Scanning…", android.widget.Toast.LENGTH_SHORT).show()
         PocherFiles.scanPicked(a, uri) { ok ->
             if (!ok) android.widget.Toast.makeText(a, "Couldn't open that image", android.widget.Toast.LENGTH_SHORT).show()
-            select(5, animate = false)
+            select(6, animate = false)
         }
     }
 
@@ -1005,7 +1113,7 @@ object GilbertConsole {
                     setTextColor(if (on) Color.BLACK else Hud.CYAN)
                     setPadding(dp(6), dp(8), dp(6), dp(8))
                     background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(if (on) Hud.CYAN else Hud.a(Hud.CYAN, 22)); setStroke(maxOf(1, dp(1)), Hud.a(Hud.CYAN, 150)) }
-                    setOnClickListener { GilbertNarrator.useVoice(a, name); select(6, animate = false) }
+                    setOnClickListener { GilbertNarrator.useVoice(a, name); select(7, animate = false) }
                 }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(6); topMargin = dp(6) })
             }
             vb.addView(wrap)
@@ -1013,7 +1121,7 @@ object GilbertConsole {
         val ctl = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
         vb.addView(ctl)
         pill(ctl, if (s.gilbertEcho) "AI echo: on" else "AI echo: off") {
-            s.gilbertEcho = !s.gilbertEcho; select(6, animate = false)
+            s.gilbertEcho = !s.gilbertEcho; select(7, animate = false)
             GilbertNarrator.say(a, if (s.gilbertEcho) "Echo on. I sound like I'm in the room." else "Echo off.")
         }
         ctl.addView(View(a), LinearLayout.LayoutParams(dp(8), 1))

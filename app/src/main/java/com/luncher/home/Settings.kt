@@ -496,8 +496,8 @@ class Settings(ctx: Context) {
         get() = p.getBoolean("s_gil_echo", true)
         set(v) = put("s_gil_echo", v)
     var gilbertTitle: String
-        get() = p.getString("s_gil_title", "sir") ?: "sir"
-        set(v) = put("s_gil_title", v)
+        get() = p.getString("s_gil_title2", "auto") ?: "auto"
+        set(v) = put("s_gil_title2", v)
     /** Sound effects still play during Do Not Disturb. */
     var soundsInDnd: Boolean
         get() = p.getBoolean("s_sfx_dnd", true)

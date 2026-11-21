@@ -156,10 +156,20 @@ object GilbertNarrator {
 
     // ------------------------------------------------------------------ what he says
     /** How he addresses you (Settings › Gilbert › Call Me). */
-    fun title(ctx: Context): String = when (val t = Settings(ctx).gilbertTitle) {
-        "name" -> GilbertTalk.ownerName(ctx) ?: "sir"
-        else -> t
+    fun title(ctx: Context): String {
+        val name = ownerName(ctx)
+        return when (val t = Settings(ctx).gilbertTitle) {
+            "name" -> name ?: "sir"
+            // Like a composed AI assistant: your name mostly, "sir" now and then.
+            "auto" -> if (name != null && Math.random() < 0.7) name else "sir"
+            else -> t
+        }
     }
+
+    /** Your name: from "About you" in his console (Notes), else your contact card. */
+    fun ownerName(ctx: Context): String? =
+        ctx.getSharedPreferences("gil_profile", Context.MODE_PRIVATE).getString("name", null)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: GilbertTalk.ownerName(ctx)
 
     fun greeting(ctx: Context): String {
         val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)

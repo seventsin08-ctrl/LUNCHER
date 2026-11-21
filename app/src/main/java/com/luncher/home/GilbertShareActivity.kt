@@ -31,7 +31,7 @@ class GilbertShareActivity : Activity() {
         android.widget.Toast.makeText(this, if (n > 0) "Gilbert is scanning $n image${if (n > 1) "s" else ""}" else "Couldn't read that image",
             android.widget.Toast.LENGTH_SHORT).show()
         if (n > 0) {
-            GilbertConsole.startWin = 5
+            GilbertConsole.startWin = 6
             startActivity(Intent(this, GilbertChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         finish()
