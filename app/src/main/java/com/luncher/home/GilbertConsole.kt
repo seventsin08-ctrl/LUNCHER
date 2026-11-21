@@ -145,7 +145,9 @@ object GilbertConsole {
         cmd.addView(TextView(a).apply {
             text = "🎤"; textSize = 15f; gravity = Gravity.CENTER
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Hud.a(Hud.CYAN, 30)); setStroke(maxOf(1, dp(1)), Hud.CYAN) }
-            setOnClickListener { listen() }
+            setOnClickListener { if (convo) stopConversation() else listen() }
+            // Hold 🎤: conversation mode (keeps listening between replies).
+            setOnLongClickListener { SoundFX.play(a, "success"); GilbertNarrator.say(a, "Go ahead, ${GilbertNarrator.title(a)}."); startConversation(); true }
         }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginStart = dp(8) })
         cmd.addView(TextView(a).apply {
             text = "↵"; textSize = 16f; gravity = Gravity.CENTER; setTextColor(Color.BLACK)
@@ -202,6 +204,7 @@ object GilbertConsole {
         startMotion(a)
         close = {
             closeConsole = null
+            convo = false; uiHandler.removeCallbacks(convoTick); runCatching { GilbertVoice.stopListening() }; hearing = false
             GilbertNarrator.onSpeaking = null; GilbertNarrator.stop()
             motion?.let { l -> runCatching { a.getSystemService(android.hardware.SensorManager::class.java)?.unregisterListener(l) } }; motion = null
             announceJob?.let { uiHandler.removeCallbacks(it) }; announceJob = null; heard.clear(); heardCount = 0
@@ -235,6 +238,13 @@ object GilbertConsole {
             face?.baseMood = GilbertMind.faceMood(a)
             face?.wave()   // he waves hello
             val pc = pendingCommand; pendingCommand = null
+            val voice = wokeByVoice; wokeByVoice = false
+            if (voice) {
+                // "System online": answer, then listen — talk to him without touching the screen.
+                GilbertNarrator.say(a, listOf("Online. Yes, ${GilbertNarrator.title(a)}?", "System online. Go ahead, ${GilbertNarrator.title(a)}.", "At your service.", "Listening, John.").random())
+                if (pc != null) command(pc)
+                startConversation(); return@postDelayed
+            }
             if (pc != null) { GilbertNarrator.say(a, listOf("Online.", "At your service.", "Yes, ${GilbertNarrator.title(a)}?").random()); command(pc); return@postDelayed }
             val q = openingQuestion()
             // His own decision: usually he greets you aloud, sometimes just on screen.
@@ -265,6 +275,8 @@ object GilbertConsole {
     val isOpen get() = act != null && content != null
     /** Something you said with the wake word ("System online, open Spotify"). */
     var pendingCommand: String? = null
+    /** Opened by the wake word → conversation mode. */
+    var wokeByVoice = false
     const val REQ_MIC = 5143
 
     /** You told him to do something: understand it, then ask for permission (Rule 3). */
@@ -370,6 +382,30 @@ object GilbertConsole {
     }
 
     /** 🎤: say a command. */
+    // ---- Conversation mode: after "System online" he keeps listening between replies.
+    private var convo = false
+    private var hearing = false
+    private var misses = 0
+    private val BYE = Regex("^(?:that'?s all|that is all|goodbye|bye|stop listening|stop|thanks?(?: gilbert)?|thank you|nothing|never ?mind|sige na|salamat)[.!]?$")
+    private val convoTick = object : Runnable { override fun run() {
+        if (!convo || act == null) return
+        // His turn is over (not speaking, not thinking, not already listening) → your turn.
+        if (!hearing && !GilbertNarrator.pending() && !GilbertBrain.busy) listen()
+        uiHandler.postDelayed(this, 700)
+    } }
+
+    /** Start talking back and forth (no taps needed). */
+    fun startConversation() {
+        convo = true; misses = 0
+        uiHandler.removeCallbacks(convoTick); uiHandler.postDelayed(convoTick, 900)
+    }
+    fun stopConversation(say: Boolean = false) {
+        convo = false; uiHandler.removeCallbacks(convoTick)
+        runCatching { GilbertVoice.stopListening() }; hearing = false
+        if (say) act?.let { GilbertNarrator.say(it, listOf("Standing by.", "I'll be here.", "Standing by, ${GilbertNarrator.title(it)}.").random()) }
+        type("STANDING BY · SAY “SYSTEM ONLINE” OR TAP 🎤")
+    }
+
     private fun listen() {
         val a = act ?: return
         if (a.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -378,9 +414,20 @@ object GilbertConsole {
             return
         }
         GilbertNarrator.stop()
-        face?.react("listening", 8000); type("LISTENING…")
+        hearing = true
+        SoundFX.play(a, "tick")
+        face?.react("listening", 8000); type(if (convo) "LISTENING… (SAY “THAT'S ALL” TO STOP)" else "LISTENING…")
         GilbertVoice.listen(a, { partial -> type("> ${partial.uppercase()}") }) { heard ->
-            if (heard.isNullOrBlank()) { type("DIDN'T CATCH THAT"); face?.react("curious", 1000) } else command(heard)
+            hearing = false
+            if (heard.isNullOrBlank()) {
+                type("DIDN'T CATCH THAT"); face?.react("curious", 1000)
+                if (convo && ++misses >= 2) stopConversation()
+            } else {
+                misses = 0
+                val h = heard.trim().lowercase()
+                if (convo && BYE.matches(h)) { stopConversation(say = true); return@listen }
+                command(heard)
+            }
         }
     }
     private var lastTabTap = 0L

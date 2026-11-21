@@ -95,6 +95,8 @@ object GilbertNarrator {
 
     // ------------------------------------------------------------------ speaking
     fun speaking() = busy
+    /** Talking now, or about to (lines waiting / voice still starting up). */
+    fun pending() = busy || queue.isNotEmpty()
 
     /** Say [text]. [flush] cuts off whatever he was saying. */
     fun say(ctx: Context, text: String, flush: Boolean = true) {

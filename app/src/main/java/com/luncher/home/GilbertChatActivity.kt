@@ -32,6 +32,7 @@ class GilbertChatActivity : Activity() {
         super.onNewIntent(intent)
         // Woken again while open ("System online, open Spotify"): just do it.
         GilbertConsole.pendingCommand?.let { c -> GilbertConsole.pendingCommand = null; GilbertConsole.command(c) }
+        if (GilbertConsole.wokeByVoice) { GilbertConsole.wokeByVoice = false; GilbertConsole.startConversation() }
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -100,8 +101,9 @@ class GilbertTileService : android.service.quicksettings.TileService() {
 }
 
 object GilbertLauncher {
-    fun open(ctx: android.content.Context, command: String? = null) {
+    fun open(ctx: android.content.Context, command: String? = null, byVoice: Boolean = false) {
         GilbertConsole.pendingCommand = command
+        GilbertConsole.wokeByVoice = byVoice
         runCatching {
             ctx.startActivity(android.content.Intent(ctx, GilbertChatActivity::class.java)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION))

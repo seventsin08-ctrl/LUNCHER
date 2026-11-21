@@ -236,7 +236,7 @@ class VoiceService : Service() {
             // Hand over to the assistant screen (timers, messages, calls, notes, report…),
             // then go back to waiting for the wake word once it closes.
             // Wake Gilbert: his console opens (and does what you said after the phrase, if anything).
-            GilbertLauncher.open(this, rest?.takeIf { it.length > 2 })
+            GilbertLauncher.open(this, rest?.takeIf { it.length > 2 }, byVoice = true)
             waitForAssistant()
             return
         }
